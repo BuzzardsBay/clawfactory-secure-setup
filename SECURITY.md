@@ -105,7 +105,7 @@ This installer hardens the OpenClaw runtime environment on Windows. It does not 
 
 ## Reporting a Vulnerability
 
-**Do not open a public GitHub issue for security vulnerabilities.** Email **security@frontierholdingsllc.com** with:
+**Do not open a public GitHub issue for security vulnerabilities.** Email **hello@avitalresearch.com** with:
 
 - A description of the vulnerability.
 - Steps to reproduce.

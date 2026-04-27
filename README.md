@@ -99,4 +99,4 @@ The compile is one step; there's no Node, npm, or external toolchain. The `.iss`
 
 ## Security disclosure
 
-If you find a security issue, please **do not** open a public issue. Email security@frontierholdingsllc.com with details. We respond within 72 hours.
+If you find a security issue, please **do not** open a public issue. Email hello@avitalresearch.com with details. We respond within 72 hours.
