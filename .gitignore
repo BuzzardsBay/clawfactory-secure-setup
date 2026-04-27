@@ -1,0 +1,23 @@
+# Compiled installer output
+Output/
+
+# Inno Setup compiler artifacts
+*.~is
+
+# Windows
+Thumbs.db
+Desktop.ini
+*.lnk
+
+# Logs
+*.log
+logs/
+
+# Any accidentally dropped secrets
+.env
+*.pfx
+*.p12
+secrets/
+
+# Node (if any tooling is added)
+node_modules/

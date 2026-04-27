@@ -1,0 +1,19 @@
+# resources/logo.png — placeholder
+
+The shipped logo.png is a 1x1 transparent PNG so Inno Setup's WizardImageFile
+reference does not break at compile time.
+
+## Intended artwork
+
+- Theme:     dark shield silhouette with a stylized claw inside a padlock
+- Palette:   charcoal (#1a1a1a), steel-blue (#2b4a6f), amber highlight (#e0a030)
+- Sizes:
+    - WizardImageFile:       164 x 314 px  (large banner, left side of wizard)
+    - WizardSmallImageFile:   55 x  58 px  (small, upper-right of inner pages)
+
+Drop replacement PNGs into this folder with the same filename(s). No .iss
+changes needed.
+
+Free-to-use alternatives: shields from https://iconarchive.com, any CC0
+shield/padlock SVG from https://undraw.co or https://heroicons.com rendered
+to PNG at the sizes above.
