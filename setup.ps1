@@ -32,7 +32,7 @@ Set-StrictMode -Version 3.0
 #--- Constants ----------------------------------------------------------------
 $OpenClawInstallUrl    = 'https://openclaw.ai/install.sh'
 # [R2] Pin me. See README.md section "Pinning the OpenClaw install.sh hash".
-$OpenClawInstallSha256 = 'b585950258e21eb3fb0b2ecfbc2f1e8d79ae472b2c21a7919a082067b925f6e7'
+$OpenClawInstallSha256 = '57f025ba0272e2da3238984360e37fad5230bc7cea81854d154a362ea989d49d'
 $LogDir                = Join-Path $env:ProgramData 'ClawFactory'
 $LogFile               = Join-Path $LogDir 'install.log'
 $CheckpointFile        = Join-Path $LogDir 'checkpoint.json'
