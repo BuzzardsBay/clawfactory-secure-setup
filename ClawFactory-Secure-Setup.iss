@@ -51,10 +51,13 @@ Source: "resources\lobster.ico";             DestDir: "{app}\resources";  Flags:
 
 [Run]
 ; [R5] No API key on the command line - setup.ps1 reads from Windows Credential Manager.
+; {srcexe} is passed so setup.ps1 can register a RunOnce that relaunches this
+; same .exe with /SILENT /resume after a WSL2-install reboot. {code:GetResumeFlag}
+; appends ' -Resume' iff the wizard was relaunched with /resume.
 Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup.ps1"" -AcknowledgedOpenClawUrl -Provider {code:GetProviderLabel}"; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup.ps1"" -AcknowledgedOpenClawUrl -Provider {code:GetProviderLabel} -SourceExe ""{srcexe}""{code:GetResumeFlag}"; \
   WorkingDir: "{app}"; \
-  StatusMsg: "Building your hardened OpenClaw Skills Factory (10-20 minutes)..."; \
+  StatusMsg: "{code:GetStatusMsg}"; \
   Flags: waituntilterminated
 
 [UninstallRun]
@@ -100,9 +103,61 @@ var
   ApiKeyPage:     TInputQueryWizardPage;
   ApiKeyLaterChk: TNewCheckBox;
   AckPage:        TInputOptionWizardPage;
+  IsResumeRun:    Boolean;
+  ResumeProvider: string;
+
+function ResumeFlagPath: string;
+begin
+  Result := ExpandConstant('{commonappdata}\ClawFactory\resume-after-restart.flag');
+end;
+
+function HasCmdLineSwitch(const SwitchName: string): Boolean;
+var
+  i: Integer;
+begin
+  Result := False;
+  for i := 1 to ParamCount do
+    if CompareText(ParamStr(i), SwitchName) = 0 then
+    begin
+      Result := True;
+      exit;
+    end;
+end;
+
+{ Naive scan for `"provider": "<value>"` in the JSON resume flag. We can't
+  pull a JSON parser into Inno's [Code]; the flag is written by setup.ps1
+  with a known shape so a scan is safe enough. Inno Pascal lacks PosEx so
+  we repeatedly slice off the head of the string. }
+function ReadResumeProvider: string;
+var
+  Content: AnsiString;
+  Tail: string;
+  P, Q: Integer;
+begin
+  Result := 'grok';
+  if not LoadStringFromFile(ResumeFlagPath, Content) then exit;
+  Tail := string(Content);
+  P := Pos('"provider"', Tail);
+  if P = 0 then exit;
+  Tail := Copy(Tail, P + Length('"provider"'), MaxInt);
+  P := Pos(':', Tail);
+  if P = 0 then exit;
+  Tail := Copy(Tail, P + 1, MaxInt);
+  P := Pos('"', Tail);
+  if P = 0 then exit;
+  Tail := Copy(Tail, P + 1, MaxInt);
+  Q := Pos('"', Tail);
+  if Q = 0 then exit;
+  Result := Copy(Tail, 1, Q - 1);
+end;
 
 function GetProviderLabel(Param: string): string;
 begin
+  if IsResumeRun then
+  begin
+    Result := ResumeProvider;
+    exit;
+  end;
   case ProviderPage.SelectedValueIndex of
     0: Result := 'grok';
     1: Result := 'openai';
@@ -113,6 +168,22 @@ begin
   else
     Result := 'grok';
   end;
+end;
+
+function GetResumeFlag(Param: string): string;
+begin
+  if IsResumeRun then
+    Result := ' -Resume'
+  else
+    Result := '';
+end;
+
+function GetStatusMsg(Param: string): string;
+begin
+  if IsResumeRun then
+    Result := 'Resuming installation after restart...'
+  else
+    Result := 'Building your hardened OpenClaw Skills Factory (10-20 minutes)...';
 end;
 
 function ProviderNeedsApiKey: Boolean;
@@ -135,6 +206,13 @@ end;
 
 procedure InitializeWizard;
 begin
+  { Detect /resume early so wizard pages know whether to skip. The
+    RunOnce key registered by setup.ps1 relaunches this .exe with
+    /SILENT /resume after a WSL-install reboot. }
+  IsResumeRun := HasCmdLineSwitch('/resume');
+  if IsResumeRun then
+    ResumeProvider := ReadResumeProvider;
+
   { --- Page 1: Welcome + warning --- }
   WelcomePage := CreateOutputMsgPage(wpWelcome,
     'Hardened OpenClaw Skills Factory',
@@ -196,6 +274,19 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
+  { On a /resume relaunch the user has already chosen a provider, supplied
+    the API key (DPAPI-stored, survives reboot), and acknowledged the
+    security notice. Skip those pages so the wizard goes straight to the
+    install step. }
+  if IsResumeRun then
+  begin
+    if (PageID = WelcomePage.ID) or (PageID = ProviderPage.ID) or
+       (PageID = ApiKeyPage.ID) or (PageID = AckPage.ID) then
+    begin
+      Result := True;
+      exit;
+    end;
+  end;
   if PageID = ApiKeyPage.ID then
     Result := not ProviderNeedsApiKey;
 end;

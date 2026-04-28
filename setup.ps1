@@ -2,7 +2,16 @@
 param(
     [switch]$AcknowledgedOpenClawUrl,
     [ValidateSet('grok','openai','claude','gemini','ollama','later')]
-    [string]$Provider = 'grok'
+    [string]$Provider = 'grok',
+    # Set when re-launched by RunOnce after a reboot triggered by Step-EnsureWsl.
+    # Skips the WSL install and waits for the kernel to come up instead.
+    [switch]$Resume,
+    # Path to the original installer .exe; passed by Inno's [Run] section as
+    # {srcexe} so we can register a RunOnce that relaunches the same .exe with
+    # /SILENT /resume after a reboot. Empty when setup.ps1 is invoked outside
+    # of the Inno wizard - in that case we fall back to relaunching setup.ps1
+    # directly via powershell.exe.
+    [string]$SourceExe = ''
 )
 
 # ClawFactory Secure Setup - main automation script.
@@ -32,6 +41,10 @@ $WslDistro             = 'Ubuntu'
 $WslUser               = 'clawuser'
 $GatewayPort           = 8787
 $FirewallRuleName      = 'ClawFactory-Block-Inbound-8787'
+# Restart-and-resume plumbing for the WSL2-needs-a-reboot case.
+$ResumeFlagFile        = Join-Path $LogDir 'resume-after-restart.flag'
+$RunOnceRegPath        = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'
+$RunOnceRegName        = 'ClawFactoryResumeInstall'
 
 #--- Provider map ------------------------------------------------------------
 $ProviderConfig = @{
@@ -106,14 +119,146 @@ function Save-Checkpoint {
         $json  = Get-Content -LiteralPath $CheckpointFile -Raw | ConvertFrom-Json
         $state.completedSteps = @($json.completedSteps)
     }
-    $state.completedSteps += $Step
-    $state | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $CheckpointFile -Encoding UTF8
+    # Idempotent: don't double-append if a step re-runs after a resume.
+    if ($state.completedSteps -notcontains $Step) {
+        $state.completedSteps += $Step
+        $state | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $CheckpointFile -Encoding UTF8
+    }
 }
 
 function Get-CompletedSteps {
     if (-not (Test-Path $CheckpointFile)) { return @() }
     $json = Get-Content -LiteralPath $CheckpointFile -Raw | ConvertFrom-Json
     return @($json.completedSteps)
+}
+
+#--- WSL availability + restart-and-resume -----------------------------------
+function Test-WslFunctional {
+    # True iff WSL2 + Ubuntu can actually run a command. Distinguishes:
+    #   - WSL features just enabled but kernel not loaded (post-install,
+    #     pre-reboot): `wsl --status` may succeed but `wsl -d Ubuntu -- true`
+    #     fails or hangs.
+    #   - WSL fully ready (post-reboot): both work.
+    try {
+        $null = & wsl.exe --status 2>&1
+        if ($LASTEXITCODE -ne 0) { return $false }
+    } catch { return $false }
+    $list = (& wsl.exe --list --quiet 2>$null) -split "`n" |
+        ForEach-Object { $_.Trim() -replace "`0", '' }
+    if (-not ($list -contains $WslDistro)) { return $false }
+    $null = & wsl.exe -d $WslDistro -u root -- true 2>&1
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Save-ResumeFlag {
+    param(
+        [Parameter(Mandatory)][string]$Provider,
+        [Parameter(Mandatory)][string]$InstallDir,
+        [string]$SourceExe         = '',
+        [string]$CredentialTarget  = ''
+    )
+    # Atomic write: serialize to .tmp first, then move into place.
+    $obj = [ordered]@{
+        provider         = $Provider
+        installDir       = $InstallDir
+        sourceExe        = $SourceExe
+        credentialTarget = $CredentialTarget
+        timestamp        = (Get-Date).ToString('o')
+    }
+    $tmp = "$ResumeFlagFile.tmp"
+    $obj | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $tmp -Encoding UTF8
+    Move-Item -LiteralPath $tmp -Destination $ResumeFlagFile -Force
+}
+
+function Read-ResumeFlag {
+    if (-not (Test-Path $ResumeFlagFile)) { return $null }
+    try {
+        return Get-Content -LiteralPath $ResumeFlagFile -Raw | ConvertFrom-Json
+    } catch {
+        Write-Log WARN "Could not parse resume flag at ${ResumeFlagFile}: $($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Remove-ResumeFlag {
+    if (Test-Path $ResumeFlagFile) {
+        Remove-Item -LiteralPath $ResumeFlagFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Set-RunOnceResume {
+    param([string]$ExePath, [string]$ScriptPath)
+    # Prefer relaunching the original installer .exe (so the user sees the
+    # branded Inno wizard with /SILENT progress). Fall back to running
+    # setup.ps1 directly if the .exe path is missing (e.g. user moved/deleted
+    # the downloaded installer between launch and reboot).
+    if ($ExePath -and (Test-Path -LiteralPath $ExePath)) {
+        $cmd = "`"$ExePath`" /SILENT /resume"
+    } else {
+        $cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$ScriptPath`" -AcknowledgedOpenClawUrl -Resume"
+    }
+    if (-not (Test-Path $RunOnceRegPath)) {
+        New-Item -Path $RunOnceRegPath -Force | Out-Null
+    }
+    Set-ItemProperty -Path $RunOnceRegPath -Name $RunOnceRegName -Value $cmd -Force
+    Write-Log INFO "RunOnce registered: $cmd"
+}
+
+function Remove-RunOnceResume {
+    if (-not (Test-Path $RunOnceRegPath)) { return }
+    $existing = Get-ItemProperty -Path $RunOnceRegPath -Name $RunOnceRegName -ErrorAction SilentlyContinue
+    if ($existing) {
+        Remove-ItemProperty -Path $RunOnceRegPath -Name $RunOnceRegName -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Show-RestartDialog {
+    param([string]$Title, [string]$Message)
+    # Use WPF MessageBox so we don't depend on WinForms init order. Falls back
+    # to a console prompt if PresentationFramework is unavailable (very rare
+    # on Win11).
+    try {
+        Add-Type -AssemblyName PresentationFramework -ErrorAction Stop
+        [System.Windows.MessageBox]::Show($Message, $Title, 'OK', 'Information') | Out-Null
+    } catch {
+        Write-Host ''
+        Write-Host "==== $Title ====" -ForegroundColor Yellow
+        Write-Host $Message
+        Read-Host 'Press Enter to restart now'
+    }
+}
+
+function Invoke-WslInstallWithRestart {
+    # Runs `wsl --install --no-launch -d Ubuntu`, persists state needed for
+    # resume, registers RunOnce, prompts the user, and reboots. Does not
+    # return: the script process is killed by the shutdown.
+    Write-Log INFO 'WSL2 not installed (or kernel not loaded). Running `wsl --install` and scheduling a restart.'
+    & wsl.exe --install --no-launch -d $WslDistro | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "wsl --install failed with exit $LASTEXITCODE."
+    }
+
+    $credTarget = if ($ThisProvider.CredentialTarget) { $ThisProvider.CredentialTarget } else { '' }
+    Save-ResumeFlag -Provider $Provider -InstallDir $PSScriptRoot -SourceExe $SourceExe -CredentialTarget $credTarget
+
+    $scriptPath = Join-Path $PSScriptRoot 'setup.ps1'
+    Set-RunOnceResume -ExePath $SourceExe -ScriptPath $scriptPath
+
+    Show-RestartDialog -Title 'ClawFactory - Restart Required' -Message (
+        "WSL2 needs to be installed. Your computer will restart to complete this step.`r`n`r`n" +
+        'ClawFactory will resume automatically after restart.'
+    )
+
+    Write-Log INFO 'Initiating restart.'
+    try {
+        Restart-Computer -Force
+        # Restart-Computer is async - give the OS time to tear us down.
+        Start-Sleep -Seconds 60
+        exit 0
+    } catch {
+        Write-Log ERROR "Restart failed: $($_.Exception.Message). Reboot manually; ClawFactory will resume on next login."
+        exit 0
+    }
 }
 
 #--- Rollback [R7] ------------------------------------------------------------
@@ -128,7 +273,7 @@ function Invoke-Rollback {
             'FirewallRule' {
                 Remove-NetFirewallRule -DisplayName $FirewallRuleName -ErrorAction SilentlyContinue
             }
-            'WslInstall' {
+            'EnsureWsl' {
                 $ans = Read-Host "Rollback: unregister WSL '$WslDistro' distro? This deletes the Ubuntu distro and any files inside it. Type YES to confirm"
                 if ($ans -eq 'YES') {
                     wsl --unregister $WslDistro 2>&1 | Out-Null
@@ -225,19 +370,57 @@ function Step-Preflight {
     Save-Checkpoint 'Preflight'
 }
 
-function Step-InstallWsl {
-    Write-Log INFO 'Step 2: Installing WSL2 + Ubuntu (idempotent).'
-    $list = (wsl --list --quiet 2>$null) -split "`n" | ForEach-Object { $_.Trim() -replace "`0", '' }
-    if ($list -contains 'Ubuntu') {
-        Write-Log INFO 'Ubuntu distro already installed - skipping.'
-    } else {
-        wsl --install --no-launch -d Ubuntu | Out-Null
+function Step-EnsureWsl {
+    # Replaces the old Step-InstallWsl. Three cases:
+    #   1. WSL2 + Ubuntu already functional -> skip, no install.
+    #   2. WSL kernel loaded but Ubuntu missing -> `wsl --install -d Ubuntu`,
+    #      no reboot (kernel is already up).
+    #   3. WSL not installed at all (clean Win11) -> `wsl --install`, write
+    #      resume flag, register RunOnce, restart. Resume re-enters this
+    #      function with $Resume=true and just polls for readiness.
+    Write-Log INFO 'Step 2: Ensuring WSL2 + Ubuntu are available.'
+
+    if ($Resume) {
+        Write-Log INFO 'Resuming after restart - waiting for WSL2 + Ubuntu to come up...'
+        for ($i = 1; $i -le 12; $i++) {
+            if (Test-WslFunctional) {
+                Write-Log INFO "WSL2 + Ubuntu ready after restart (attempt $i)."
+                Save-Checkpoint 'EnsureWsl'
+                return
+            }
+            Start-Sleep -Seconds 5
+        }
+        throw 'After restart, WSL2 + Ubuntu still not responding after 60s. Run `wsl --status` to investigate, then re-run setup.ps1 -Resume.'
+    }
+
+    if (Test-WslFunctional) {
+        Write-Log INFO 'WSL2 + Ubuntu already functional - skipping install.'
+        Save-Checkpoint 'EnsureWsl'
+        return
+    }
+
+    # Test the kernel directly. If `wsl --status` returns 0, the WSL feature
+    # is active and we just need to add Ubuntu (no reboot). If it returns
+    # non-zero, the feature isn't enabled - full install + reboot needed.
+    $null = & wsl.exe --status 2>&1
+    $kernelOk = ($LASTEXITCODE -eq 0)
+
+    if ($kernelOk) {
+        Write-Log INFO 'WSL2 kernel loaded but Ubuntu missing - installing Ubuntu only.'
+        & wsl.exe --install --no-launch -d $WslDistro | Out-Null
         if ($LASTEXITCODE -ne 0) {
-            throw "wsl --install failed with exit $LASTEXITCODE (a reboot may be required; re-run installer after reboot)."
+            throw "wsl --install -d $WslDistro failed with exit $LASTEXITCODE."
         }
         Start-Sleep -Seconds 5
+        if (-not (Test-WslFunctional)) {
+            throw 'Ubuntu installed but not yet functional. Try rebooting and re-running setup.ps1 -Resume.'
+        }
+        Save-Checkpoint 'EnsureWsl'
+        return
     }
-    Save-Checkpoint 'WslInstall'
+
+    # Kernel not loaded - full install plus reboot. Does not return.
+    Invoke-WslInstallWithRestart
 }
 
 function Step-ConfigureWslConf {
@@ -924,12 +1107,37 @@ function Step-ConfigureAgents {
 }
 
 #--- Main ---------------------------------------------------------------------
-if (Test-Path $CheckpointFile) { Remove-Item $CheckpointFile -Force }
+if ($Resume) {
+    # Recover provider from the resume flag (the cmdline value may be the
+    # default 'grok' if Inno didn't pass -Provider on the silent relaunch).
+    $flag = Read-ResumeFlag
+    if ($flag -and $flag.provider) {
+        if ($flag.provider -ne $Provider) {
+            Write-Log INFO "Resume: switching provider from cmdline '$Provider' to flag value '$($flag.provider)'."
+            $Provider     = $flag.provider
+            $ThisProvider = $ProviderConfig[$Provider]
+        }
+    } else {
+        Write-Log WARN '-Resume passed but no resume flag found. Continuing with whatever -Provider was given.'
+    }
+    # RunOnce auto-deletes when it fires; this is belt-and-suspenders for the
+    # case where it didn't (manually triggered resume, etc).
+    Remove-RunOnceResume
+    $existing = Get-CompletedSteps
+    Write-Log INFO "==== ClawFactory Secure Setup - resuming after restart (provider=$Provider) ===="
+    Write-Host ''
+    Write-Host 'Welcome back - continuing installation.' -ForegroundColor Cyan
+    Write-Host "Steps already completed before restart: $($existing -join ', ')"
+    Write-Host ''
+} else {
+    if (Test-Path $CheckpointFile) { Remove-Item $CheckpointFile -Force }
+    Remove-ResumeFlag
+    Write-Log INFO "==== ClawFactory Secure Setup - starting (provider=$Provider) ===="
+}
 
-Write-Log INFO "==== ClawFactory Secure Setup - starting (provider=$Provider) ===="
 Invoke-WithRollback {
     Step-Preflight
-    Step-InstallWsl
+    Step-EnsureWsl
     Step-ConfigureWslConf
     Step-RestartWsl
     Step-CreateClawUser
@@ -948,6 +1156,8 @@ Invoke-WithRollback {
     Step-ConfigureAgents         # step 15: stage agent.md prompts via bootstrap.ps1
 }
 Write-Log INFO '==== ClawFactory Secure Setup - completed successfully ===='
+Remove-ResumeFlag
+Remove-RunOnceResume
 
 Write-Host ''
 Write-Host 'SUCCESS. Your hardened Skills Factory is ready.' -ForegroundColor Green
