@@ -655,6 +655,8 @@ function Step-EgressFirewall {
 
     $script = @"
 set -euo pipefail
+
+# --- Write nftables config (used if nf_tables is available) ----------------
 cat > /etc/nftables.conf <<'NFT'
 #!/usr/sbin/nft -f
 flush ruleset
@@ -679,33 +681,117 @@ table inet clawfactory {
 }
 NFT
 chmod 644 /etc/nftables.conf
-nft -f /etc/nftables.conf
 
+# --- Resolve allowlist hosts to IPv4s --------------------------------------
 HOSTS=`"$hostList`"
+ALLOWED_IPS=`"`"
 for h in `$HOSTS; do
     for ip in `$(getent ahostsv4 `"`$h`" 2>/dev/null | awk '{print `$1}' | sort -u); do
-        nft add element inet clawfactory allowed_ipv4 `"{ `$ip }`" 2>/dev/null || true
+        ALLOWED_IPS=`"`$ALLOWED_IPS `$ip`"
     done
 done
 
-cat > /etc/systemd/system/clawfactory-nft.service <<'UNIT'
+# --- Try nftables first; fall back to iptables-legacy on Netlink failure ---
+# Default WSL2 kernels often ship without nf_tables loaded, in which case
+# `nft -f` exits non-zero with `Unable to initialize Netlink socket`. We
+# detect that specific signal and re-apply equivalent rules using
+# iptables-legacy (xt_owner + xt_conntrack are usually available on the
+# same kernels that lack nf_tables).
+NFT_ERR=`$(mktemp)
+trap 'rm -f `"`$NFT_ERR`"' EXIT
+FW_BACKEND=`"`"
+
+if nft -f /etc/nftables.conf 2>`"`$NFT_ERR`"; then
+    FW_BACKEND=`"nftables`"
+    for ip in `$ALLOWED_IPS; do
+        nft add element inet clawfactory allowed_ipv4 `"{ `$ip }`" 2>/dev/null || true
+    done
+elif grep -qE 'Unable to initialize Netlink|netlink|nf_tables' `"`$NFT_ERR`"; then
+    echo `"[clawfactory-fw] nftables not supported on this WSL kernel - falling back to iptables-legacy`"
+    cat `"`$NFT_ERR`" >&2 || true
+    IPT=`"`$(command -v iptables-legacy || true)`"
+    if [ -z `"`$IPT`" ]; then
+        echo `"[clawfactory-fw] iptables-legacy binary not found - cannot apply firewall`" >&2
+        exit 1
+    fi
+    FW_BACKEND=`"iptables-legacy`"
+    `"`$IPT`" -F OUTPUT
+    `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -o lo -j ACCEPT
+    `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -p udp --dport 53 -j ACCEPT
+    `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -p tcp --dport 53 -j ACCEPT
+    `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    for ip in `$ALLOWED_IPS; do
+        `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -d `"`$ip`" -p tcp --dport 443 -j ACCEPT
+    done
+    `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -d 127.0.0.1 -p tcp --dport 11434 -j ACCEPT
+    `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -j DROP
+else
+    echo `"[clawfactory-fw] nft -f failed for an unexpected reason:`" >&2
+    cat `"`$NFT_ERR`" >&2
+    exit 1
+fi
+
+echo `"[clawfactory-fw] active backend: `$FW_BACKEND`"
+
+# --- Persist the active backend choice + IP list for the boot-time unit ----
+mkdir -p /etc/clawfactory
+echo `"`$FW_BACKEND`" > /etc/clawfactory/fw-backend
+printf '%s\n' `$ALLOWED_IPS | sed '/^`$/d' > /etc/clawfactory/allowed-ips.txt
+
+# --- Boot-time apply script: re-applies whichever backend is active --------
+cat > /usr/local/sbin/clawfactory-fw-apply.sh <<'APPLY'
+#!/bin/bash
+set -euo pipefail
+BACKEND=`"`$(cat /etc/clawfactory/fw-backend 2>/dev/null || echo nftables)`"
+if [ `"`$BACKEND`" = `"iptables-legacy`" ]; then
+    IPT=`"`$(command -v iptables-legacy || true)`"
+    [ -n `"`$IPT`" ] || { echo `"[clawfactory-fw] iptables-legacy missing`" >&2; exit 1; }
+    `"`$IPT`" -F OUTPUT
+    `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -o lo -j ACCEPT
+    `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -p udp --dport 53 -j ACCEPT
+    `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -p tcp --dport 53 -j ACCEPT
+    `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    while IFS= read -r ip; do
+        [ -n `"`$ip`" ] || continue
+        `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -d `"`$ip`" -p tcp --dport 443 -j ACCEPT
+    done < /etc/clawfactory/allowed-ips.txt
+    `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -d 127.0.0.1 -p tcp --dport 11434 -j ACCEPT
+    `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -j DROP
+else
+    /usr/sbin/nft -f /etc/nftables.conf
+    while IFS= read -r ip; do
+        [ -n `"`$ip`" ] || continue
+        /usr/sbin/nft add element inet clawfactory allowed_ipv4 `"{ `$ip }`" 2>/dev/null || true
+    done < /etc/clawfactory/allowed-ips.txt
+fi
+APPLY
+chmod +x /usr/local/sbin/clawfactory-fw-apply.sh
+
+cat > /etc/systemd/system/clawfactory-fw.service <<'UNIT'
 [Unit]
-Description=ClawFactory nftables egress firewall
+Description=ClawFactory egress firewall (nftables or iptables-legacy fallback)
 After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/sbin/nft -f /etc/nftables.conf
+ExecStart=/usr/local/sbin/clawfactory-fw-apply.sh
 
 [Install]
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload 2>/dev/null || true
-systemctl enable clawfactory-nft.service 2>/dev/null || true
+systemctl enable clawfactory-fw.service 2>/dev/null || true
 "@
     $rc = Invoke-WslBash -Script $script -User 'root'
     if ($rc -ne 0) {
-        Write-Log WARN 'nftables setup returned non-zero. Check install.log; egress firewall may not be active.'
+        Write-Log WARN 'Egress firewall setup returned non-zero. Check install.log; firewall may not be active.'
+    } else {
+        # Surface which backend the script picked so the install log is
+        # explicit (the bash output is also captured in install.log).
+        $backendCheck = @'
+cat /etc/clawfactory/fw-backend 2>/dev/null || echo unknown
+'@
+        $null = Invoke-WslBash -Script $backendCheck -User 'root'
     }
     Save-Checkpoint 'EgressFirewall'
 }
@@ -758,7 +844,23 @@ fi
 # install.sh runs `sudo` internally but falls back to direct exec when already root.
 # Set HOME/USER/LOGNAME so per-user artifacts (shim at \$HOME/.local/bin, config
 # under \$HOME/.openclaw) land in clawuser's home, not /root.
-HOME=/home/clawuser USER=clawuser LOGNAME=clawuser bash `"`$TMP`"
+#
+# Wrap bash with `timeout` to fail fast if openclaw-onboard (invoked from
+# inside install.sh) hangs waiting on interactive input. 5 minutes is enough
+# for any non-interactive run; longer than that means we're stuck. SIGTERM
+# first (graceful), then SIGKILL after 30s (--kill-after) if the child
+# trapped SIGTERM. timeout's exit code 124 = timed out.
+set +e
+HOME=/home/clawuser USER=clawuser LOGNAME=clawuser timeout --foreground --kill-after=30 300 bash `"`$TMP`"
+INSTALL_RC=`$?
+set -e
+if [ `$INSTALL_RC -eq 124 ]; then
+    echo `"!! OpenClaw install.sh did not complete within 5 minutes (timeout). The install hung - typically because openclaw-onboard prompted for interactive input on a closed stdin.`" >&2
+    exit 44
+fi
+if [ `$INSTALL_RC -ne 0 ]; then
+    exit `$INSTALL_RC
+fi
 # Ensure the installed shim is owned by clawuser (install.sh runs as root).
 chown -R clawuser:clawuser /home/clawuser/.local 2>/dev/null || true
 chown -R clawuser:clawuser /home/clawuser/.openclaw 2>/dev/null || true
@@ -767,6 +869,7 @@ chown -R clawuser:clawuser /home/clawuser/.npm 2>/dev/null || true
     $rc = Invoke-WslBash -Script $fetch -User 'root'
     if ($rc -eq 42) { throw 'OpenClaw install blocked: SHA-256 pin not set. See README "Pinning the OpenClaw install.sh hash".' }
     if ($rc -eq 43) { throw 'OpenClaw install blocked: SHA-256 mismatch. The install.sh on the server does not match the pinned hash.' }
+    if ($rc -eq 44) { throw 'OpenClaw install timed out after 5 minutes. install.sh hung (typically an interactive openclaw-onboard prompt waiting on closed stdin). See install.log for details and re-run setup.ps1 -Resume to retry.' }
     if ($rc -ne 0)  { throw "OpenClaw install failed with exit $rc" }
     Save-Checkpoint 'OpenClaw'
 }
@@ -882,16 +985,42 @@ fi
 loginctl enable-linger clawuser || true
 
 # --- e. Resolve LLM-provider hostnames into the egress firewall allowlist
-# (this depends on Step-EgressFirewall having run already so the table exists)
+# (this depends on Step-EgressFirewall having run already so the table or
+# the iptables-legacy chain exists). Both backends get the same auxiliary
+# host list (auth endpoints, registry mirrors, etc.) so OpenClaw's first-run
+# auth flows succeed regardless of which firewall is active.
+AUX_HOSTS="api.anthropic.com console.anthropic.com api.openai.com auth.openai.com api.x.ai \
+generativelanguage.googleapis.com aiplatform.googleapis.com \
+clawhub.ai api.github.com raw.githubusercontent.com objects.githubusercontent.com \
+registry.npmjs.org"
 if nft list table inet clawfactory >/dev/null 2>&1; then
-    for h in api.anthropic.com console.anthropic.com api.openai.com auth.openai.com api.x.ai \
-             generativelanguage.googleapis.com aiplatform.googleapis.com \
-             clawhub.ai api.github.com raw.githubusercontent.com objects.githubusercontent.com \
-             registry.npmjs.org; do
+    for h in $AUX_HOSTS; do
         for ip in $(getent ahostsv4 "$h" | awk '{print $1}' | sort -u); do
             nft add element inet clawfactory allowed_ipv4 "{ $ip }" 2>/dev/null || true
         done
     done
+elif [ "$(cat /etc/clawfactory/fw-backend 2>/dev/null)" = "iptables-legacy" ]; then
+    # iptables-legacy backend: the OUTPUT chain has explicit ACCEPT rules
+    # per IP and a final DROP for clawuser. Insert new ACCEPTs at position 1
+    # so they take precedence over the DROP, with -C as an idempotency guard
+    # against duplicate rules on re-runs. Persist each new IP into
+    # /etc/clawfactory/allowed-ips.txt so clawfactory-fw-apply.sh re-applies
+    # them at boot.
+    IPT="$(command -v iptables-legacy || true)"
+    if [ -n "$IPT" ]; then
+        touch /etc/clawfactory/allowed-ips.txt
+        for h in $AUX_HOSTS; do
+            for ip in $(getent ahostsv4 "$h" | awk '{print $1}' | sort -u); do
+                if ! "$IPT" -C OUTPUT -m owner --uid-owner clawuser -d "$ip" -p tcp --dport 443 -j ACCEPT 2>/dev/null; then
+                    "$IPT" -I OUTPUT 1 -m owner --uid-owner clawuser -d "$ip" -p tcp --dport 443 -j ACCEPT
+                fi
+                grep -qx "$ip" /etc/clawfactory/allowed-ips.txt || echo "$ip" >> /etc/clawfactory/allowed-ips.txt
+            done
+            echo "[clawfactory-fw] iptables-legacy: allowlisted $h"
+        done
+    else
+        echo "[clawfactory-fw] iptables-legacy backend declared but binary missing - auxiliary IPs NOT applied" >&2
+    fi
 fi
 
 # --- f. Systemd timer to refresh the firewall allowlist every 5 hours ----
@@ -921,16 +1050,35 @@ TMR
 
 cat > /usr/local/sbin/clawfactory-allow-providers.sh <<'REFRESH'
 #!/usr/bin/env bash
+# Re-resolve auxiliary LLM-provider host IPs and re-add them to the active
+# firewall. Routes to nftables or iptables-legacy based on the backend
+# persisted by Step-EgressFirewall. Runs every 5h via the systemd timer.
 set -e
-nft list table inet clawfactory >/dev/null 2>&1 || exit 0
-for h in api.anthropic.com console.anthropic.com api.openai.com auth.openai.com api.x.ai \
-         generativelanguage.googleapis.com aiplatform.googleapis.com \
-         clawhub.ai api.github.com raw.githubusercontent.com objects.githubusercontent.com \
-         registry.npmjs.org; do
-    for ip in $(getent ahostsv4 "$h" | awk '{print $1}' | sort -u); do
-        nft add element inet clawfactory allowed_ipv4 "{ $ip }" 2>/dev/null || true
+AUX_HOSTS="api.anthropic.com console.anthropic.com api.openai.com auth.openai.com api.x.ai \
+generativelanguage.googleapis.com aiplatform.googleapis.com \
+clawhub.ai api.github.com raw.githubusercontent.com objects.githubusercontent.com \
+registry.npmjs.org"
+BACKEND="$(cat /etc/clawfactory/fw-backend 2>/dev/null || echo nftables)"
+if [ "$BACKEND" = "nftables" ]; then
+    nft list table inet clawfactory >/dev/null 2>&1 || exit 0
+    for h in $AUX_HOSTS; do
+        for ip in $(getent ahostsv4 "$h" | awk '{print $1}' | sort -u); do
+            nft add element inet clawfactory allowed_ipv4 "{ $ip }" 2>/dev/null || true
+        done
     done
-done
+elif [ "$BACKEND" = "iptables-legacy" ]; then
+    IPT="$(command -v iptables-legacy || true)"
+    [ -n "$IPT" ] || exit 0
+    touch /etc/clawfactory/allowed-ips.txt
+    for h in $AUX_HOSTS; do
+        for ip in $(getent ahostsv4 "$h" | awk '{print $1}' | sort -u); do
+            if ! "$IPT" -C OUTPUT -m owner --uid-owner clawuser -d "$ip" -p tcp --dport 443 -j ACCEPT 2>/dev/null; then
+                "$IPT" -I OUTPUT 1 -m owner --uid-owner clawuser -d "$ip" -p tcp --dport 443 -j ACCEPT
+            fi
+            grep -qx "$ip" /etc/clawfactory/allowed-ips.txt || echo "$ip" >> /etc/clawfactory/allowed-ips.txt
+        done
+    done
+fi
 REFRESH
 chmod +x /usr/local/sbin/clawfactory-allow-providers.sh
 systemctl daemon-reload
