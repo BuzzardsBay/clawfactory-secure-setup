@@ -102,6 +102,7 @@ var
   ProviderPage:   TInputOptionWizardPage;
   ApiKeyPage:     TInputQueryWizardPage;
   ApiKeyLaterChk: TNewCheckBox;
+  GetKeyButton:   TNewButton;
   AckPage:        TInputOptionWizardPage;
   IsResumeRun:    Boolean;
   ResumeProvider: string;
@@ -204,6 +205,40 @@ begin
   end;
 end;
 
+function ProviderApiKeyUrl: string;
+begin
+  case ProviderPage.SelectedValueIndex of
+    0: Result := 'https://console.x.ai/';
+    1: Result := 'https://platform.openai.com/api-keys';
+    2: Result := 'https://console.anthropic.com/settings/keys';
+    3: Result := 'https://aistudio.google.com/app/apikey';
+  else
+    Result := '';
+  end;
+end;
+
+function ProviderShortName: string;
+begin
+  case ProviderPage.SelectedValueIndex of
+    0: Result := 'Grok';
+    1: Result := 'OpenAI';
+    2: Result := 'Anthropic';
+    3: Result := 'Gemini';
+  else
+    Result := '';
+  end;
+end;
+
+procedure GetKeyButtonClick(Sender: TObject);
+var
+  URL: string;
+  ResultCode: Integer;
+begin
+  URL := ProviderApiKeyUrl;
+  if URL = '' then exit;
+  ShellExec('open', URL, '', '', SW_SHOWNORMAL, ewNoWait, ResultCode);
+end;
+
 procedure InitializeWizard;
 begin
   { Detect /resume early so wizard pages know whether to skip. The
@@ -219,7 +254,7 @@ begin
     'This installer builds a sandboxed environment for AI agents.',
     'ClawFactory Secure Setup configures WSL2, Docker, and OpenClaw with strict' + #13#10 +
     'security guardrails:' + #13#10 + #13#10 +
-    '  - Five agents run in Docker sandbox (network=none, sandbox=all).' + #13#10 +
+    '  - Four agents run in Docker sandbox (network=none, sandbox=all).' + #13#10 +
     '  - OpenClaw gateway binds to 127.0.0.1 only.' + #13#10 +
     '  - Tool allowlist blocks shell/sudo/rm/system.run/browser.' + #13#10 +
     '  - WSL automount is disabled (no access to your Windows files).' + #13#10 +
@@ -253,9 +288,22 @@ begin
     'Rotate later from a terminal with cmdkey (see README).');
   ApiKeyPage.Add('API key:', True);
 
+  { "Get your <Provider> API key" button - opens the provider's key page in
+    the default browser. Caption + visibility are updated in CurPageChanged
+    based on the provider selected on the previous page. Hidden for Ollama
+    (no key needed) and "configure later". }
+  GetKeyButton := TNewButton.Create(ApiKeyPage);
+  GetKeyButton.Parent := ApiKeyPage.Surface;
+  GetKeyButton.Top    := ApiKeyPage.Edits[0].Top + ApiKeyPage.Edits[0].Height + ScaleY(12);
+  GetKeyButton.Left   := ApiKeyPage.Edits[0].Left;
+  GetKeyButton.Width  := ScaleX(220);
+  GetKeyButton.Height := ScaleY(24);
+  GetKeyButton.Caption := 'Get your API key →';
+  GetKeyButton.OnClick := @GetKeyButtonClick;
+
   ApiKeyLaterChk := TNewCheckBox.Create(ApiKeyPage);
   ApiKeyLaterChk.Parent  := ApiKeyPage.Surface;
-  ApiKeyLaterChk.Top     := ApiKeyPage.Edits[0].Top + ApiKeyPage.Edits[0].Height + ScaleY(16);
+  ApiKeyLaterChk.Top     := GetKeyButton.Top + GetKeyButton.Height + ScaleY(12);
   ApiKeyLaterChk.Left    := ApiKeyPage.Edits[0].Left;
   ApiKeyLaterChk.Width   := ApiKeyPage.SurfaceWidth - ApiKeyLaterChk.Left;
   ApiKeyLaterChk.Height  := ScaleY(20);
@@ -269,6 +317,27 @@ begin
     False, False);
   AckPage.Add('I understand agents execute code in isolated containers and I will ' +
               'personally review every skill before publishing.');
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+var
+  ShortName: string;
+begin
+  { When the API key page becomes active, set the "Get your API key" button
+    label and visibility based on the provider chosen on the previous page. }
+  if CurPageID = ApiKeyPage.ID then
+  begin
+    ShortName := ProviderShortName;
+    if ShortName = '' then
+    begin
+      GetKeyButton.Visible := False;
+    end
+    else
+    begin
+      GetKeyButton.Caption := 'Get your ' + ShortName + ' API key →';
+      GetKeyButton.Visible := True;
+    end;
+  end;
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;

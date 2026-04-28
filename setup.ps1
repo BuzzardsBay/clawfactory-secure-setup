@@ -228,15 +228,101 @@ function Show-RestartDialog {
     }
 }
 
-function Invoke-WslInstallWithRestart {
-    # Runs `wsl --install --no-launch -d Ubuntu`, persists state needed for
-    # resume, registers RunOnce, prompts the user, and reboots. Does not
-    # return: the script process is killed by the shutdown.
-    Write-Log INFO 'WSL2 not installed (or kernel not loaded). Running `wsl --install` and scheduling a restart.'
-    & wsl.exe --install --no-launch -d $WslDistro | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "wsl --install failed with exit $LASTEXITCODE."
+function Enable-WindowsFeaturesForWsl {
+    # Three Windows features must be enabled for WSL2 to function on a clean
+    # Win11 machine. After they're enabled the machine MUST reboot before the
+    # WSL kernel is available. DISM exit codes: 0=success, 3010=success-needs-
+    # restart. Both are fine here since we're about to restart anyway.
+    Write-Log INFO 'Enabling Windows features for WSL via DISM (3 features).'
+    $features = @(
+        'Microsoft-Windows-Subsystem-Linux',
+        'VirtualMachinePlatform',
+        'HypervisorPlatform'
+    )
+    foreach ($f in $features) {
+        Write-Log INFO "  DISM /enable-feature /featurename:$f"
+        $proc = Start-Process -FilePath 'dism.exe' `
+            -ArgumentList '/online','/enable-feature',"/featurename:$f",'/all','/norestart' `
+            -NoNewWindow -PassThru -Wait
+        if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+            throw "Windows features could not be enabled. Please ensure you are running as Administrator. (DISM /featurename:$f exit=$($proc.ExitCode))"
+        }
+        Write-Log INFO "    DISM /featurename:$f -> exit $($proc.ExitCode)"
     }
+}
+
+function Install-WslDistroWithFallback {
+    # Tries WSL2 first; on `HCS_E_HYPERV_NOT_INSTALLED` (0x80370102 - common in
+    # nested-VM testing or hardware without VT-x) falls back to WSL1.
+    # Returns the variant string ('wsl2' or 'wsl1') for logging.
+    Write-Log INFO 'Installing Ubuntu (attempting WSL2 first).'
+    $output = & wsl.exe --install --no-launch -d $WslDistro 2>&1
+    $exit = $LASTEXITCODE
+    foreach ($line in @($output)) {
+        $t = ($line | Out-String).TrimEnd()
+        if ($t) { Add-Content -LiteralPath $LogFile -Value "[wsl install out] $t" -Encoding UTF8 }
+    }
+    if ($exit -eq 0) {
+        Write-Log INFO 'WSL2 install succeeded.'
+        return 'wsl2'
+    }
+    $hyperVMissing = $false
+    foreach ($line in @($output)) {
+        $t = ($line | Out-String)
+        if ($t -match 'HCS_E_HYPERV_NOT_INSTALLED' -or $t -match '0x80370102') {
+            $hyperVMissing = $true; break
+        }
+    }
+    if (-not $hyperVMissing) {
+        throw "wsl --install failed (exit $exit) and no fallback signal detected. See $LogFile."
+    }
+    Write-Log WARN 'WSL2 unavailable (HCS_E_HYPERV_NOT_INSTALLED). Falling back to WSL1.'
+    & wsl.exe --install --no-distribution 2>&1 |
+        ForEach-Object { Add-Content -LiteralPath $LogFile -Value "[wsl install fallback] $_" -Encoding UTF8 }
+    & wsl.exe --set-default-version 1 2>&1 |
+        ForEach-Object { Add-Content -LiteralPath $LogFile -Value "[wsl set-default-version] $_" -Encoding UTF8 }
+    & wsl.exe --install -d $WslDistro --no-launch 2>&1 |
+        ForEach-Object { Add-Content -LiteralPath $LogFile -Value "[wsl install -d $WslDistro] $_" -Encoding UTF8 }
+    if ($LASTEXITCODE -ne 0) {
+        throw "WSL1 fallback install also failed (exit $LASTEXITCODE)."
+    }
+    Write-Log WARN 'WSL1 fallback install succeeded. Some features (systemd, networking) behave differently on WSL1.'
+    return 'wsl1'
+}
+
+function New-ClawUserAndSetDefault {
+    # Pre-creates clawuser as a TEMPORARY sudoer (NOPASSWD) so Ubuntu's
+    # first-launch locale-setup script and other OOBE hooks don't block
+    # waiting for an interactive default user, and sets it as the WSL
+    # default in /etc/wsl.conf. Step-CreateClawUser strips both the sudoers
+    # line and the sudo group membership later, restoring the non-privileged
+    # security model (DEVIATION A2: clawuser is non-sudo at runtime).
+    Write-Log INFO 'Pre-creating clawuser stub (temp sudoer) and setting WSL default user.'
+    $script = @'
+set -e
+if ! id clawuser >/dev/null 2>&1; then
+    useradd -m -s /bin/bash clawuser
+fi
+usermod -aG sudo clawuser
+grep -qx 'clawuser ALL=(ALL) NOPASSWD:ALL' /etc/sudoers || \
+    echo 'clawuser ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+touch /etc/wsl.conf
+sed -i '/^\[user\]/,/^$/d' /etc/wsl.conf
+printf '\n[user]\ndefault=clawuser\n' >> /etc/wsl.conf
+chmod 644 /etc/wsl.conf
+echo "clawuser-stub ready: uid=$(id -u clawuser)"
+'@
+    $rc = Invoke-WslBash -Script $script -User 'root'
+    if ($rc -ne 0) { throw "Failed to pre-create clawuser stub (exit=$rc)" }
+}
+
+function Invoke-WslInstallWithRestart {
+    # Caller has already run Enable-WindowsFeaturesForWsl. Persists resume
+    # state, registers RunOnce, prompts the user, and reboots. The actual
+    # `wsl --install -d Ubuntu` happens AFTER the reboot in the resume
+    # branch of Step-EnsureWsl - until features are loaded post-reboot,
+    # `wsl --install` cannot create a usable instance.
+    Write-Log INFO 'Persisting resume state and scheduling restart for WSL setup.'
 
     $credTarget = if ($ThisProvider.CredentialTarget) { $ThisProvider.CredentialTarget } else { '' }
     Save-ResumeFlag -Provider $Provider -InstallDir $PSScriptRoot -SourceExe $SourceExe -CredentialTarget $credTarget
@@ -371,26 +457,40 @@ function Step-Preflight {
 }
 
 function Step-EnsureWsl {
-    # Replaces the old Step-InstallWsl. Three cases:
-    #   1. WSL2 + Ubuntu already functional -> skip, no install.
-    #   2. WSL kernel loaded but Ubuntu missing -> `wsl --install -d Ubuntu`,
-    #      no reboot (kernel is already up).
-    #   3. WSL not installed at all (clean Win11) -> `wsl --install`, write
-    #      resume flag, register RunOnce, restart. Resume re-enters this
-    #      function with $Resume=true and just polls for readiness.
+    # Three cases:
+    #   1. WSL2 + Ubuntu already functional -> skip.
+    #   2. WSL kernel loaded but Ubuntu missing -> install Ubuntu (with WSL1
+    #      fallback on HCS_E_HYPERV_NOT_INSTALLED), no reboot.
+    #   3. WSL not installed at all (clean Win11) -> enable Windows features
+    #      via DISM (Microsoft-Windows-Subsystem-Linux, VirtualMachinePlatform,
+    #      HypervisorPlatform), persist resume state, restart. The ACTUAL
+    #      `wsl --install -d Ubuntu` runs in the resume branch below, after
+    #      the kernel features are loaded.
     Write-Log INFO 'Step 2: Ensuring WSL2 + Ubuntu are available.'
 
     if ($Resume) {
-        Write-Log INFO 'Resuming after restart - waiting for WSL2 + Ubuntu to come up...'
+        Write-Log INFO 'Resuming after restart - completing WSL install if needed.'
+        if (Test-WslFunctional) {
+            Write-Log INFO 'WSL2 + Ubuntu already functional after restart.'
+            Save-Checkpoint 'EnsureWsl'
+            return
+        }
+        # Pre-reboot we ran DISM but not `wsl --install`. Run it now. WSL1
+        # fallback kicks in if HCS_E_HYPERV_NOT_INSTALLED is detected.
+        $variant = Install-WslDistroWithFallback
+        Write-Log INFO "WSL variant installed: $variant"
+        New-ClawUserAndSetDefault
+
+        $ready = $false
         for ($i = 1; $i -le 12; $i++) {
-            if (Test-WslFunctional) {
-                Write-Log INFO "WSL2 + Ubuntu ready after restart (attempt $i)."
-                Save-Checkpoint 'EnsureWsl'
-                return
-            }
+            if (Test-WslFunctional) { $ready = $true; break }
             Start-Sleep -Seconds 5
         }
-        throw 'After restart, WSL2 + Ubuntu still not responding after 60s. Run `wsl --status` to investigate, then re-run setup.ps1 -Resume.'
+        if (-not $ready) {
+            throw 'WSL could not be configured on this machine. Please contact support at hello@avitalresearch.com'
+        }
+        Save-Checkpoint 'EnsureWsl'
+        return
     }
 
     if (Test-WslFunctional) {
@@ -399,27 +499,28 @@ function Step-EnsureWsl {
         return
     }
 
-    # Test the kernel directly. If `wsl --status` returns 0, the WSL feature
-    # is active and we just need to add Ubuntu (no reboot). If it returns
-    # non-zero, the feature isn't enabled - full install + reboot needed.
+    # Kernel-loaded check. If `wsl --status` returns 0 the feature is active
+    # and we can install Ubuntu without rebooting. Otherwise enable features
+    # via DISM and reboot - the resume branch above completes the install.
     $null = & wsl.exe --status 2>&1
     $kernelOk = ($LASTEXITCODE -eq 0)
 
     if ($kernelOk) {
         Write-Log INFO 'WSL2 kernel loaded but Ubuntu missing - installing Ubuntu only.'
-        & wsl.exe --install --no-launch -d $WslDistro | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "wsl --install -d $WslDistro failed with exit $LASTEXITCODE."
-        }
+        $variant = Install-WslDistroWithFallback
+        Write-Log INFO "WSL variant installed: $variant"
+        New-ClawUserAndSetDefault
         Start-Sleep -Seconds 5
         if (-not (Test-WslFunctional)) {
-            throw 'Ubuntu installed but not yet functional. Try rebooting and re-running setup.ps1 -Resume.'
+            throw 'WSL could not be configured on this machine. Please contact support at hello@avitalresearch.com'
         }
         Save-Checkpoint 'EnsureWsl'
         return
     }
 
-    # Kernel not loaded - full install plus reboot. Does not return.
+    # Kernel not loaded - DISM the features then reboot. Resume branch
+    # completes the install on next launch. Does not return.
+    Enable-WindowsFeaturesForWsl
     Invoke-WslInstallWithRestart
 }
 
@@ -455,7 +556,7 @@ function Step-RestartWsl {
 }
 
 function Step-CreateClawUser {
-    Write-Log INFO "Step 5: Creating non-root user '$WslUser' (no sudo membership)."
+    Write-Log INFO "Step 5: Locking down '$WslUser' (no sudo, no password login)."
     $script = @'
 set -e
 if ! id clawuser >/dev/null 2>&1; then
@@ -465,9 +566,15 @@ fi
 # never set (usermod -L returns 0 on a newly-created account).
 usermod -L clawuser 2>/dev/null || true
 chmod 700 /home/clawuser
-# Guarantee no sudo membership (fresh users aren't in sudo anyway, but belt+braces).
+# Strip the temporary NOPASSWD sudoers entry that Step-EnsureWsl added to
+# bypass Ubuntu's first-launch interactive setup. The egress firewall and
+# overall security model assume clawuser is fully non-privileged
+# (DEVIATION A2: nft mutations run via -u root, not via clawuser sudo).
+sed -i '/^clawuser[[:space:]]\+ALL=(ALL)[[:space:]]\+NOPASSWD:ALL$/d' /etc/sudoers || true
+# Remove sudo group membership (fresh users aren't in sudo anyway, but
+# Step-EnsureWsl added clawuser to sudo to bridge the OOBE gap).
 gpasswd -d clawuser sudo 2>/dev/null || true
-echo "clawuser ready: uid=$(id -u clawuser)"
+echo "clawuser locked down: uid=$(id -u clawuser), groups=$(id -nG clawuser | tr ' ' ',')"
 '@
     $rc = Invoke-WslBash -Script $script -User 'root'
     if ($rc -ne 0) { throw "Failed to create clawuser (exit=$rc) - check install.log for [wsl:root] lines." }
