@@ -237,6 +237,30 @@ foreach ($agent in $Agents) {
 
 Write-BootstrapLog INFO 'Bootstrap complete.'
 
+# Append 'AgentBootstrap' to %ProgramData%\ClawFactory\checkpoint.json. Mirrors
+# setup.ps1's Save-Checkpoint shape: ordered hashtable -> JSON, idempotent via
+# -notcontains. The smoke-test checks completedSteps for 'AgentBootstrap' to
+# confirm Step 15 (this script) finished. Wrapped in try/catch because a
+# checkpoint write failure must not block the user from seeing the next-steps
+# guidance below.
+$checkpointFile = Join-Path $env:ProgramData 'ClawFactory\checkpoint.json'
+try {
+    $state = [ordered]@{ completedSteps = @() }
+    if (Test-Path -LiteralPath $checkpointFile) {
+        $json = Get-Content -LiteralPath $checkpointFile -Raw | ConvertFrom-Json
+        $state.completedSteps = @($json.completedSteps)
+    }
+    if ($state.completedSteps -notcontains 'AgentBootstrap') {
+        $state.completedSteps += 'AgentBootstrap'
+        $state | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $checkpointFile -Encoding UTF8
+        Write-BootstrapLog INFO "Checkpoint updated: AgentBootstrap appended to $checkpointFile."
+    } else {
+        Write-BootstrapLog INFO "Checkpoint already contains AgentBootstrap; nothing to do."
+    }
+} catch {
+    Write-BootstrapLog WARN "Failed to update checkpoint at ${checkpointFile}: $($_.Exception.Message)"
+}
+
 #--- "What to do next" -------------------------------------------------------
 Write-Host ''
 Write-Host '================================================================' -ForegroundColor Green
