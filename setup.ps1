@@ -851,7 +851,7 @@ fi
 # first (graceful), then SIGKILL after 30s (--kill-after) if the child
 # trapped SIGTERM. timeout's exit code 124 = timed out.
 set +e
-NO_ONBOARD=1 HOME=/home/clawuser USER=clawuser LOGNAME=clawuser timeout --foreground --kill-after=30 300 bash `"`$TMP`" -- --no-onboard > >(tee /tmp/openclaw-install.log) 2>&1
+NO_ONBOARD=1 HOME=/home/clawuser USER=clawuser LOGNAME=clawuser timeout --foreground --kill-after=30 900 bash `"`$TMP`" -- --no-onboard > >(tee /tmp/openclaw-install.log) 2>&1
 INSTALL_RC=`$?
 set -e
 if [ `$INSTALL_RC -eq 124 ]; then
