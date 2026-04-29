@@ -91,7 +91,7 @@ if ($Provider -eq 'ollama') {
         Log "API key found for $Provider. Piping to OpenClaw via stdin (no at-rest copy in WSL)."
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName  = 'wsl.exe'
-        $psi.Arguments = "-d $WslDistro -u $WslUser -- bash -lc `"cd ~/skills-factory && openclaw config set-model-key --model $($cfg.Model) --stdin`""
+        $psi.Arguments = "-d $WslDistro -u $WslUser -- bash -lc `"mkdir -p ~/skills-factory && cd ~/skills-factory && openclaw config set-model-key --model $($cfg.Model) --stdin`""
         $psi.RedirectStandardInput = $true
         $psi.UseShellExecute       = $false
         $proc = [System.Diagnostics.Process]::Start($psi)
@@ -107,12 +107,12 @@ if ($Provider -eq 'ollama') {
 #--- Default model (skipped for 'later') --------------------------------------
 if ($cfg.Model) {
     Log "Setting $($cfg.Model) as default model."
-    wsl -d $WslDistro -u $WslUser -- bash -lc "cd ~/skills-factory && openclaw config set model.default $($cfg.Model)" | Out-Null
+    wsl -d $WslDistro -u $WslUser -- bash -lc "mkdir -p ~/skills-factory && cd ~/skills-factory && openclaw config set model.default $($cfg.Model)" | Out-Null
 }
 
 #--- Verify ------------------------------------------------------------------
 Log 'Running openclaw verify.'
-wsl -d $WslDistro -u $WslUser -- bash -lc 'cd ~/skills-factory && openclaw verify'
+wsl -d $WslDistro -u $WslUser -- bash -lc 'mkdir -p ~/skills-factory && cd ~/skills-factory && openclaw verify'
 if ($LASTEXITCODE -ne 0) { throw "openclaw verify failed with exit $LASTEXITCODE" }
 
 #--- Checklist ---------------------------------------------------------------

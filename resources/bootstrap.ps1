@@ -179,7 +179,7 @@ printf '%s' '$b64' | base64 -d > "`$TMP"
 chmod 644 "`$TMP"
 mv -f "`$TMP" "`$DIR/agent.md"
 SIZE=`$(wc -c < "`$DIR/agent.md")
-echo "  $AgentName: agent.md installed (`$SIZE bytes)"
+echo "  ${AgentName}: agent.md installed (`$SIZE bytes)"
 "@
     $rc = Invoke-WslBash -Script $script
     if ($rc -ne 0) { throw "Failed to write agent.md for $AgentName (exit=$rc)" }
