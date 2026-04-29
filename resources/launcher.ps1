@@ -111,6 +111,60 @@ function Invoke-WslSilent {
     return @{ ExitCode = $proc.ExitCode; Stdout = $stdout.Trim() }
 }
 
+function Invoke-WslSilentScript {
+    # Multi-line variant of Invoke-WslSilent: base64-encodes the script so
+    # quoting/escaping doesn't break across the powershell -> wsl -> bash
+    # boundary. Mirrors setup.ps1's Invoke-WslBash strategy.
+    param([Parameter(Mandatory)][string]$Script)
+    $enc = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Script))
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName               = 'wsl.exe'
+    $psi.Arguments              = "-d $WslDistro -u $WslUser -- bash -lc `"echo '$enc' | base64 -d | bash -l`""
+    $psi.UseShellExecute        = $false
+    $psi.CreateNoWindow         = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError  = $true
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $null = $proc.StandardOutput.ReadToEnd()
+    $null = $proc.StandardError.ReadToEnd()
+    $proc.WaitForExit()
+    return $proc.ExitCode
+}
+
+function Start-Gateway {
+    # Same three-tier fallback as setup.ps1's Step-PreinstallGatewayRuntime
+    # `$startGateway` block: prefer systemd --user, fall back to
+    # `openclaw gateway start`, fall back to `nohup setsid openclaw gateway run`.
+    # Fire-and-forget; the Windows-side polling loop verifies via
+    # http://127.0.0.1:8787/status. Idempotent: skips if gateway is already up.
+    $script = @'
+set -e
+LOG=/home/clawuser/.openclaw/logs/gateway.log
+mkdir -p /home/clawuser/.openclaw/logs
+
+if curl -fsS --max-time 2 http://127.0.0.1:8787/status >/dev/null 2>&1; then
+    exit 0
+fi
+
+SYSTEMD_OK=false
+if systemctl --user is-system-running >/dev/null 2>&1 || \
+   systemctl --user list-units --no-legend --no-pager >/dev/null 2>&1; then
+    SYSTEMD_OK=true
+fi
+
+if [ "$SYSTEMD_OK" = "true" ]; then
+    systemctl --user start openclaw-gateway.service 2>/dev/null || true
+else
+    if ! openclaw gateway start </dev/null >>"$LOG" 2>&1; then
+        nohup setsid openclaw gateway run </dev/null >>"$LOG" 2>&1 &
+        disown 2>/dev/null || true
+    fi
+fi
+exit 0
+'@
+    $null = Invoke-WslSilentScript -Script $script
+}
+
 function Open-Chat {
     # Drop the user directly into `openclaw chat` running as clawuser inside
     # WSL. Windows Terminal first (ships with Win11, has tabs and a sane font);
@@ -125,15 +179,20 @@ function Open-Chat {
 }
 
 #--- 1. Already running? ----------------------------------------------------
-$check = Invoke-WslSilent -Command 'systemctl --user is-active openclaw-gateway'
-if ($check.Stdout -eq 'active' -and (Test-GatewayResponding)) {
+# The HTTP /status probe is the real source of truth. The previous
+# `systemctl --user is-active` check was systemd-specific and silently
+# returned "inactive" on systemd-less WSL installs (WSL1 fallback or
+# systemd-disabled), causing the launcher to always TIMEOUT.
+if (Test-GatewayResponding) {
     Write-LauncherLog -State 'ALREADY_RUNNING'
     Open-Chat
     exit 0
 }
 
 #--- 2. Not running — start it (fire-and-forget; idempotent) ----------------
-$null = Invoke-WslSilent -Command 'systemctl --user start openclaw-gateway'
+# Layered fallback: systemd --user → openclaw gateway start → nohup setsid
+# openclaw gateway run. Same logic as setup.ps1's Step-PreinstallGatewayRuntime.
+Start-Gateway
 
 #--- 3. Poll for up to $TimeoutSec seconds ----------------------------------
 $deadline = (Get-Date).AddSeconds($TimeoutSec)

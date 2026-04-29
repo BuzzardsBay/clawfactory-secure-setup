@@ -899,6 +899,24 @@ function Step-PreinstallGatewayRuntime {
     # the lazy-install fallback will silently fail; setup.ps1 will need to
     # be updated. The install.sh SHA-256 pin prevents silent upgrades.
     Write-Log INFO 'Step 8b: Pre-installing OpenClaw gateway + bundled plugin deps as root.'
+
+    # M8: Compute the default `main` agent model based on the selected
+    # provider so the agent.md sub-block g writes a model line that matches
+    # what `Step-WireProviderKey` actually authenticated. Hardcoding
+    # anthropic/claude-sonnet-4-6 broke every non-claude install. The
+    # provider->prefix mapping mirrors Step-ConfigureOpenClaw: 'claude' maps
+    # to 'anthropic'; everyone else uses their own name.
+    $mainAgentPrefix = switch ($Provider) {
+        'claude' { 'anthropic' }
+        default  { $Provider }
+    }
+    $mainAgentModel = if ($Provider -eq 'later' -or -not $ThisProvider.DefaultModel) {
+        ''
+    } else {
+        "$mainAgentPrefix/$($ThisProvider.DefaultModel)"
+    }
+    Write-Log INFO "Default main agent model: $(if ($mainAgentModel) { $mainAgentModel } else { '(none - skipping main agent.md)' })"
+
     $script = @'
 set -e
 
@@ -1090,14 +1108,21 @@ systemctl enable --now clawfactory-allow-providers.timer 2>/dev/null || true
 # agent dir; this gives `main` a sane default. Other agents (the factory
 # team) get their prompts from bootstrap-factory.sh later.
 if [ -d /home/clawuser/.openclaw/agents/main ] && [ ! -f /home/clawuser/.openclaw/agents/main/agent.md ]; then
-    cat > /home/clawuser/.openclaw/agents/main/agent.md <<'AGENT'
+    if [ -n "${DEFAULT_MAIN_MODEL:-}" ]; then
+        # Unquoted heredoc marker so $DEFAULT_MAIN_MODEL expands. Quoting
+        # the YAML value defends against models whose names contain ':'
+        # (e.g. ollama/llama3.1:8b).
+        cat > /home/clawuser/.openclaw/agents/main/agent.md <<AGENT
 ---
 name: main
-model: anthropic/claude-sonnet-4-6
+model: "$DEFAULT_MAIN_MODEL"
 ---
 
 You are the default chat assistant for the ClawFactory operator. Reply directly and concisely to whatever the operator asks. Keep answers under three sentences unless explicitly asked for detail.
 AGENT
+    else
+        echo "[gateway-preinstall] no provider model configured (Provider=later); skipping main agent.md - run switch-provider.ps1 later"
+    fi
 fi
 
 # --- h. Chown everything back to clawuser --------------------------------
@@ -1107,6 +1132,13 @@ chown -R clawuser:clawuser /usr/lib/node_modules/openclaw/dist/extensions/
 
 echo "[gateway-preinstall] complete"
 '@
+    # M8: Prepend the resolved default model so sub-block g's heredoc can
+    # interpolate it. Single-quoted on the bash side so shell metachars in
+    # the model name are literal; PowerShell's escaping for the embedded
+    # single-quote (rare in model names but possible) is belt-and-suspenders.
+    $modelEscaped = $mainAgentModel -replace "'", "'\''"
+    $script = "DEFAULT_MAIN_MODEL='$modelEscaped'`n" + $script
+
     $rc = Invoke-WslBash -Script $script -User 'root'
     if ($rc -ne 0) { Write-Log WARN "Gateway runtime pre-install returned $rc; the gateway may need manual help on first boot." }
 

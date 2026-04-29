@@ -17,12 +17,12 @@ $WslUser   = 'clawuser'
 $LogFile   = Join-Path $env:ProgramData 'ClawFactory\install.log'
 
 $ProviderMap = @{
-    grok    = @{ Cred = 'ClawFactory/GrokApiKey';      Model = 'grok-4-1-fast' }
-    openai  = @{ Cred = 'ClawFactory/OpenAIApiKey';    Model = 'gpt-5' }
-    claude  = @{ Cred = 'ClawFactory/AnthropicApiKey'; Model = 'claude-sonnet-4-6' }
-    gemini  = @{ Cred = 'ClawFactory/GeminiApiKey';    Model = 'gemini-2.5-pro' }
-    ollama  = @{ Cred = $null;                         Model = 'llama3.1:8b' }
-    later   = @{ Cred = $null;                         Model = $null }
+    grok    = @{ Cred = 'ClawFactory/GrokApiKey';      Model = 'grok-4-1-fast';      Prefix = 'grok' }
+    openai  = @{ Cred = 'ClawFactory/OpenAIApiKey';    Model = 'gpt-5';              Prefix = 'openai' }
+    claude  = @{ Cred = 'ClawFactory/AnthropicApiKey'; Model = 'claude-sonnet-4-6';  Prefix = 'anthropic' }
+    gemini  = @{ Cred = 'ClawFactory/GeminiApiKey';    Model = 'gemini-2.5-pro';     Prefix = 'gemini' }
+    ollama  = @{ Cred = $null;                         Model = 'llama3.1:8b';        Prefix = 'ollama' }
+    later   = @{ Cred = $null;                         Model = $null;                Prefix = $null }
 }
 $cfg = $ProviderMap[$Provider]
 
@@ -82,38 +82,39 @@ if ($Provider -eq 'ollama') {
 } elseif ($Provider -eq 'later') {
     Log 'No provider selected. Run resources\switch-provider.ps1 -Provider <name> later to configure.'
 } else {
+    # The provider key is wired into ~/.openclaw/auth-profiles.json by
+    # setup.ps1's Step-WireProviderKey BEFORE this script runs. We just
+    # verify it's still present in Windows Credential Manager (DPAPI) so
+    # post-install can flag a missing key clearly. There's no separate
+    # `openclaw config set-model-key --stdin` subcommand in OpenClaw - the
+    # auth profile in auth-profiles.json is the canonical store.
     $key = [CredWrapper]::Read($cfg.Cred)
     if ([string]::IsNullOrEmpty($key)) {
-        Log "No API key in Credential Manager for target '$($cfg.Cred)'."
-        Log "Add later with:  cmdkey /generic:$($cfg.Cred) /user:clawuser /pass:<your-key>"
-        Log 'Then re-run:     powershell -NoProfile -ExecutionPolicy Bypass -File "<install-dir>\resources\post-install.ps1" -Provider ' + $Provider
+        Log "WARN: No API key in Credential Manager for target '$($cfg.Cred)'."
+        Log "      Add later with:  cmdkey /generic:$($cfg.Cred) /user:clawuser /pass:<your-key>"
+        Log "      Then re-run:     resources\\switch-provider.ps1 -Provider $Provider"
     } else {
-        Log "API key found for $Provider. Piping to OpenClaw via stdin (no at-rest copy in WSL)."
-        $psi = New-Object System.Diagnostics.ProcessStartInfo
-        $psi.FileName  = 'wsl.exe'
-        $psi.Arguments = "-d $WslDistro -u $WslUser -- bash -lc `"mkdir -p ~/skills-factory && cd ~/skills-factory && openclaw config set-model-key --model $($cfg.Model) --stdin`""
-        $psi.RedirectStandardInput = $true
-        $psi.UseShellExecute       = $false
-        $proc = [System.Diagnostics.Process]::Start($psi)
-        $proc.StandardInput.Write($key)
-        $proc.StandardInput.Close()
-        $proc.WaitForExit()
-        if ($proc.ExitCode -ne 0) { throw "openclaw config set-model-key exited $($proc.ExitCode)" }
+        Log "API key found for $Provider. (Already wired into ~/.openclaw/auth-profiles.json by Step-WireProviderKey.)"
         $key = ('x' * 64)
         Remove-Variable key -ErrorAction SilentlyContinue
     }
 }
 
 #--- Default model (skipped for 'later') --------------------------------------
-if ($cfg.Model) {
-    Log "Setting $($cfg.Model) as default model."
-    wsl -d $WslDistro -u $WslUser -- bash -lc "mkdir -p ~/skills-factory && cd ~/skills-factory && openclaw config set model.default $($cfg.Model)" | Out-Null
+# Use `openclaw models set "<prefix>/<model>"` (matches setup.ps1's
+# Step-ConfigureOpenClaw line 902 syntax). Note `claude` -> `anthropic` prefix.
+if ($cfg.Model -and $cfg.Prefix) {
+    $modelId = "$($cfg.Prefix)/$($cfg.Model)"
+    Log "Setting $modelId as default model."
+    wsl -d $WslDistro -u $WslUser -- bash -lc "openclaw models set '$modelId'" | Out-Null
 }
 
 #--- Verify ------------------------------------------------------------------
-Log 'Running openclaw verify.'
-wsl -d $WslDistro -u $WslUser -- bash -lc 'mkdir -p ~/skills-factory && cd ~/skills-factory && openclaw verify'
-if ($LASTEXITCODE -ne 0) { throw "openclaw verify failed with exit $LASTEXITCODE" }
+# OpenClaw's `verify` subcommand was renamed to `doctor` in current releases.
+# `doctor` runs health checks + quick fixes for the gateway and channels.
+Log 'Running openclaw doctor.'
+wsl -d $WslDistro -u $WslUser -- bash -lc 'openclaw doctor'
+if ($LASTEXITCODE -ne 0) { throw "openclaw doctor failed with exit $LASTEXITCODE" }
 
 #--- Checklist ---------------------------------------------------------------
 Write-Host ''
