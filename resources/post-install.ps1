@@ -109,24 +109,35 @@ if ($cfg.Model -and $cfg.Prefix) {
     wsl -d $WslDistro -u $WslUser -- bash -lc "openclaw models set '$modelId'" | Out-Null
 }
 
-#--- FIX 3: Non-interactive doctor with timeout ------------------------------
+#--- FIX 3: Auto-confirming doctor with timeout ------------------------------
 # Refs openclaw/openclaw#18502 (doctor hangs after completion in non-interactive
 # parent processes), openclaw/openclaw#44185 (--repair partial-effect bugs in
 # some sub-flows; we accept this - main config normalization works).
 #
-# `--fix --non-interactive --yes` together suppress all prompts. `timeout
-# --foreground --kill-after=15 120` is generous (healthy runs finish 30-60s)
-# and SIGKILLs after a 15s grace if SIGTERM is trapped. Exit codes 124
-# (timeout) and 137 (SIGKILL after timeout) are both treated as non-fatal:
-# doctor's job is config normalization, not a hard requirement for gateway
-# startup. Output tee'd to /tmp/openclaw-install.log for diagnosis.
-Log 'Running openclaw doctor in non-interactive mode (120s timeout).'
+# `--non-interactive` is documented as "Run without prompts (safe migrations
+# only)" - it explicitly skips operations that need confirmation, including
+# the systemd service unit install. On fresh state that flag makes doctor
+# exit 1 in ~1s without doing what we need. Validated 2026-04-30 on the
+# laptop: piping `yes` to stdin (no --non-interactive) lets doctor complete
+# the full pipeline including the systemd unit, after which the gateway
+# returns HTTP 200.
+#
+# `yes | timeout --foreground --kill-after=15 180 openclaw doctor --fix --yes`
+# auto-answers every prompt with 'y' and bounds the run at 180s (was 120s;
+# fresh-state runs that include the systemd install legitimately take
+# longer than the prior config-normalization-only path). $? after the
+# `yes |` pipe reflects timeout's exit code (timeout is the last process
+# in the pipeline before stderr-redirect, with pipefail off). Exit 124
+# (timed out) and 137 (SIGKILL after the 15s grace) are both [WARN] only
+# - FIX 1 and FIX 2 must run regardless. Output is captured by the
+# Windows-side ForEach-Object { Log $_ } below, which writes to install.log.
+Log 'Running openclaw doctor with auto-confirmation (180s timeout).'
 $doctorScript = @'
-echo "[ClawFactory] FIX 3: Running openclaw doctor in non-interactive mode (refs openclaw/openclaw#18502)"
-timeout --foreground --kill-after=15 120 openclaw doctor --fix --non-interactive --yes 2>&1 | tee -a /tmp/openclaw-install.log
+echo "[ClawFactory] FIX 3: Running openclaw doctor with auto-confirmation (refs openclaw/openclaw#18502)"
+yes | timeout --foreground --kill-after=15 180 openclaw doctor --fix --yes 2>&1
 rc=$?
 if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
-    echo "[ClawFactory] WARN: openclaw doctor timed out after 120s (refs #18502) - continuing install"
+    echo "[ClawFactory] WARN: openclaw doctor timed out after 180s (refs #18502) - continuing install"
 elif [ $rc -ne 0 ]; then
     echo "[ClawFactory] WARN: openclaw doctor exited rc=$rc - continuing install (non-fatal)"
 fi
