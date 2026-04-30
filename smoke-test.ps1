@@ -58,5 +58,14 @@ Check 'Orchestrator SOUL hash substituted' {
     $enc = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($script))
     (wsl -d Ubuntu -u clawuser --cd ~ -- bash -lc "echo $enc | base64 -d | bash") -eq 'OK' }
 
+Check 'auth-profiles.json present for all 5 agents' {
+    $script = 'ok=0; for a in main orchestrator publisher skill-builder skill-scout; do
+      f=$HOME/.openclaw/agents/$a/agent/auth-profiles.json
+      [ -f "$f" ] && [ "$(stat -c %a "$f")" = "600" ] && ok=$((ok+1))
+    done
+    [ "$ok" = "5" ] && echo OK || echo BAD'
+    $enc = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($script))
+    (wsl -d Ubuntu -u clawuser --cd ~ -- bash -lc "echo $enc | base64 -d | bash") -eq 'OK' }
+
 Write-Host ""; Write-Host "Result: $ok pass, $fail fail" -ForegroundColor $(if ($fail) {'Red'} else {'Green'})
 exit $fail

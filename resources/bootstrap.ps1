@@ -235,6 +235,44 @@ foreach ($agent in $Agents) {
     Write-AgentMd -AgentName $name -Content $content
 }
 
+#--- FIX 4: auth-profiles per-agent fan-out ----------------------------------
+# Refs openclaw/openclaw#44571 (auth-profiles only written to main agent),
+# openclaw/openclaw#12003 (OpenAI auth not persisted to auth-profiles.json).
+# The OpenClaw runtime reads auth from the per-agent canonical path
+# ~/.openclaw/agents/<id>/agent/auth-profiles.json and the legacy fallback to
+# ~/.openclaw/auth-profiles.json is unreliable across the 2026.4.x line.
+# Step 12 (Step-WireProviderKey in setup.ps1) writes the legacy path; we
+# fan it out to all 5 agent dirs (main + the 4 sub-agents) here in Step 15.
+# Idempotent: cp overwrites cleanly, mkdir -p / chmod are idempotent.
+# Graceful skip when SOURCE missing (Provider=later case).
+$fanOutScript = @'
+set -e
+echo "[ClawFactory] Fanning out auth-profiles.json to all configured agents (refs openclaw/openclaw#44571, openclaw/openclaw#12003)"
+
+SOURCE="$HOME/.openclaw/auth-profiles.json"
+if [ ! -f "$SOURCE" ]; then
+    echo "[ClawFactory] No auth-profiles.json at $SOURCE - skipping fan-out (likely Provider=later)"
+    exit 0
+fi
+
+for agent in main orchestrator publisher skill-builder skill-scout; do
+    target_dir="$HOME/.openclaw/agents/$agent/agent"
+    mkdir -p "$target_dir"
+    cp "$SOURCE" "$target_dir/auth-profiles.json"
+    chmod 600 "$target_dir/auth-profiles.json"
+    if [ -f "$target_dir/auth-profiles.json" ]; then
+        echo "[ClawFactory]   $agent: auth-profiles wired"
+    else
+        echo "[ClawFactory] ERROR: failed to write auth-profiles for $agent" >&2
+        exit 13
+    fi
+done
+'@
+$rcFanOut = Invoke-WslBash -Script $fanOutScript
+if ($rcFanOut -ne 0) {
+    Write-BootstrapLog WARN "auth-profiles fan-out returned $rcFanOut; check ~/.openclaw/agents/<id>/agent/auth-profiles.json manually."
+}
+
 Write-BootstrapLog INFO 'Bootstrap complete.'
 
 # Append 'AgentBootstrap' to %ProgramData%\ClawFactory\checkpoint.json. Mirrors
