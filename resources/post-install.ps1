@@ -116,6 +116,74 @@ Log 'Running openclaw doctor.'
 wsl -d $WslDistro -u $WslUser -- bash -lc 'openclaw doctor'
 if ($LASTEXITCODE -ne 0) { throw "openclaw doctor failed with exit $LASTEXITCODE" }
 
+#--- Disable mDNS plugin (v1.0 fix for gateway restart loop) -----------------
+# The mDNS plugin broadcasts gateway presence on the LAN and ships a watchdog
+# that SIGTERMs the gateway ~47s after start on duplicate-service detection.
+# ClawFactory's gateway binds 127.0.0.1 and Windows Firewall blocks inbound
+# TCP/8787, so service discovery is unused by design. Disable at the config
+# level - the schema's discovery.mdns.mode enum sanctions "off", so the value
+# survives `openclaw doctor` and `openclaw config validate`. The change
+# persists in ~/.openclaw/openclaw.json (atomic write with .bak by openclaw).
+# Idempotent: skip if already off. Non-fatal: warn and continue on failure.
+$disableScript = @'
+set -e
+LOG=/home/clawuser/.openclaw/logs/gateway.log
+mkdir -p /home/clawuser/.openclaw/logs
+
+CURRENT="$(openclaw config get discovery.mdns.mode 2>/dev/null || true)"
+if [ "$CURRENT" = "off" ]; then
+    echo "[ClawFactory] mDNS already disabled (discovery.mdns.mode=off); skipping."
+else
+    if openclaw config set discovery.mdns.mode off >/dev/null 2>&1; then
+        echo "[ClawFactory] Disabled bonjour plugin (reason: loopback-only gateway, no mDNS use case)"
+    else
+        echo "[ClawFactory] WARNING: openclaw config set discovery.mdns.mode off failed; gateway may restart-loop. Run manually: openclaw config set discovery.mdns.mode off" >&2
+    fi
+fi
+
+# Flush stale "BuzzardsBay (OpenClaw)" advertisements from a system-managed
+# avahi-daemon if present. Harmless no-op when avahi isn't installed (the
+# default WSL Ubuntu doesn't ship avahi unless something pulled it in).
+systemctl --user restart avahi-daemon 2>/dev/null || true
+
+# Restart the gateway so the new config takes effect. Same three-tier
+# fallback as setup.ps1 $startGateway / launcher.ps1 Start-Gateway:
+# systemd --user, then `openclaw gateway start`, then `nohup setsid
+# openclaw gateway run`. Stop any prior instance first so we don't
+# double-bind 127.0.0.1:8787.
+if systemctl --user is-system-running >/dev/null 2>&1 || \
+   systemctl --user list-units --no-legend --no-pager >/dev/null 2>&1; then
+    systemctl --user daemon-reload || true
+    systemctl --user restart openclaw-gateway.service 2>/dev/null || \
+        systemctl --user start openclaw-gateway.service 2>/dev/null || true
+else
+    openclaw gateway stop </dev/null >>"$LOG" 2>&1 || true
+    pkill -f "openclaw gateway run" 2>/dev/null || true
+    sleep 1
+    if ! openclaw gateway start </dev/null >>"$LOG" 2>&1; then
+        nohup setsid openclaw gateway run </dev/null >>"$LOG" 2>&1 &
+        disown 2>/dev/null || true
+    fi
+fi
+
+# Verify the gateway is back, polling /status up to 30s.
+for i in $(seq 1 15); do
+    if curl -fsS --max-time 2 http://127.0.0.1:8787/status >/dev/null 2>&1; then
+        echo "[ClawFactory] Gateway responding on 127.0.0.1:8787 after mDNS-off restart (attempt $i)"
+        exit 0
+    fi
+    sleep 2
+done
+echo "[ClawFactory] WARNING: Gateway not responding on 127.0.0.1:8787 within 30s after restart; check ~/.openclaw/logs/gateway.log" >&2
+exit 1
+'@
+$encDisable = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($disableScript))
+Log 'Disabling mDNS plugin and restarting gateway.'
+wsl -d $WslDistro -u $WslUser -- bash -lc "echo $encDisable | base64 -d | bash" 2>&1 | ForEach-Object { Log $_ }
+if ($LASTEXITCODE -ne 0) {
+    Log "WARN: mDNS-disable + gateway-restart returned $LASTEXITCODE; install will continue but verify gateway manually."
+}
+
 #--- Checklist ---------------------------------------------------------------
 Write-Host ''
 Write-Host '========================================'
