@@ -33,6 +33,19 @@ Set-StrictMode -Version 3.0
 $OpenClawInstallUrl    = 'https://openclaw.ai/install.sh'
 # [R2] Pin me. See README.md section "Pinning the OpenClaw install.sh hash".
 $OpenClawInstallSha256 = '57f025ba0272e2da3238984360e37fad5230bc7cea81854d154a362ea989d49d'
+# Pin OpenClaw npm package to a known-validated version.
+# ClawFactory v1.0 ships with OpenClaw 2026.4.27 - the version manually
+# validated on 2026-04-30 with the four bundled bug-workarounds intact:
+#   - openclaw/openclaw#72355, #64928 (bonjour mDNS crash loop)
+#   - openclaw/openclaw#73358 (codex/coding-agent silent default)
+#   - openclaw/openclaw#44571, #12003 (auth-profiles per-agent path)
+#   - openclaw/openclaw#18502 (doctor non-interactive hang)
+# When bumping this pin, manually re-validate the four fixes against
+# the new version before shipping. install.sh honors OPENCLAW_VERSION
+# via env var (install.sh:1012, install_spec construction at 2342) - no
+# fallback needed; install.sh:2354's @latest fallback only fires when
+# OPENCLAW_VERSION literally equals 'latest', so a pinned version skips it.
+$OpenClawNpmVersion    = '2026.4.27'
 $LogDir                = Join-Path $env:ProgramData 'ClawFactory'
 $LogFile               = Join-Path $LogDir 'install.log'
 $CheckpointFile        = Join-Path $LogDir 'checkpoint.json'
@@ -851,7 +864,7 @@ fi
 # first (graceful), then SIGKILL after 30s (--kill-after) if the child
 # trapped SIGTERM. timeout's exit code 124 = timed out.
 set +e
-NO_ONBOARD=1 HOME=/home/clawuser USER=clawuser LOGNAME=clawuser timeout --foreground --kill-after=30 900 bash `"`$TMP`" -- --no-onboard > >(tee /tmp/openclaw-install.log) 2>&1
+NO_ONBOARD=1 OPENCLAW_VERSION=$OpenClawNpmVersion HOME=/home/clawuser USER=clawuser LOGNAME=clawuser timeout --foreground --kill-after=30 900 bash `"`$TMP`" -- --no-onboard > >(tee /tmp/openclaw-install.log) 2>&1
 INSTALL_RC=`$?
 set -e
 if [ `$INSTALL_RC -eq 124 ]; then
