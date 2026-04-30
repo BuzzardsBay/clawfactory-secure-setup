@@ -19,7 +19,31 @@ Check 'AgentBootstrap checkpoint recorded' {
     $cp = Join-Path $env:ProgramData 'ClawFactory\checkpoint.json'
     (Get-Content $cp -Raw | ConvertFrom-Json).completedSteps -contains 'AgentBootstrap' }
 
-wsl -d Ubuntu -u clawuser -- bash -lc "systemctl --user start openclaw-gateway" 2>&1 | Out-Null
+# Layered gateway start: prefer systemd --user, then `openclaw gateway start`,
+# then `nohup setsid openclaw gateway run`. Same three-tier fallback as
+# setup.ps1's $startGateway block and launcher.ps1's Start-Gateway. Required
+# because default WSL2 kernels often don't have systemd available, in which
+# case `systemctl --user start` silently no-ops and the gateway never binds.
+$startScript = @'
+set -e
+LOG=/home/clawuser/.openclaw/logs/gateway.log
+mkdir -p /home/clawuser/.openclaw/logs
+if curl -fsS --max-time 2 http://127.0.0.1:8787/status >/dev/null 2>&1; then
+    exit 0
+fi
+if systemctl --user is-system-running >/dev/null 2>&1 || \
+   systemctl --user list-units --no-legend --no-pager >/dev/null 2>&1; then
+    systemctl --user start openclaw-gateway.service 2>/dev/null || true
+else
+    if ! openclaw gateway start </dev/null >>"$LOG" 2>&1; then
+        nohup setsid openclaw gateway run </dev/null >>"$LOG" 2>&1 &
+        disown 2>/dev/null || true
+    fi
+fi
+exit 0
+'@
+$encStart = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($startScript))
+wsl -d Ubuntu -u clawuser --cd ~ -- bash -lc "echo $encStart | base64 -d | bash" 2>&1 | Out-Null
 Start-Sleep -Seconds 8
 Check 'Gateway responds 200 on loopback' {
     try { (Invoke-WebRequest -Uri http://127.0.0.1:8787/status -UseBasicParsing -TimeoutSec 5).StatusCode -eq 200 }
