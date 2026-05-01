@@ -911,7 +911,7 @@ function Step-PreinstallGatewayRuntime {
     # If a future openclaw release adds new bundled plugins or changes deps,
     # the lazy-install fallback will silently fail; setup.ps1 will need to
     # be updated. The install.sh SHA-256 pin prevents silent upgrades.
-    Write-Log INFO 'Step 8b: Pre-installing OpenClaw gateway + bundled plugin deps as root.'
+    Write-Log INFO 'Step 8b: Installing OpenClaw Gateway systemd service via canonical `openclaw gateway install --force`.'
 
     # M8: Compute the default `main` agent model based on the selected
     # provider so the agent.md sub-block g writes a model line that matches
@@ -1155,73 +1155,66 @@ echo "[gateway-preinstall] complete"
     $rc = Invoke-WslBash -Script $script -User 'root'
     if ($rc -ne 0) { Write-Log WARN "Gateway runtime pre-install returned $rc; the gateway may need manual help on first boot." }
 
-    # Start the gateway as clawuser. Three layered paths:
-    #   1. If systemd --user is functional, use the openclaw-gateway.service
-    #      unit (existing path; respects the install.sh-supplied systemd unit
-    #      and our TimeoutStartSec=infinity override from sub-block b).
-    #   2. If systemd is unavailable (WSL1 fallback, or systemd-disabled WSL),
-    #      try `openclaw gateway start` - the CLI may have its own
-    #      non-systemd daemonization.
-    #   3. If even that fails, daemonize directly via `nohup setsid openclaw
-    #      gateway run` writing to ~/.openclaw/logs/gateway.log.
-    # Verify by polling http://127.0.0.1:8787/status. The script logs which
-    # path won so install.log is unambiguous.
-    $startGateway = @'
+    # Install the OpenClaw Gateway systemd user service via the canonical
+    # `openclaw gateway install --force --port 8787`. Validated 2026-04-30 on
+    # the laptop with 2026.4.27: this single command auto-generates a gateway
+    # token (saved to ~/.openclaw/openclaw.json), writes the unit at
+    # ~/.config/systemd/user/openclaw-gateway.service (~923 bytes), and is
+    # idempotent on re-runs. Replaces the prior systemctl-start-then-fallback
+    # dance which was a workaround for the missing unit (the prior code tried
+    # to start a unit nothing in our flow had ever created).
+    #
+    # After install, daemon-reload + enable + restart per openclaw issue
+    # #65184 (a known race where the service stays in 'inactive' state if
+    # these steps are skipped). The TimeoutStartSec=infinity drop-in written
+    # in $script sub-block (b) is auto-loaded on daemon-reload because
+    # systemd merges all *.d/*.conf overrides when the unit loads.
+    #
+    # Runs as clawuser (not root) so the unit lands under /home/clawuser/
+    # .config/systemd/user/, not /root/.
+    $gatewayInstall = @'
 set -e
-LOG=/home/clawuser/.openclaw/logs/gateway.log
-mkdir -p /home/clawuser/.openclaw/logs
+LOG=/tmp/openclaw-install.log
+mkdir -p "$(dirname "$LOG")"
 
-# Skip the start dance if the gateway is already responding (re-run case).
-if curl -fsS --max-time 3 http://127.0.0.1:8787/status >/dev/null 2>&1; then
-    echo "[gateway-start] gateway already running on 127.0.0.1:8787"
-    exit 0
+echo "[gateway-install] openclaw gateway install --force --port 8787"
+openclaw gateway install --force --port 8787 2>&1 | tee -a "$LOG"
+rc=${PIPESTATUS[0]}
+if [ "$rc" -ne 0 ]; then
+    echo "[gateway-install] FATAL: openclaw gateway install --force failed (exit $rc). Cannot proceed." >&2
+    echo "[gateway-install] last 20 lines of $LOG:" >&2
+    tail -n 20 "$LOG" >&2 2>/dev/null || true
+    exit "$rc"
 fi
 
-# Detect a usable systemd --user manager. `is-system-running` returns
-# non-zero if systemd is missing or DBus isn't reachable; we also accept
-# `list-units` succeeding as a softer probe.
-SYSTEMD_OK=false
-if systemctl --user is-system-running >/dev/null 2>&1 || \
-   systemctl --user list-units --no-legend --no-pager >/dev/null 2>&1; then
-    SYSTEMD_OK=true
-fi
+echo "[gateway-install] systemctl --user daemon-reload"
+systemctl --user daemon-reload 2>&1 | tee -a "$LOG" || true
 
-if [ "$SYSTEMD_OK" = "true" ]; then
-    echo "[gateway-start] systemd --user available - starting via systemd"
-    systemctl --user daemon-reload || true
-    systemctl --user reset-failed openclaw-gateway.service 2>/dev/null || true
-    systemctl --user enable --now openclaw-gateway.service 2>/dev/null || \
-        systemctl --user start openclaw-gateway.service || true
-    GATEWAY_BACKEND=systemd
-else
-    echo "[gateway-start] systemd --user unavailable - falling back to direct start"
-    if openclaw gateway start </dev/null >>"$LOG" 2>&1; then
-        echo "[gateway-start] openclaw gateway start succeeded"
-        GATEWAY_BACKEND=openclaw-cli
-    else
-        echo "[gateway-start] openclaw gateway start failed - launching gateway in background via nohup setsid"
-        nohup setsid openclaw gateway run </dev/null >>"$LOG" 2>&1 &
-        disown 2>/dev/null || true
-        GATEWAY_BACKEND=nohup
-    fi
-fi
+echo "[gateway-install] systemctl --user enable openclaw-gateway.service"
+systemctl --user enable openclaw-gateway.service 2>&1 | tee -a "$LOG" || true
 
-# Poll the status endpoint. Up to ~30s for the gateway to bind + accept.
-for i in $(seq 1 15); do
-    if curl -fsS --max-time 3 http://127.0.0.1:8787/status >/dev/null 2>&1; then
-        echo "[gateway-start] gateway responding on 127.0.0.1:8787 via $GATEWAY_BACKEND (attempt $i)"
+echo "[gateway-install] systemctl --user restart openclaw-gateway.service"
+systemctl --user restart openclaw-gateway.service 2>&1 | tee -a "$LOG" || true
+
+# Per #65184, give the unit ~5s to fully bind before probing is-active.
+sleep 5
+
+# Poll is-active up to 6x with 2s gaps (~12s total). Non-blocking on miss.
+for i in 1 2 3 4 5 6; do
+    state="$(systemctl --user is-active openclaw-gateway.service 2>/dev/null || true)"
+    if [ "$state" = "active" ]; then
+        echo "[gateway-install] Gateway service active (attempt $i)"
         exit 0
     fi
     sleep 2
 done
-echo "[gateway-start] WARNING: gateway not responding on 127.0.0.1:8787 after ~30s (backend=$GATEWAY_BACKEND)" >&2
-echo "[gateway-start] last 40 lines of $LOG:" >&2
-tail -n 40 "$LOG" >&2 2>/dev/null || true
-exit 1
+echo "[gateway-install] WARNING: gateway service did not become active within 12s - install will continue" >&2
+exit 0
 '@
-    $rc = Invoke-WslBash -Script $startGateway -User $WslUser
-    if ($rc -ne 0) {
-        Write-Log WARN "Gateway did not come up cleanly (exit=$rc). Check ~/.openclaw/logs/gateway.log. The install will continue; start it manually with: wsl -u clawuser -- openclaw gateway start"
+    $rcGateway = Invoke-WslBash -Script $gatewayInstall -User $WslUser
+    if ($rcGateway -ne 0) {
+        Write-Log ERROR "openclaw gateway install --force failed (exit=$rcGateway). Cannot proceed. Check /tmp/openclaw-install.log inside WSL for details."
+        throw "Step 8b: openclaw gateway install --force returned $rcGateway"
     }
     Save-Checkpoint 'GatewayRuntime'
 }

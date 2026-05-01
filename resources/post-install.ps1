@@ -128,59 +128,64 @@ if ($cfg.Model -and $cfg.Prefix) {
 # longer than the prior config-normalization-only path). $? after the
 # `yes |` pipe reflects timeout's exit code (timeout is the last process
 # in the pipeline before stderr-redirect, with pipefail off). Exit 124
-# (timed out) and 137 (SIGKILL after the 15s grace) are both [WARN] only
-# - FIX 1 and FIX 2 must run regardless. Output is captured by the
-# Windows-side ForEach-Object { Log $_ } below, which writes to install.log.
-Log 'Running openclaw doctor with auto-confirmation (180s timeout).'
+# (timed out) and 137 (SIGKILL after the 15s grace) are both [WARN] only.
+# Doctor is reframed as a final health check - non-zero exit logs WARN,
+# does not block FIX 1 (bonjour drop-in) or restart-and-verify. Output is
+# captured by the Windows-side ForEach-Object { Log $_ } below, which
+# writes to install.log.
+Log 'Running openclaw doctor as final health check (180s timeout).'
 $doctorScript = @'
 echo "[ClawFactory] FIX 3: Running openclaw doctor with auto-confirmation (refs openclaw/openclaw#18502)"
 yes | timeout --foreground --kill-after=15 180 openclaw doctor --fix --yes 2>&1
 rc=$?
 if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
-    echo "[ClawFactory] WARN: openclaw doctor timed out after 180s (refs #18502) - continuing install"
+    echo "[ClawFactory] doctor timed out after 180s - health check WARN, install continues."
 elif [ $rc -ne 0 ]; then
-    echo "[ClawFactory] WARN: openclaw doctor exited rc=$rc - continuing install (non-fatal)"
+    echo "[ClawFactory] doctor exited $rc - health check WARN, install continues."
 fi
 exit 0
 '@
 $encDoctor = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($doctorScript))
 wsl -d $WslDistro -u $WslUser -- bash -lc "echo $encDoctor | base64 -d | bash" 2>&1 | ForEach-Object { Log $_ }
 
-#--- FIX bundle: bonjour disable + codex disable + gateway restart -----------
-# Bundles three v1.0 fixes into a single WSL invocation:
+#--- Post-doctor: bonjour drop-in (defense-in-depth) + gateway restart -------
+# After the doctor health check runs above, this WSL block:
 #
-#   FIX 1 - Bonjour disable via systemd env var (PRIMARY).
-#           Refs openclaw/openclaw#72355, openclaw/openclaw#64928.
-#           Writes a systemd drop-in setting OPENCLAW_DISABLE_BONJOUR=1.
-#           Deployment-scoped, version-independent. Survives openclaw upgrades
-#           that may rename the discovery.mdns.mode schema path.
+#   FIX 1 - Writes a systemd drop-in setting OPENCLAW_DISABLE_BONJOUR=1.
+#           Defense-in-depth against the bonjour SIGTERM crash loop on
+#           openclaw versions where the bug fires (refs openclaw/openclaw
+#           #72355, #64928). Harmless on 2026.4.27 (our pinned version)
+#           since the env var is simply ignored when the bug is absent.
 #
-#   Defense-in-depth - same disable via config schema (discovery.mdns.mode=off).
-#           Belt-and-suspenders. If the env var is ever ignored upstream, the
-#           config-level disable still applies. If both fail, we warn loudly.
+#   FIX 2 - REMOVED. Previously toggled discovery.mdns.mode=off (the
+#           "config-level mDNS off" defense-in-depth) and
+#           skills.entries.coding-agent.enabled=false (the "coding-agent
+#           off" path that aimed to Disable codex silent-default auth
+#           failures). On 2026.4.27 those config paths do not exist
+#           (config-set returned "path not found") AND the underlying
+#           bonjour and codex bugs do not fire (validated via clean
+#           journalctl over multiple installs). FIX 1's env var drop-in
+#           retains forward-compatible protection. Re-add with current
+#           schema paths if a future version pin shows either bug
+#           regressing.
 #
-#   FIX 2 - Disable codex/coding-agent skill (refs openclaw/openclaw#73358).
-#           openclaw 2026.4.26+ ships a coding-agent skill that delegates to
-#           Codex by default and produces "No API key found for provider
-#           'openai'" errors on every Anthropic-only install. Strips codex
-#           provider from agent models.json and disables the skill in config.
+#   Restart - daemon-reload + restart openclaw-gateway.service (with
+#           non-systemd fallback for WSL1 / systemd-disabled installs),
+#           then polls http://127.0.0.1:8787/status for up to 60s.
+#           Confirms HTTP 200 on loopback before exiting.
 #
-#   Restart - reuses the existing 3-tier fallback (systemd --user -> openclaw
-#           gateway start -> nohup setsid openclaw gateway run). Same logic as
-#           setup.ps1 $startGateway / launcher.ps1 Start-Gateway. Polls
-#           /status for up to 60s after restart (TASK 5 bumped from 30s).
-#
-# Idempotent: cat overwrites the drop-in, openclaw config set is idempotent,
-# the node script is also idempotent (`removed` is empty if already cleaned).
-# Non-fatal: every individual fix logs WARN on failure and continues. The
-# install never aborts here.
+# Idempotent: drop-in cat overwrites cleanly, daemon-reload safe to repeat.
+# Non-fatal on failure: WARN logged, install continues.
 $fixesScript = @'
 set -e
 LOG=/home/clawuser/.openclaw/logs/gateway.log
 mkdir -p /home/clawuser/.openclaw/logs
 
-# === FIX 1: bonjour disable via systemd env var (refs #72355, #64928) =====
-echo "[ClawFactory] FIX 1: Disabling bonjour mDNS plugin via systemd env var (refs openclaw/openclaw#72355, openclaw/openclaw#64928)"
+# FIX 1: Bonjour env var drop-in (defense-in-depth)
+# Sets OPENCLAW_DISABLE_BONJOUR=1 as service env var. Harmless if the bonjour SIGTERM bug is not
+# present (env var simply ignored). Documented protection against version-bump regressions.
+# See openclaw issues #72355, #64928 for original bug context.
+echo "[ClawFactory] FIX 1: Writing bonjour env var drop-in (defense-in-depth, refs openclaw/openclaw#72355, openclaw/openclaw#64928)"
 mkdir -p "$HOME/.config/systemd/user/openclaw-gateway.service.d"
 cat > "$HOME/.config/systemd/user/openclaw-gateway.service.d/clawfactory-disable-bonjour.conf" <<'CONF'
 [Service]
@@ -191,59 +196,11 @@ if systemctl --user is-system-running >/dev/null 2>&1 || \
     systemctl --user daemon-reload || echo "[ClawFactory] WARN: daemon-reload failed (non-fatal)"
 fi
 
-# === Defense-in-depth: bonjour disable via config schema =================
-CURRENT="$(openclaw config get discovery.mdns.mode 2>/dev/null || true)"
-if [ "$CURRENT" = "off" ]; then
-    echo "[ClawFactory] mDNS config already off; skipping schema disable"
-else
-    if openclaw config set discovery.mdns.mode off >/dev/null 2>&1; then
-        echo "[ClawFactory] Disabled mDNS via discovery.mdns.mode=off (defense-in-depth)"
-    else
-        echo "[ClawFactory] WARN: openclaw config set discovery.mdns.mode off failed; env var still applies. Run manually if needed: openclaw config set discovery.mdns.mode off" >&2
-    fi
-fi
-
 # Flush stale "BuzzardsBay (OpenClaw)" advertisements from a system-managed
 # avahi-daemon if present. Harmless no-op when avahi isn't installed.
 systemctl --user restart avahi-daemon 2>/dev/null || true
 
-# === FIX 2: disable codex/coding-agent skill (refs #73358) ================
-echo "[ClawFactory] FIX 2: Disabling coding-agent skill (refs openclaw/openclaw#73358)"
-
-MODELS_JSON="$HOME/.openclaw/agents/main/agent/models.json"
-if [ -f "$MODELS_JSON" ]; then
-    cp "$MODELS_JSON" "$MODELS_JSON.bak"
-    node -e "
-const fs = require('fs');
-const p = '$MODELS_JSON';
-const data = JSON.parse(fs.readFileSync(p, 'utf8'));
-let removed = [];
-if (data.providers && data.providers.codex) {
-    delete data.providers.codex;
-    removed.push('providers.codex');
-}
-if (data.providers && data.providers.huggingface && data.providers.huggingface.models) {
-    const before = data.providers.huggingface.models.length;
-    data.providers.huggingface.models = data.providers.huggingface.models.filter(m =>
-        !(typeof m === 'string' ? m.startsWith('openai/') : (m.id || '').startsWith('openai/'))
-    );
-    const after = data.providers.huggingface.models.length;
-    if (before !== after) removed.push('huggingface openai/* (' + (before-after) + ' models)');
-}
-fs.writeFileSync(p, JSON.stringify(data, null, 2));
-console.log('[ClawFactory] models.json cleanup: ' + (removed.length ? removed.join(', ') : 'nothing to remove'));
-" || echo "[ClawFactory] WARN: models.json cleanup failed (non-fatal)"
-else
-    echo "[ClawFactory] models.json not present at $MODELS_JSON - skipping codex strip (expected on some versions)"
-fi
-
-if openclaw config set skills.entries.coding-agent.enabled false >/dev/null 2>&1; then
-    echo "[ClawFactory] coding-agent skill disabled in config"
-else
-    echo "[ClawFactory] WARN: coding-agent disable failed (non-fatal)"
-fi
-
-# === Restart and verify gateway (TASK 5) ==================================
+# === Restart and verify gateway ===========================================
 # Reuses the existing 3-tier fallback. Stop any prior instance first so we
 # don't double-bind 127.0.0.1:8787.
 if systemctl --user is-system-running >/dev/null 2>&1 || \
@@ -274,7 +231,7 @@ echo "[ClawFactory] WARN: gateway not responsive after 60s - check journalctl --
 exit 1
 '@
 $encFixes = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($fixesScript))
-Log 'Applying fix bundle (bonjour env var, config-level mDNS off, coding-agent off, restart).'
+Log 'Applying bonjour drop-in (defense-in-depth) and restarting gateway.'
 wsl -d $WslDistro -u $WslUser -- bash -lc "echo $encFixes | base64 -d | bash" 2>&1 | ForEach-Object { Log $_ }
 if ($LASTEXITCODE -ne 0) {
     Log "WARN: fix bundle returned $LASTEXITCODE; install will continue but verify gateway manually."
