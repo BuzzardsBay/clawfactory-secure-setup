@@ -11,7 +11,14 @@ param(
     # /SILENT /resume after a reboot. Empty when setup.ps1 is invoked outside
     # of the Inno wizard - in that case we fall back to relaunching setup.ps1
     # directly via powershell.exe.
-    [string]$SourceExe = ''
+    [string]$SourceExe = '',
+    # Path to the Inno Setup {tmp} directory where the bundled
+    # ubuntu-rootfs.tar.gz lives during install (passed by [Run] as {tmp}).
+    # When non-empty AND the tarball is present, Install-WslDistroWithFallback
+    # uses `wsl --import` as the primary path; otherwise falls through to
+    # `wsl --install` (network). Empty on dev-tree invocations and on
+    # /resume relaunches (the tarball has already been consumed).
+    [string]$BundledRootfsDir = ''
 )
 
 # ClawFactory Secure Setup - main automation script.
@@ -265,9 +272,34 @@ function Enable-WindowsFeaturesForWsl {
 }
 
 function Install-WslDistroWithFallback {
-    # Tries WSL2 first; on `HCS_E_HYPERV_NOT_INSTALLED` (0x80370102 - common in
-    # nested-VM testing or hardware without VT-x) falls back to WSL1.
+    # PRIMARY: `wsl --import` from a bundled rootfs tarball passed in via
+    # $BundledRootfs. Offline, fast, deterministic. Single WSL2 attempt;
+    # any non-zero exit (including HCS_E_HYPERV_NOT_INSTALLED) falls through
+    # to the network install path below, which has its own WSL1 fallback.
+    #
+    # FALLBACK: existing `wsl --install` (network) path. Used when no
+    # bundle was passed, the tarball is absent, or the bundled import
+    # failed. Same WSL2 → WSL1 fallback shape as before, unchanged.
+    #
     # Returns the variant string ('wsl2' or 'wsl1') for logging.
+    param([string]$BundledRootfs = '')
+
+    if ($BundledRootfs -and (Test-Path -LiteralPath $BundledRootfs)) {
+        $WslInstallDir = 'C:\Program Files\ClawFactory\WSL'
+        if (-not (Test-Path -LiteralPath $WslInstallDir)) {
+            New-Item -ItemType Directory -Path $WslInstallDir -Force | Out-Null
+        }
+        Write-Log INFO 'Installing Ubuntu from bundled rootfs (offline).'
+        & wsl.exe --import $WslDistro $WslInstallDir $BundledRootfs --version 2 2>&1 |
+            ForEach-Object { Add-Content -LiteralPath $LogFile -Value "[wsl --import v2] $_" -Encoding UTF8 }
+        $exit = $LASTEXITCODE
+        if ($exit -eq 0) {
+            Write-Log INFO 'WSL2 import from bundle succeeded.'
+            return 'wsl2'
+        }
+        Write-Log WARN "wsl --import failed (exit $exit), falling through to wsl --install."
+    }
+
     Write-Log INFO 'Installing Ubuntu (attempting WSL2 first).'
     $output = & wsl.exe --install --no-launch -d $WslDistro 2>&1
     $exit = $LASTEXITCODE
@@ -490,7 +522,8 @@ function Step-EnsureWsl {
         }
         # Pre-reboot we ran DISM but not `wsl --install`. Run it now. WSL1
         # fallback kicks in if HCS_E_HYPERV_NOT_INSTALLED is detected.
-        $variant = Install-WslDistroWithFallback
+        $bundledTarball = if ($BundledRootfsDir) { Join-Path $BundledRootfsDir 'ubuntu-rootfs.tar.gz' } else { '' }
+        $variant = Install-WslDistroWithFallback -BundledRootfs $bundledTarball
         Write-Log INFO "WSL variant installed: $variant"
         New-ClawUserAndSetDefault
 
@@ -520,7 +553,8 @@ function Step-EnsureWsl {
 
     if ($kernelOk) {
         Write-Log INFO 'WSL2 kernel loaded but Ubuntu missing - installing Ubuntu only.'
-        $variant = Install-WslDistroWithFallback
+        $bundledTarball = if ($BundledRootfsDir) { Join-Path $BundledRootfsDir 'ubuntu-rootfs.tar.gz' } else { '' }
+        $variant = Install-WslDistroWithFallback -BundledRootfs $bundledTarball
         Write-Log INFO "WSL variant installed: $variant"
         New-ClawUserAndSetDefault
         Start-Sleep -Seconds 5

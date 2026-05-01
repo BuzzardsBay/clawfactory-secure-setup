@@ -48,6 +48,11 @@ Source: "resources\switch-provider.ps1";     DestDir: "{app}\resources";  Flags:
 Source: "resources\logo.png";                DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\logo.README.txt";         DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\lobster.ico";             DestDir: "{app}\resources";  Flags: ignoreversion
+; Bundled Ubuntu rootfs for offline `wsl --import` (~341 MB pre-compression;
+; sourced separately at build time, gitignored). Extracts to {tmp} so it's
+; not duplicated into the install dir; `deleteafterinstall` purges it after
+; setup.ps1 finishes. setup.ps1 receives the path via -BundledRootfsDir.
+Source: "resources\ubuntu-rootfs.tar.gz";    DestDir: "{tmp}";            Flags: deleteafterinstall
 
 [Run]
 ; [R5] No API key on the command line - setup.ps1 reads from Windows Credential Manager.
@@ -55,7 +60,7 @@ Source: "resources\lobster.ico";             DestDir: "{app}\resources";  Flags:
 ; same .exe with /SILENT /resume after a WSL2-install reboot. {code:GetResumeFlag}
 ; appends ' -Resume' iff the wizard was relaunched with /resume.
 Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup.ps1"" -AcknowledgedOpenClawUrl -Provider {code:GetProviderLabel} -SourceExe ""{srcexe}""{code:GetResumeFlag}"; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup.ps1"" -AcknowledgedOpenClawUrl -Provider {code:GetProviderLabel} -SourceExe ""{srcexe}"" -BundledRootfsDir ""{tmp}""{code:GetResumeFlag}"; \
   WorkingDir: "{app}"; \
   StatusMsg: "{code:GetStatusMsg}"; \
   Flags: waituntilterminated
