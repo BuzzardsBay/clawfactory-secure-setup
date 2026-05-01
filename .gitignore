@@ -1,6 +1,9 @@
 # Compiled installer output
 Output/
 
+# Bundled Ubuntu rootfs (sourced separately, too large for git)
+resources/ubuntu-rootfs.tar.gz
+
 # Inno Setup compiler artifacts
 *.~is
 
