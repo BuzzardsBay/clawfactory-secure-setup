@@ -1178,12 +1178,10 @@ LOG=/tmp/openclaw-install.log
 mkdir -p "$(dirname "$LOG")"
 
 echo "[gateway-install] openclaw gateway install --force --port 8787"
-openclaw gateway install --force --port 8787 2>&1 | tee -a "$LOG"
-rc=${PIPESTATUS[0]}
+openclaw gateway install --force --port 8787 2>&1
+rc=$?
 if [ "$rc" -ne 0 ]; then
-    echo "[gateway-install] FATAL: openclaw gateway install --force failed (exit $rc). Cannot proceed." >&2
-    echo "[gateway-install] last 20 lines of $LOG:" >&2
-    tail -n 20 "$LOG" >&2 2>/dev/null || true
+    echo "[gateway-install] FATAL: openclaw gateway install --force failed (exit $rc). Output is captured in the Windows-side install.log (C:\\ProgramData\\ClawFactory\\install.log)." >&2
     exit "$rc"
 fi
 
