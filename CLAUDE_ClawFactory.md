@@ -1,3 +1,34 @@
+## SHIP STATUS: v1.0.0 — 2026-05-03
+
+**All 7 smoke test checks passing on real hardware.** Tag `v1.0.0` at commit [`93c0bf7`](https://github.com/BuzzardsBay/clawfactory-secure-setup/commit/93c0bf7). Bundled installer is 322.5 MB (carries 2026.4.27 OpenClaw + Ubuntu 24.04 rootfs for offline `wsl --import`).
+
+---
+
+## Resolved bugs (v1.0.0 ship cycle)
+
+| Bug | Resolved in | Commit |
+|---|---|---|
+| Gateway restart loop on first install (exit code 1 from `openclaw gateway install --force` aborted Step 8b before the gateway actually came up healthy) | Step 8b now polls `/status` for 60 s after install; non-zero exit is WARN, only a non-responsive gateway throws | [`cf38a65`](https://github.com/BuzzardsBay/clawfactory-secure-setup/commit/cf38a65) |
+| `openclaw doctor` interactive prompts blocking install | Added `--non-interactive --no-workspace-suggestions`, kept `yes \|` and 180 s timeout as belt-and-suspenders. Architecture changed (Step 8b handles systemd unit install now) so `--non-interactive` is safe — the operations it skips are already done | [`93c0bf7`](https://github.com/BuzzardsBay/clawfactory-secure-setup/commit/93c0bf7) |
+| CR line-ending corruption when bash here-strings are base64-encoded from PowerShell (CRLF turns `set -e` into `set -e\r`, bash prints `set: invalid option`) | `Invoke-WslBash` in `setup.ps1` now strips CRLF→LF before encoding | [`17172d5`](https://github.com/BuzzardsBay/clawfactory-secure-setup/commit/17172d5) |
+| Same CR bug, two more sites in `bootstrap.ps1` (`Invoke-WslBash` + `Get-SoulSha256`) | CRLF→LF strip applied to both | [`93c0bf7`](https://github.com/BuzzardsBay/clawfactory-secure-setup/commit/93c0bf7) |
+| `post-install.ps1` raw `wsl -- … 2>&1 \| ForEach-Object` calls aborting on the first stderr line because `$ErrorActionPreference = 'Stop'` wraps stderr as `ErrorRecord` | Refactored 4 sites to use a `Process.Start`-based `Invoke-WslBash` ported from `bootstrap.ps1` | [`93c0bf7`](https://github.com/BuzzardsBay/clawfactory-secure-setup/commit/93c0bf7) |
+| Tee-pipe trapping the install command's success exit code as tee's permission-denied failure (`/tmp/openclaw-install.log` was created by the prior root-context step and `tee -a` from clawuser failed) | Dropped the `tee` from Step 8b's gateway-install line; output captured via `Invoke-WslBash`'s stdout routing | [`42869d8`](https://github.com/BuzzardsBay/clawfactory-secure-setup/commit/42869d8) |
+
+---
+
+## Smoke test history
+
+| Date | Build | Result | Notes |
+|---|---|---|---|
+| 2026-05-03 | `93c0bf7` (v1.0.0) | **7/7 PASS on real hardware** | Final ship validation. |
+| 2026-04-30 | `a702b2d` | 6/7 (doctor blocked on prompt) | Drove diagnosis of the doctor-non-interactive issue resolved in `93c0bf7`. |
+| 2026-04-30 | `cf38a65` | 6/7 (Step 8b threw on install --force exit=1) | Drove diagnosis of the throw-on-exit-1 issue resolved in `cf38a65` itself. |
+
+The smoke test script lives at [`smoke-test.ps1`](smoke-test.ps1). Re-run it on every clean-VM rebuild before tagging.
+
+---
+
 ## Quick navigation index (read this first when debugging)
 
 | Symptom | First check | Then |

@@ -1,5 +1,14 @@
 # Security Policy
 
+## Supported Versions
+
+| Version | Supported          |
+| ------- | ------------------ |
+| 1.0.x   | :white_check_mark: |
+| < 1.0   | :x:                |
+
+Security fixes land on the latest minor of the current major. Older releases do not receive backports.
+
 ## Security Model
 
 ClawFactory Secure Setup is built on **defense in depth**: multiple independent layers, each scoped to a different attack surface, so no single failure is catastrophic. A bad prompt, a compromised model, a misconfigured agent, or a leaked credential should each be stopped by something the next layer doesn't depend on. The controls below describe each layer with its concrete implementation site.
