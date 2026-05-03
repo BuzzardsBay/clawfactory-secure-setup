@@ -1229,11 +1229,12 @@ LOG=/tmp/openclaw-install.log
 mkdir -p "$(dirname "$LOG")"
 
 echo "[gateway-install] openclaw gateway install --force --port 8787"
+set +e
 openclaw gateway install --force --port 8787 2>&1
 rc=$?
+set -e
 if [ "$rc" -ne 0 ]; then
-    echo "[gateway-install] FATAL: openclaw gateway install --force failed (exit $rc). Output is captured in the Windows-side install.log (C:\\ProgramData\\ClawFactory\\install.log)." >&2
-    exit "$rc"
+    echo "[gateway-install] WARN: openclaw gateway install --force returned $rc - continuing to daemon-reload/restart; PowerShell-side /status poll is the source of truth for health." >&2
 fi
 
 echo "[gateway-install] systemctl --user daemon-reload"
@@ -1262,8 +1263,25 @@ exit 0
 '@
     $rcGateway = Invoke-WslBash -Script $gatewayInstall -User $WslUser
     if ($rcGateway -ne 0) {
-        Write-Log ERROR "openclaw gateway install --force failed (exit=$rcGateway). Cannot proceed. Check /tmp/openclaw-install.log inside WSL for details."
-        throw "Step 8b: openclaw gateway install --force returned $rcGateway"
+        Write-Log WARN "openclaw gateway install --force returned $rcGateway; the install command's exit code is no longer treated as fatal. Health is determined by the /status poll below."
+    }
+
+    # Poll gateway health via curl /status for up to 60s (6 attempts, 10s
+    # apart). The install command can return non-zero for transient reasons
+    # (e.g., racing with a prior unit shutdown) while still leaving the
+    # gateway healthy after restart. Trust the HTTP probe, not the exit code.
+    $healthy = $false
+    for ($i = 1; $i -le 6; $i++) {
+        $rcCurl = Invoke-WslBash -Script 'curl -fsS --max-time 5 http://127.0.0.1:8787/status >/dev/null 2>&1' -User $WslUser
+        if ($rcCurl -eq 0) {
+            Write-Log INFO "Gateway confirmed healthy via poll (attempt $i)."
+            $healthy = $true
+            break
+        }
+        if ($i -lt 6) { Start-Sleep -Seconds 10 }
+    }
+    if (-not $healthy) {
+        throw 'Gateway did not respond after 60 seconds'
     }
     Save-Checkpoint 'GatewayRuntime'
 }
