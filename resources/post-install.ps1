@@ -169,7 +169,7 @@ if ($cfg.Model -and $cfg.Prefix) {
 # This will still trigger the #47133 cycle, but `StartLimitBurst=0` in
 # clawfactory-tunables.conf lets systemd retry indefinitely until it resolves.
 
-#--- Post-install: bonjour drop-in (defense-in-depth) + gateway restart ------
+#--- Post-install: bonjour drop-in (defense-in-depth) -----------------------
 # After Step 8b's gateway install, this WSL block:
 #
 #   FIX 1 - Writes a systemd drop-in setting OPENCLAW_DISABLE_BONJOUR=1.
@@ -178,22 +178,18 @@ if ($cfg.Model -and $cfg.Prefix) {
 #           #72355, #64928). Harmless on 2026.4.27 (our pinned version)
 #           since the env var is simply ignored when the bug is absent.
 #
-#   FIX 2 - REMOVED. Previously toggled discovery.mdns.mode=off (the
-#           "config-level mDNS off" defense-in-depth) and
-#           skills.entries.coding-agent.enabled=false (the "coding-agent
-#           off" path that aimed to Disable codex silent-default auth
-#           failures). On 2026.4.27 those config paths do not exist
-#           (config-set returned "path not found") AND the underlying
-#           bonjour and codex bugs do not fire (validated via clean
-#           journalctl over multiple installs). FIX 1's env var drop-in
-#           retains forward-compatible protection. Re-add with current
-#           schema paths if a future version pin shows either bug
-#           regressing.
+#   FIX 2 - REMOVED. Previously toggled discovery.mdns.mode=off and
+#           skills.entries.coding-agent.enabled=false. Config paths
+#           don't exist on 2026.4.27 and underlying bugs don't fire.
 #
-#   Restart - daemon-reload + restart openclaw-gateway.service (with
-#           non-systemd fallback for WSL1 / systemd-disabled installs),
-#           then polls http://127.0.0.1:8787/status for up to 60s.
-#           Confirms HTTP 200 on loopback before exiting.
+#   Restart - REMOVED. Previously restarted the gateway here so the
+#           drop-in took effect immediately. On 2026.4.27 the bonjour
+#           bug doesn't fire, so immediate effect isn't required — the
+#           drop-in takes effect on the next natural restart (reboot or
+#           manual `systemctl --user restart`). Removing the restart
+#           eliminated a #47133 SIGTERM cycle that left the gateway
+#           mid-restart when the smoke test ran. The final health gate
+#           at the end of setup.ps1 is the install-time source of truth.
 #
 # Idempotent: drop-in cat overwrites cleanly, daemon-reload safe to repeat.
 # Non-fatal on failure: WARN logged, install continues.
@@ -221,40 +217,16 @@ fi
 # avahi-daemon if present. Harmless no-op when avahi isn't installed.
 systemctl --user restart avahi-daemon 2>/dev/null || true
 
-# === Restart and verify gateway ===========================================
-# Reuses the existing 3-tier fallback. Stop any prior instance first so we
-# don't double-bind 127.0.0.1:8787.
-if systemctl --user is-system-running >/dev/null 2>&1 || \
-   systemctl --user list-units --no-legend --no-pager >/dev/null 2>&1; then
-    systemctl --user daemon-reload || true
-    systemctl --user restart openclaw-gateway.service 2>/dev/null || \
-        systemctl --user start openclaw-gateway.service 2>/dev/null || true
-else
-    openclaw gateway stop </dev/null >>"$LOG" 2>&1 || true
-    pkill -f "openclaw gateway run" 2>/dev/null || true
-    sleep 1
-    if ! openclaw gateway start </dev/null >>"$LOG" 2>&1; then
-        nohup setsid openclaw gateway run </dev/null >>"$LOG" 2>&1 &
-        disown 2>/dev/null || true
-    fi
-fi
-
-# Poll /status for up to 60s (TASK 5: bumped from 30s to give the doctor /
-# config-set / restart sequence room to settle).
-for i in $(seq 1 30); do
-    if curl -fsS --max-time 2 http://127.0.0.1:8787/status >/dev/null 2>&1; then
-        echo "[ClawFactory] Gateway responsive after fix bundle (attempt $i)"
-        exit 0
-    fi
-    sleep 2
-done
-echo "[ClawFactory] WARN: gateway not responsive after 60s - check journalctl --user -u openclaw-gateway and ~/.openclaw/logs/gateway.log" >&2
-exit 1
+# Gateway restart REMOVED — see header comment above. The drop-in takes
+# effect on the next natural restart, and the post-install restart was
+# triggering #47133 SIGTERM cycles. Final health verification happens at
+# the end of setup.ps1.
+exit 0
 '@
-Log 'Applying bonjour drop-in (defense-in-depth) and restarting gateway.'
+Log 'Applying bonjour drop-in (defense-in-depth).'
 $rcFixes = Invoke-WslBash -Script $fixesScript
 if ($rcFixes -ne 0) {
-    Log "WARN: fix bundle returned $rcFixes; install will continue but verify gateway manually."
+    Log "WARN: bonjour drop-in returned $rcFixes; install will continue but verify the drop-in manually at ~/.config/systemd/user/openclaw-gateway.service.d/clawfactory-disable-bonjour.conf."
 }
 
 #--- Checklist ---------------------------------------------------------------
