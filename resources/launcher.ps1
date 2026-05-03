@@ -15,21 +15,20 @@ param(
 # MessageBox dialog.
 #
 # Sequence:
-#   1. Ask `systemctl --user is-active openclaw-gateway` (inside WSL).
-#      If "active" AND http://127.0.0.1:8787/status responds → log
-#      ALREADY_RUNNING and open Windows Terminal into `openclaw chat`.
-#   2. Otherwise, fire-and-forget `systemctl --user start openclaw-gateway`.
+#   1. Probe http://127.0.0.1:8787/status. If it responds → log
+#      ALREADY_RUNNING and open the dashboard in the user's default browser.
+#   2. Otherwise, fire-and-forget the gateway start (systemd --user →
+#      `openclaw gateway start` → `nohup setsid openclaw gateway run` —
+#      same three-tier fallback as setup.ps1's Step-PreinstallGatewayRuntime).
 #   3. Poll http://127.0.0.1:8787/status every $PollSec seconds for up to
 #      $TimeoutSec seconds via Invoke-WebRequest -UseBasicParsing -TimeoutSec 2.
-#      As soon as it responds → log STARTED and open Windows Terminal into
-#      `openclaw chat`.
+#      As soon as it responds → log STARTED and open the dashboard.
 #   4. If the deadline elapses with no response → log TIMEOUT and show a
 #      single-button warning dialog with the canonical "could not start" copy.
 #
-# The dashboard at http://127.0.0.1:8787 is reachable via the Start Menu
-# "ClawFactory Dashboard" shortcut for users who prefer the browser UI; the
-# desktop double-click drops them into the TUI chat directly because the
-# dashboard requires manual device pairing the installer doesn't yet wire up.
+# The desktop double-click goes to the browser dashboard because non-technical
+# users expect a UI. Power users who want the TUI can still run
+# `wsl -d Ubuntu -u clawuser -- openclaw chat` from any shell.
 #
 # The launcher log lives at $env:ProgramData\ClawFactory\launcher.log; one
 # line per launch, written via tmp+rename for atomicity (matches the write
@@ -49,10 +48,11 @@ $LogFile      = Join-Path $LogDir 'launcher.log'
 #--- Logging (atomic tmp+rename) --------------------------------------------
 function Write-LauncherLog {
     # State semantics:
-    #   STARTED         = launched `openclaw chat` after starting the gateway.
-    #   ALREADY_RUNNING = launched `openclaw chat` with the gateway already up.
-    #   TIMEOUT         = gateway failed to respond within $TimeoutSec; chat
-    #                     was not launched and the failure dialog was shown.
+    #   STARTED         = opened the dashboard after starting the gateway.
+    #   ALREADY_RUNNING = opened the dashboard with the gateway already up.
+    #   TIMEOUT         = gateway failed to respond within $TimeoutSec; the
+    #                     dashboard was not opened and the failure dialog
+    #                     was shown.
     param([Parameter(Mandatory)][ValidateSet('STARTED', 'ALREADY_RUNNING', 'TIMEOUT')][string]$State)
     try {
         if (-not (Test-Path -LiteralPath $LogDir)) {
@@ -165,17 +165,13 @@ exit 0
     $null = Invoke-WslSilentScript -Script $script
 }
 
-function Open-Chat {
-    # Drop the user directly into `openclaw chat` running as clawuser inside
-    # WSL. Windows Terminal first (ships with Win11, has tabs and a sane font);
-    # plain PowerShell window as fallback for older Win10 boxes that haven't
-    # had `wt` installed.
-    $wt = Get-Command wt -ErrorAction SilentlyContinue
-    if ($wt) {
-        Start-Process wt -ArgumentList "wsl.exe -d $WslDistro -u $WslUser bash -lc `"openclaw chat`""
-    } else {
-        Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command `"wsl -d $WslDistro -u $WslUser bash -lc 'openclaw chat'`""
-    }
+function Open-Dashboard {
+    # Open the OpenClaw dashboard in the user's default browser. Non-technical
+    # users expect a UI, not a terminal session — `openclaw chat` is still
+    # available via `wsl -- openclaw chat` from any shell, but the desktop
+    # double-click goes to the browser. Start-Process with a URL hands off to
+    # the OS's URL handler (typically the default browser).
+    Start-Process $DashboardUrl
 }
 
 #--- 1. Already running? ----------------------------------------------------
@@ -185,7 +181,7 @@ function Open-Chat {
 # systemd-disabled), causing the launcher to always TIMEOUT.
 if (Test-GatewayResponding) {
     Write-LauncherLog -State 'ALREADY_RUNNING'
-    Open-Chat
+    Open-Dashboard
     exit 0
 }
 
@@ -200,7 +196,7 @@ do {
     Start-Sleep -Seconds $PollSec
     if (Test-GatewayResponding) {
         Write-LauncherLog -State 'STARTED'
-        Open-Chat
+        Open-Dashboard
         exit 0
     }
 } while ((Get-Date) -lt $deadline)
