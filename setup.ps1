@@ -447,7 +447,7 @@ function Invoke-WslBash {
         [Parameter(Mandatory)][string]$Script,
         [string]$User = 'root'
     )
-    $enc = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Script))
+    $enc = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Script.Replace("`r`n", "`n").Replace("`r", "`n")))
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName               = 'wsl.exe'
