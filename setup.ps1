@@ -1592,6 +1592,39 @@ Invoke-WithRollback {
     Step-PostInstall
     Step-ConfigureAgents         # step 15: stage agent.md prompts via bootstrap.ps1
 }
+
+#--- Final gateway health gate ------------------------------------------------
+# After all install steps complete, confirm the gateway is responding before
+# reporting success. This is the real health gate — replaces the old
+# `openclaw doctor` final-check (removed because of openclaw/openclaw#47133:
+# CLI commands that open a WS connection to the running gateway trigger
+# SIGTERM on disconnect, restart cycle). HTTP /status uses no WS and never
+# triggers #47133. Polled from the Windows side (Invoke-WebRequest), which
+# reaches WSL2's loopback via the kernel's localhost forwarding.
+# 15 attempts × 2-second intervals = 30 seconds total.
+Write-Log INFO 'Final gateway health gate: polling http://127.0.0.1:8787/status for up to 30s.'
+$healthy = $false
+for ($i = 1; $i -le 15; $i++) {
+    try {
+        $resp = Invoke-WebRequest -Uri 'http://127.0.0.1:8787/status' -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+        if ($resp.StatusCode -eq 200) {
+            Write-Log INFO "Final health gate: gateway responsive on attempt $i."
+            $healthy = $true
+            break
+        }
+    } catch {
+        # Not yet responding - sleep and retry. Common reasons: the unit is
+        # still in restart back-off (StartLimitBurst=0 means it will keep
+        # retrying), or the WSL2 localhost forwarder hasn't picked up the
+        # listening socket yet (Windows<->WSL2 forwarding is one-way and
+        # has a ~1-2s settle window after the listener binds).
+    }
+    Start-Sleep -Seconds 2
+}
+if (-not $healthy) {
+    throw 'Final gateway health gate failed: http://127.0.0.1:8787/status did not return 200 within 30 seconds. Diagnose with: wsl -d Ubuntu -u clawuser -- journalctl --user -u openclaw-gateway -n 100, then `cat ~/.openclaw/logs/gateway.log`. After the underlying issue is fixed, re-run setup.ps1 (the 15 install steps will skip via checkpoints; only the final gate re-runs).'
+}
+
 Write-Log INFO '==== ClawFactory Secure Setup - completed successfully ===='
 Remove-ResumeFlag
 Remove-RunOnceResume

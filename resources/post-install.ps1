@@ -151,50 +151,26 @@ if ($cfg.Model -and $cfg.Prefix) {
     Log "Default model already set to $modelId by Step-ConfigureOpenClaw before gateway start (per #47133)."
 }
 
-#--- Final health check: openclaw doctor -------------------------------------
-# Refs openclaw/openclaw#18502 (doctor hangs after completion in non-interactive
-# parent processes), openclaw/openclaw#44185 (--repair partial-effect bugs in
-# some sub-flows; we accept this — main config normalization works), and
-# openclaw/openclaw#47133 (CLI commands that connect to the running gateway
-# trigger SIGTERM on disconnect, causing a restart cycle). All other openclaw
-# CLI commands have been moved to Step-ConfigureOpenClaw (pre-gateway-start)
-# to avoid #47133. Doctor is the lone exception: it's a health check that
-# REQUIRES a running gateway, so the SIGTERM cycle is unavoidable here. The
-# `clawfactory-tunables.conf` drop-in with `StartLimitBurst=0` ensures
-# systemd retries indefinitely so the cycle resolves without manual
-# intervention.
+#--- openclaw doctor: REMOVED -----------------------------------------------
+# `openclaw doctor` was previously run here as a final health check, but its
+# WS connection to the running gateway triggered a SIGTERM-on-disconnect
+# cycle (openclaw/openclaw#47133). Doctor is a repair tool for broken
+# installs, not a required step for fresh installs — every config item it
+# would normalize is already set explicitly: setup.ps1's Step-ConfigureOpenClaw
+# writes gateway.{mode,bind,port}, models.default, auth.profiles, and
+# auth.order to ~/.openclaw/openclaw.json (pre-gateway-start, no WS); Step 8b
+# does the systemd service registration via `openclaw gateway install --force`.
+# The real health gate is now at the end of setup.ps1: a 30-second poll of
+# /status from the Windows side, which uses HTTP only (no WS, no #47133).
 #
-# Architecture note: by the time post-install runs, setup.ps1's Step 8b has
-# already executed `openclaw gateway install --force` which writes the systemd
-# unit at ~/.config/systemd/user/openclaw-gateway.service and starts the
-# gateway. Doctor is no longer responsible for unit installation, so the
-# `--non-interactive` flag (which explicitly "skips operations that need
-# confirmation") is now safe — the work it would skip is already done.
-# `--no-workspace-suggestions` suppresses the workspace-discovery prompt.
-# The yes-pipe + 180s timeout remain as belt-and-suspenders against any
-# future doctor sub-flow that still tries to read from stdin.
-#
-# Doctor's job here is final config normalization and health verification.
-# Non-zero exit is WARN-only. Exit codes 124 (timeout) and 137 (SIGKILL
-# after the 15s grace) are treated identically. Output captured via
-# Invoke-WslBash's stdout/stderr routing through Log, which writes to
-# install.log and skips the benign `wsl: Failed to translate ...` lines.
-Log 'Running openclaw doctor as final health check (180s timeout).'
-$doctorScript = @'
-echo "[ClawFactory] FIX 3: Running openclaw doctor with auto-confirmation (refs openclaw/openclaw#18502)"
-yes | timeout --foreground --kill-after=15 180 openclaw doctor --fix --yes --non-interactive --no-workspace-suggestions 2>&1
-rc=$?
-if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
-    echo "[ClawFactory] doctor timed out after 180s - health check WARN, install continues."
-elif [ $rc -ne 0 ]; then
-    echo "[ClawFactory] doctor exited $rc - health check WARN, install continues."
-fi
-exit 0
-'@
-$null = Invoke-WslBash -Script $doctorScript
+# Users who suspect a broken install (config drift, corrupted state) can run
+# doctor manually:
+#     wsl -d Ubuntu -u clawuser -- bash -lc "yes | openclaw doctor --fix --yes"
+# This will still trigger the #47133 cycle, but `StartLimitBurst=0` in
+# clawfactory-tunables.conf lets systemd retry indefinitely until it resolves.
 
-#--- Post-doctor: bonjour drop-in (defense-in-depth) + gateway restart -------
-# After the doctor health check runs above, this WSL block:
+#--- Post-install: bonjour drop-in (defense-in-depth) + gateway restart ------
+# After Step 8b's gateway install, this WSL block:
 #
 #   FIX 1 - Writes a systemd drop-in setting OPENCLAW_DISABLE_BONJOUR=1.
 #           Defense-in-depth against the bonjour SIGTERM crash loop on
