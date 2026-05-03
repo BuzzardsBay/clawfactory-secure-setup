@@ -28,6 +28,42 @@ $cfg = $ProviderMap[$Provider]
 
 function Log { param($m) Add-Content -LiteralPath $LogFile -Value "[$((Get-Date).ToString('HH:mm:ss'))] [post] $m"; Write-Host $m }
 
+#--- WSL helper (mirrors setup.ps1 / bootstrap.ps1 Invoke-WslBash) -----------
+# Uses Process.Start (not `wsl ... 2>&1 | ...`) because PowerShell 5.1 wraps
+# each stderr line from native commands piped via 2>&1 as an ErrorRecord.
+# With $ErrorActionPreference = 'Stop', the FIRST stderr line aborts the
+# script - and `wsl: Failed to translate '<path>'` warnings fire reliably
+# from a Windows shell with a multi-component PATH. CRLF -> LF normalize
+# matches setup.ps1's fix: PowerShell here-strings have CRLF endings, bash
+# treats `\r` as part of the option name in `set -e\r` and chokes.
+function Invoke-WslBash {
+    param([Parameter(Mandatory)][string]$Script)
+    $enc = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Script.Replace("`r`n", "`n").Replace("`r", "`n")))
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName               = 'wsl.exe'
+    $psi.Arguments              = "-d $WslDistro -u $WslUser --cd ~ -- bash -lc `"echo '$enc' | base64 -d | bash -l`""
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError  = $true
+    $psi.UseShellExecute        = $false
+    $psi.CreateNoWindow         = $true
+    $proc   = [System.Diagnostics.Process]::Start($psi)
+    $stdout = $proc.StandardOutput.ReadToEnd()
+    $stderr = $proc.StandardError.ReadToEnd()
+    $proc.WaitForExit()
+    foreach ($line in ($stdout -split "`r?`n")) {
+        $t = $line.Trim()
+        if ($t) { Log $t }
+    }
+    foreach ($line in ($stderr -split "`r?`n")) {
+        $t = $line.Trim()
+        # Filter benign WSL warnings (PATH entries it couldn't translate).
+        if ($t -and ($t -notmatch '^wsl: Failed to translate ')) {
+            Log $t
+        }
+    }
+    return $proc.ExitCode
+}
+
 Log "Post-install starting. Provider=$Provider Model=$($cfg.Model)."
 
 #--- CredRead P/Invoke wrapper (no external module dependency) [R5] ----------
@@ -78,7 +114,10 @@ if (-not ([System.Management.Automation.PSTypeName]'CredWrapper').Type) {
 #--- Key handling (skipped for ollama / later) --------------------------------
 if ($Provider -eq 'ollama') {
     Log 'Ollama runs locally - no API key needed. Checking daemon...'
-    wsl -d $WslDistro -u $WslUser -- bash -lc 'curl -fsS http://localhost:11434/api/tags >/dev/null && echo "Ollama daemon reachable." || echo "WARN: Ollama daemon not reachable."' | ForEach-Object { Log $_ }
+    $ollamaCheck = @'
+curl -fsS http://localhost:11434/api/tags >/dev/null && echo "Ollama daemon reachable." || echo "WARN: Ollama daemon not reachable."
+'@
+    $null = Invoke-WslBash -Script $ollamaCheck
 } elseif ($Provider -eq 'later') {
     Log 'No provider selected. Run resources\switch-provider.ps1 -Provider <name> later to configure.'
 } else {
@@ -106,33 +145,32 @@ if ($Provider -eq 'ollama') {
 if ($cfg.Model -and $cfg.Prefix) {
     $modelId = "$($cfg.Prefix)/$($cfg.Model)"
     Log "Setting $modelId as default model."
-    wsl -d $WslDistro -u $WslUser -- bash -lc "openclaw models set '$modelId'" | Out-Null
+    $rcModelSet = Invoke-WslBash -Script "openclaw models set '$modelId'"
+    if ($rcModelSet -ne 0) {
+        Log "WARN: 'openclaw models set $modelId' returned exit $rcModelSet; default model may not be set. Run manually: wsl -u $WslUser -- openclaw models set '$modelId'"
+    }
 }
 
-#--- FIX 3: Auto-confirming doctor with timeout ------------------------------
+#--- Final health check: openclaw doctor -------------------------------------
 # Refs openclaw/openclaw#18502 (doctor hangs after completion in non-interactive
 # parent processes), openclaw/openclaw#44185 (--repair partial-effect bugs in
-# some sub-flows; we accept this - main config normalization works).
+# some sub-flows; we accept this — main config normalization works).
 #
-# `--non-interactive` is documented as "Run without prompts (safe migrations
-# only)" - it explicitly skips operations that need confirmation, including
-# the systemd service unit install. On fresh state that flag makes doctor
-# exit 1 in ~1s without doing what we need. Validated 2026-04-30 on the
-# laptop: piping `yes` to stdin (no --non-interactive) lets doctor complete
-# the full pipeline including the systemd unit, after which the gateway
-# returns HTTP 200.
+# Architecture note: by the time post-install runs, setup.ps1's Step 8b has
+# already executed `openclaw gateway install --force` which writes the systemd
+# unit at ~/.config/systemd/user/openclaw-gateway.service and starts the
+# gateway. Doctor is no longer responsible for unit installation, so the
+# `--non-interactive` flag (which explicitly "skips operations that need
+# confirmation") is now safe — the work it would skip is already done.
+# `--no-workspace-suggestions` suppresses the workspace-discovery prompt.
+# The yes-pipe + 180s timeout remain as belt-and-suspenders against any
+# future doctor sub-flow that still tries to read from stdin.
 #
-# `yes | timeout --foreground --kill-after=15 180 openclaw doctor --fix --yes`
-# auto-answers every prompt with 'y' and bounds the run at 180s (was 120s;
-# fresh-state runs that include the systemd install legitimately take
-# longer than the prior config-normalization-only path). $? after the
-# `yes |` pipe reflects timeout's exit code (timeout is the last process
-# in the pipeline before stderr-redirect, with pipefail off). Exit 124
-# (timed out) and 137 (SIGKILL after the 15s grace) are both [WARN] only.
-# Doctor is reframed as a final health check - non-zero exit logs WARN,
-# does not block FIX 1 (bonjour drop-in) or restart-and-verify. Output is
-# captured by the Windows-side ForEach-Object { Log $_ } below, which
-# writes to install.log.
+# Doctor's job here is final config normalization and health verification.
+# Non-zero exit is WARN-only. Exit codes 124 (timeout) and 137 (SIGKILL
+# after the 15s grace) are treated identically. Output captured via
+# Invoke-WslBash's stdout/stderr routing through Log, which writes to
+# install.log and skips the benign `wsl: Failed to translate ...` lines.
 Log 'Running openclaw doctor as final health check (180s timeout).'
 $doctorScript = @'
 echo "[ClawFactory] FIX 3: Running openclaw doctor with auto-confirmation (refs openclaw/openclaw#18502)"
@@ -145,8 +183,7 @@ elif [ $rc -ne 0 ]; then
 fi
 exit 0
 '@
-$encDoctor = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($doctorScript))
-wsl -d $WslDistro -u $WslUser -- bash -lc "echo $encDoctor | base64 -d | bash" 2>&1 | ForEach-Object { Log $_ }
+$null = Invoke-WslBash -Script $doctorScript
 
 #--- Post-doctor: bonjour drop-in (defense-in-depth) + gateway restart -------
 # After the doctor health check runs above, this WSL block:
@@ -230,11 +267,10 @@ done
 echo "[ClawFactory] WARN: gateway not responsive after 60s - check journalctl --user -u openclaw-gateway and ~/.openclaw/logs/gateway.log" >&2
 exit 1
 '@
-$encFixes = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($fixesScript))
 Log 'Applying bonjour drop-in (defense-in-depth) and restarting gateway.'
-wsl -d $WslDistro -u $WslUser -- bash -lc "echo $encFixes | base64 -d | bash" 2>&1 | ForEach-Object { Log $_ }
-if ($LASTEXITCODE -ne 0) {
-    Log "WARN: fix bundle returned $LASTEXITCODE; install will continue but verify gateway manually."
+$rcFixes = Invoke-WslBash -Script $fixesScript
+if ($rcFixes -ne 0) {
+    Log "WARN: fix bundle returned $rcFixes; install will continue but verify gateway manually."
 }
 
 #--- Checklist ---------------------------------------------------------------

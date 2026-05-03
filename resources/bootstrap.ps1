@@ -43,7 +43,11 @@ function Write-BootstrapLog {
 #--- WSL helper (mirrors setup.ps1's Invoke-WslBash on purpose) --------------
 function Invoke-WslBash {
     param([Parameter(Mandatory)][string]$Script)
-    $enc = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Script))
+    # Normalize CRLF -> LF before base64-encoding. PowerShell here-strings
+    # on Windows have CRLF endings; bash chokes on `\r` in `set -e\r` and
+    # similar (parses CR as part of the option name, prints "set: invalid
+    # option"). Same fix as setup.ps1's Invoke-WslBash.
+    $enc = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Script.Replace("`r`n", "`n").Replace("`r", "`n")))
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName               = 'wsl.exe'
     $psi.Arguments              = "-d $WslDistro -u $WslUser --cd ~ -- bash -lc `"echo '$enc' | base64 -d | bash -l`""
@@ -148,7 +152,10 @@ if [ -f `"`$HOME/.openclaw/SOUL.md.sha256`" ]; then
     cat `"`$HOME/.openclaw/SOUL.md.sha256`"
 fi
 "@
-    $enc = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($script))
+    # Normalize CRLF -> LF (same fix as Invoke-WslBash above; this site
+    # has its own inline encode loop instead of using Invoke-WslBash because
+    # it needs to capture stdout as a return value rather than just logging).
+    $enc = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($script.Replace("`r`n", "`n").Replace("`r", "`n")))
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName               = 'wsl.exe'
     $psi.Arguments              = "-d $WslDistro -u $WslUser --cd ~ -- bash -lc `"echo '$enc' | base64 -d | bash -l`""
@@ -305,8 +312,10 @@ Write-Host '================================================================' -F
 Write-Host '   Agents configured. What to do next:                         ' -ForegroundColor Green
 Write-Host '================================================================' -ForegroundColor Green
 Write-Host ''
-Write-Host ' 1. Start the OpenClaw gateway (one-time after install):' -ForegroundColor White
-Write-Host '      wsl -d Ubuntu -u clawuser -- bash -lc "systemctl --user start openclaw-gateway"' -ForegroundColor Gray
+Write-Host ' 1. The gateway is already running on http://127.0.0.1:8787' -ForegroundColor White
+Write-Host '    (started by Step 8b via `openclaw gateway install --force`).' -ForegroundColor Gray
+Write-Host '    To restart it later if needed:' -ForegroundColor Gray
+Write-Host '      wsl -d Ubuntu -u clawuser -- bash -lc "systemctl --user restart openclaw-gateway.service"' -ForegroundColor Gray
 Write-Host ''
 Write-Host ' 2. Verify it is reachable from this host:' -ForegroundColor White
 Write-Host '      curl http://127.0.0.1:8787/status' -ForegroundColor Gray
@@ -324,7 +333,8 @@ foreach ($agent in $Agents) {
 Write-Host ''
 Write-Host ' 5. Logs:' -ForegroundColor White
 Write-Host '      Installer:   %ProgramData%\ClawFactory\install.log' -ForegroundColor Gray
-Write-Host '      OpenClaw:    wsl -d Ubuntu -u clawuser -- ls /tmp/openclaw/' -ForegroundColor Gray
+Write-Host '      Gateway:     wsl -d Ubuntu -u clawuser -- cat ~/.openclaw/logs/gateway.log' -ForegroundColor Gray
+Write-Host '      journald:    wsl -d Ubuntu -u clawuser -- journalctl --user -u openclaw-gateway' -ForegroundColor Gray
 Write-Host ''
 Write-Host ' 6. Emergency stop (Start Menu "ClawFactory Kill Switch" or):' -ForegroundColor White
 Write-Host '      powershell -ExecutionPolicy Bypass -File "<install-dir>\resources\clawfactory-stop.ps1"' -ForegroundColor Gray
