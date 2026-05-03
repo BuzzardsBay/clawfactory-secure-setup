@@ -136,7 +136,7 @@ if ($cfg.Model -and $cfg.Prefix) {
 Log 'Running openclaw doctor as final health check (180s timeout).'
 $doctorScript = @'
 echo "[ClawFactory] FIX 3: Running openclaw doctor with auto-confirmation (refs openclaw/openclaw#18502)"
-yes | timeout --foreground --kill-after=15 180 openclaw doctor --fix --yes 2>&1
+yes | timeout --foreground --kill-after=15 180 openclaw doctor --fix --yes --non-interactive --no-workspace-suggestions 2>&1
 rc=$?
 if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
     echo "[ClawFactory] doctor timed out after 180s - health check WARN, install continues."
