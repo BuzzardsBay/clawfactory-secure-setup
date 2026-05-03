@@ -139,22 +139,30 @@ curl -fsS http://localhost:11434/api/tags >/dev/null && echo "Ollama daemon reac
     }
 }
 
-#--- Default model (skipped for 'later') --------------------------------------
-# Use `openclaw models set "<prefix>/<model>"` (matches setup.ps1's
-# Step-ConfigureOpenClaw line 902 syntax). Note `claude` -> `anthropic` prefix.
+#--- Default model -----------------------------------------------------------
+# REMOVED: `openclaw models set` is now run in setup.ps1's
+# Step-ConfigureOpenClaw, which executes BEFORE Step-PreinstallGatewayRuntime
+# starts the gateway. Running `openclaw models set` here (after the gateway
+# is up) used to trigger the SIGTERM-on-disconnect cycle described in
+# openclaw/openclaw#47133. Configuration is now done while the gateway is
+# offline, by writing to ~/.openclaw/openclaw.json directly via the CLI.
 if ($cfg.Model -and $cfg.Prefix) {
     $modelId = "$($cfg.Prefix)/$($cfg.Model)"
-    Log "Setting $modelId as default model."
-    $rcModelSet = Invoke-WslBash -Script "openclaw models set '$modelId'"
-    if ($rcModelSet -ne 0) {
-        Log "WARN: 'openclaw models set $modelId' returned exit $rcModelSet; default model may not be set. Run manually: wsl -u $WslUser -- openclaw models set '$modelId'"
-    }
+    Log "Default model already set to $modelId by Step-ConfigureOpenClaw before gateway start (per #47133)."
 }
 
 #--- Final health check: openclaw doctor -------------------------------------
 # Refs openclaw/openclaw#18502 (doctor hangs after completion in non-interactive
 # parent processes), openclaw/openclaw#44185 (--repair partial-effect bugs in
-# some sub-flows; we accept this — main config normalization works).
+# some sub-flows; we accept this — main config normalization works), and
+# openclaw/openclaw#47133 (CLI commands that connect to the running gateway
+# trigger SIGTERM on disconnect, causing a restart cycle). All other openclaw
+# CLI commands have been moved to Step-ConfigureOpenClaw (pre-gateway-start)
+# to avoid #47133. Doctor is the lone exception: it's a health check that
+# REQUIRES a running gateway, so the SIGTERM cycle is unavoidable here. The
+# `clawfactory-tunables.conf` drop-in with `StartLimitBurst=0` ensures
+# systemd retries indefinitely so the cycle resolves without manual
+# intervention.
 #
 # Architecture note: by the time post-install runs, setup.ps1's Step 8b has
 # already executed `openclaw gateway install --force` which writes the systemd

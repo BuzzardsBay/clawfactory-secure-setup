@@ -1577,8 +1577,14 @@ Invoke-WithRollback {
     Step-EgressFirewall
     Step-InstallOllama           # no-op unless Provider = ollama
     Step-InstallOpenClaw
-    Step-PreinstallGatewayRuntime  # bypass egress firewall: install gateway deps as root
-    Step-ConfigureOpenClaw       # gateway, default model, auth profile registration
+    # Step-ConfigureOpenClaw runs BEFORE Step-PreinstallGatewayRuntime so all
+    # `openclaw config set` / `openclaw models set` calls execute while the
+    # gateway is NOT yet started. Per openclaw/openclaw#47133, CLI commands
+    # that connect to a running gateway can trigger SIGTERM on disconnect;
+    # writing config to ~/.openclaw/openclaw.json directly (no gateway
+    # connection) avoids the cycle entirely.
+    Step-ConfigureOpenClaw       # gateway, default model, auth profile registration (writes openclaw.json)
+    Step-PreinstallGatewayRuntime  # bypass egress firewall: install gateway deps as root, then start gateway
     Step-CreateAgentDirectories  # pre-create 4 agent dirs (orchestrator, scout, builder, publisher)
     Step-ApplySafetyRules        # SOUL.md + hash pinning
     Step-WireProviderKey         # write auth-profiles.json with API key
