@@ -1015,17 +1015,27 @@ for name in "${!PLUGIN_DEPS[@]}"; do
     npm install --no-audit --no-fund --no-progress ${PLUGIN_DEPS[$name]} 2>&1 | tail -2 || echo "  (warn) $name install reported $?"
 done
 
-# --- b. Systemd unit override: disable per-start timeout -----------------
+# --- b. Systemd unit override: disable per-start timeout + retry caps ----
 # The plugin loader can spend many seconds waiting on each non-pre-installed
 # plugin's npm install before timing out. Default TimeoutStartSec=30s in the
 # unit means systemd SIGTERMs the gateway mid-init. Bumping to infinity lets
 # the loader finish and the HTTP server bind. Once all bundled plugins are
 # pre-installed, this should drop to a low number (e.g. 60).
+#
+# StartLimitBurst=0 + StartLimitIntervalSec=0 disable systemd's "too many
+# restarts in too short a window" cap. Without these, a few rapid restarts
+# (e.g. while iterating on first-boot config) trip the rate-limit and
+# systemd refuses further restarts until the user runs `reset-failed`.
+# Zero on both means: never give up retrying.
 OVERRIDE_DIR=/home/clawuser/.config/systemd/user/openclaw-gateway.service.d
 mkdir -p "$OVERRIDE_DIR"
 cat > "$OVERRIDE_DIR/clawfactory-tunables.conf" <<'EOF'
 [Service]
 TimeoutStartSec=infinity
+
+[Unit]
+StartLimitBurst=0
+StartLimitIntervalSec=0
 EOF
 
 # --- c. Per-agent auth-profiles ------------------------------------------
