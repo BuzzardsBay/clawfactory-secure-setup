@@ -1189,6 +1189,23 @@ echo "[gateway-preinstall] complete"
     $rc = Invoke-WslBash -Script $script -User 'root'
     if ($rc -ne 0) { Write-Log WARN "Gateway runtime pre-install returned $rc; the gateway may need manual help on first boot." }
 
+    # Pre-install gateway config: `openclaw gateway install --force` starts
+    # the service immediately after writing the unit, and the service exits
+    # 78/CONFIG if gateway.mode isn't already set in ~/.openclaw/openclaw.json
+    # (the unit's ExecStart parses config before binding the socket). Set the
+    # three required keys here as clawuser before the install fires. Step 9a
+    # (Step-ConfigureOpenClaw $script9a) re-applies the same three values
+    # idempotently as defense-in-depth.
+    $script8c = @'
+set -e
+openclaw config set gateway.mode local >/dev/null
+openclaw config set gateway.bind loopback >/dev/null
+openclaw config set gateway.port 8787 >/dev/null
+echo "[gateway-preconfig] gateway.{mode,bind,port} set"
+'@
+    $rcPreconfig = Invoke-WslBash -Script $script8c -User $WslUser
+    if ($rcPreconfig -ne 0) { throw "Failed to pre-configure gateway (exit=$rcPreconfig)" }
+
     # Install the OpenClaw Gateway systemd user service via the canonical
     # `openclaw gateway install --force --port 8787`. Validated 2026-04-30 on
     # the laptop with 2026.4.27: this single command auto-generates a gateway
