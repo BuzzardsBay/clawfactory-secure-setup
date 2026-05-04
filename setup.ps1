@@ -37,8 +37,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3.0
 
 #--- Constants ----------------------------------------------------------------
-# v1.0.3 - egress firewall fix (nft full path) + allowlist + timeout strings
-$InstallerVersion      = '1.0.3'
+# v1.0.4 - pre-install OpenClaw build deps before install.sh runs
+$InstallerVersion      = '1.0.4'
 $OpenClawInstallUrl    = 'https://openclaw.ai/install.sh'
 # [R2] Pin me. See README.md section "Pinning the OpenClaw install.sh hash".
 $OpenClawInstallSha256 = '57f025ba0272e2da3238984360e37fad5230bc7cea81854d154a362ea989d49d'
@@ -821,6 +821,28 @@ grep -q 'DOCKER_HOST=unix' /home/clawuser/.bashrc || \
     $rc = Invoke-WslBash -Script $script -User 'root'
     if ($rc -ne 0) { throw 'Docker install failed' }
     Save-Checkpoint 'Docker'
+}
+
+function Step-PreInstallOpenClawDeps {
+    # v1.0.4: pre-install the build tools that OpenClaw's install.sh needs
+    # ("Installing Linux build tools" phase). Without this, install.sh runs
+    # apt-get install during Step-InstallOpenClaw - on slow/flaky networks
+    # the apt fetch can stall well past Step-InstallOpenClaw's 15-minute
+    # timeout. Pre-installing here moves the apt fetch into setup.ps1's own
+    # apt step, which is logged separately and runs BEFORE Step-EgressFirewall
+    # so there's no allowlist dependency. install.sh then finds the packages
+    # already present and skips its own apt phase entirely.
+    # Excludes nodejs deliberately - install.sh owns NodeSource setup.
+    Write-Log INFO 'Step 6b: Pre-installing OpenClaw build dependencies (make g++ cmake python3).'
+    $script = @'
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y
+apt-get install -y --no-install-recommends make g++ cmake python3
+'@
+    $rc = Invoke-WslBash -Script $script -User 'root'
+    if ($rc -ne 0) { throw 'OpenClaw build deps install failed' }
+    Save-Checkpoint 'OpenClawBuildDeps'
 }
 
 function Step-EgressFirewall {
@@ -1874,6 +1896,7 @@ Invoke-WithRollback {
     Step-CreateClawUser
     Step-SetDefaultUser
     Step-InstallDocker
+    Step-PreInstallOpenClawDeps  # v1.0.4: apt-fetch make/g++/cmake/python3 BEFORE the firewall comes up
     Step-EgressFirewall
     Step-InstallOllama           # no-op unless Provider = ollama
     Step-InstallOpenClaw

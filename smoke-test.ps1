@@ -96,5 +96,14 @@ Check 'Egress firewall clawfactory chain present in nft ruleset' {
     $result -match '^[1-9]'
 }
 
+# v1.0.4: confirms Step-PreInstallOpenClawDeps landed make/g++/cmake/python3
+# so install.sh's "Installing Linux build tools" phase finds them present
+# and skips its own apt fetch (which stalls on slow networks).
+Check 'OpenClaw build deps present (make g++ cmake python3)' {
+    $result = wsl -d Ubuntu -u clawuser -- bash -lc `
+        "dpkg -l make g++ cmake python3 2>/dev/null | grep -c '^ii'" 2>$null
+    [int]$result -ge 4
+}
+
 Write-Host ""; Write-Host "Result: $ok pass, $fail fail" -ForegroundColor $(if ($fail) {'Red'} else {'Green'})
 exit $fail
