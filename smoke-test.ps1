@@ -85,5 +85,16 @@ Check 'WSL Host scheduled task registered and enabled' {
     $t -and $t.State -ne 'Disabled'
 }
 
+# v1.0.3: confirms the egress firewall actually activated (nft table 'inet
+# clawfactory' is loaded). On v1.0.2 and earlier, runtime nft mangling
+# meant the firewall script exited 127 but was checkpointed as completed,
+# so this check would have silently failed there. Use full path to nft to
+# match the v1.0.3 fix and avoid PATH issues in the smoke-test login shell.
+Check 'Egress firewall clawfactory chain present in nft ruleset' {
+    $result = wsl -d Ubuntu -u clawuser -- bash -lc `
+        "/usr/sbin/nft list ruleset 2>/dev/null | grep -c 'clawfactory'" 2>$null
+    $result -match '^[1-9]'
+}
+
 Write-Host ""; Write-Host "Result: $ok pass, $fail fail" -ForegroundColor $(if ($fail) {'Red'} else {'Green'})
 exit $fail

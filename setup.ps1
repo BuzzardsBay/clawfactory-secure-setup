@@ -37,8 +37,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3.0
 
 #--- Constants ----------------------------------------------------------------
-# v1.0.2 - WSL host task (keeps gateway alive through wsl.exe session cycles)
-$InstallerVersion      = '1.0.2'
+# v1.0.3 - egress firewall fix (nft full path) + allowlist + timeout strings
+$InstallerVersion      = '1.0.3'
 $OpenClawInstallUrl    = 'https://openclaw.ai/install.sh'
 # [R2] Pin me. See README.md section "Pinning the OpenClaw install.sh hash".
 $OpenClawInstallSha256 = '57f025ba0272e2da3238984360e37fad5230bc7cea81854d154a362ea989d49d'
@@ -835,7 +835,11 @@ function Step-EgressFirewall {
         # npm + Node.js (for skills and updates)
         'registry.npmjs.org','nodejs.org','deb.nodesource.com',
         # Docker Hub
-        'registry-1.docker.io','auth.docker.io','production.cloudflare.docker.com'
+        'registry-1.docker.io','auth.docker.io','production.cloudflare.docker.com',
+        # v1.0.3: Ubuntu apt repos. apt-as-root currently bypasses the firewall
+        # (clawuser-scoped), but listed here as defense-in-depth in case install.sh
+        # or a future skill drops privileges before running apt.
+        'archive.ubuntu.com','security.ubuntu.com','ports.ubuntu.com','esm.ubuntu.com','ppa.launchpad.net'
     )
     $providerHosts = @($ThisProvider.AllowlistHosts)
     $allHosts      = ($baseHosts + $providerHosts) | Where-Object { $_ } | Sort-Object -Unique
@@ -890,10 +894,10 @@ NFT_ERR=`$(mktemp)
 trap 'rm -f `"`$NFT_ERR`"' EXIT
 FW_BACKEND=`"`"
 
-if nft -f /etc/nftables.conf 2>`"`$NFT_ERR`"; then
+if /usr/sbin/nft -f /etc/nftables.conf 2>`"`$NFT_ERR`"; then
     FW_BACKEND=`"nftables`"
     for ip in `$ALLOWED_IPS; do
-        nft add element inet clawfactory allowed_ipv4 `"{ `$ip }`" 2>/dev/null || true
+        /usr/sbin/nft add element inet clawfactory allowed_ipv4 `"{ `$ip }`" 2>/dev/null || true
     done
 elif grep -qE 'Unable to initialize Netlink|netlink|nf_tables' `"`$NFT_ERR`"; then
     echo `"[clawfactory-fw] nftables not supported on this WSL kernel - falling back to iptables-legacy`"
@@ -971,17 +975,34 @@ UNIT
 systemctl daemon-reload 2>/dev/null || true
 systemctl enable clawfactory-fw.service 2>/dev/null || true
 "@
+    # v1.0.3 regression guard: the laptop's runtime log showed bash receiving
+    # 'ft' instead of 'nft' (line 41: ft: command not found) despite static
+    # analysis showing intact source. We now use full path /usr/sbin/nft
+    # throughout — this assertion fails the install if a future edit
+    # accidentally drops back to the bare 'nft' form or otherwise loses
+    # the full-path token before transport to bash.
+    if ($script -notmatch '/usr/sbin/nft') {
+        Write-Log ERROR 'Firewall script missing /usr/sbin/nft full-path token - aborting to avoid silent firewall misconfiguration.'
+        throw 'ClawFactory: firewall script validation failed'
+    }
+
     $rc = Invoke-WslBash -Script $script -User 'root'
     if ($rc -ne 0) {
-        Write-Log WARN 'Egress firewall setup returned non-zero. Check install.log; firewall may not be active.'
-    } else {
-        # Surface which backend the script picked so the install log is
-        # explicit (the bash output is also captured in install.log).
-        $backendCheck = @'
+        # v1.0.3: do NOT checkpoint on failure. Was previously WARN+checkpoint,
+        # which silently masked the firewall never coming up (exit 127 from
+        # the nft mangling looked like a successful step). Logging ERROR and
+        # skipping Save-Checkpoint means a -Resume run will retry this step.
+        Write-Log ERROR "Egress firewall setup returned exit $rc. Firewall is NOT active. Check install.log; re-run setup.ps1 -Resume after diagnosing."
+        return
+    }
+
+    # Surface which backend the script picked so the install log is
+    # explicit (the bash output is also captured in install.log).
+    $backendCheck = @'
 cat /etc/clawfactory/fw-backend 2>/dev/null || echo unknown
 '@
-        $null = Invoke-WslBash -Script $backendCheck -User 'root'
-    }
+    $null = Invoke-WslBash -Script $backendCheck -User 'root'
+
     Save-Checkpoint 'EgressFirewall'
 }
 
@@ -1035,7 +1056,7 @@ fi
 # under \$HOME/.openclaw) land in clawuser's home, not /root.
 #
 # Wrap bash with `timeout` to fail fast if openclaw-onboard (invoked from
-# inside install.sh) hangs waiting on interactive input. 5 minutes is enough
+# inside install.sh) hangs waiting on interactive input. 15 minutes is enough
 # for any non-interactive run; longer than that means we're stuck. SIGTERM
 # first (graceful), then SIGKILL after 30s (--kill-after) if the child
 # trapped SIGTERM. timeout's exit code 124 = timed out.
@@ -1044,7 +1065,7 @@ NO_ONBOARD=1 OPENCLAW_VERSION=$OpenClawNpmVersion HOME=/home/clawuser USER=clawu
 INSTALL_RC=`$?
 set -e
 if [ `$INSTALL_RC -eq 124 ]; then
-    echo `"!! OpenClaw install.sh did not complete within 5 minutes (timeout). The install hung - typically because openclaw-onboard prompted for interactive input on a closed stdin.`" >&2
+    echo `"!! OpenClaw install.sh did not complete within 15 minutes (timeout). The install hung - check the actual install.sh output above for the real cause (apt mirror outage, npm registry latency, DNS issue, or interactive prompt on closed stdin).`" >&2
     exit 44
 fi
 if [ `$INSTALL_RC -ne 0 ]; then
@@ -1058,7 +1079,7 @@ chown -R clawuser:clawuser /home/clawuser/.npm 2>/dev/null || true
     $rc = Invoke-WslBash -Script $fetch -User 'root'
     if ($rc -eq 42) { throw 'OpenClaw install blocked: SHA-256 pin not set. See README "Pinning the OpenClaw install.sh hash".' }
     if ($rc -eq 43) { throw 'OpenClaw install blocked: SHA-256 mismatch. The install.sh on the server does not match the pinned hash.' }
-    if ($rc -eq 44) { throw 'OpenClaw install timed out after 5 minutes. install.sh hung (typically an interactive openclaw-onboard prompt waiting on closed stdin). See install.log for details and re-run setup.ps1 -Resume to retry.' }
+    if ($rc -eq 44) { throw 'OpenClaw install timed out after 15 minutes. install.sh hung; check install.log for the actual stalled command (apt, npm, or interactive prompt). Re-run setup.ps1 -Resume to retry.' }
     if ($rc -ne 0)  { throw "OpenClaw install failed with exit $rc" }
     Save-Checkpoint 'OpenClaw'
 }
