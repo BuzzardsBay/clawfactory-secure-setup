@@ -37,6 +37,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3.0
 
 #--- Constants ----------------------------------------------------------------
+# v1.0.1 - gateway stability fix (vmIdleTimeout=-1) + chatCompletions endpoint enabled
+$InstallerVersion      = '1.0.1'
 $OpenClawInstallUrl    = 'https://openclaw.ai/install.sh'
 # [R2] Pin me. See README.md section "Pinning the OpenClaw install.sh hash".
 $OpenClawInstallSha256 = '57f025ba0272e2da3238984360e37fad5230bc7cea81854d154a362ea989d49d'
@@ -569,6 +571,146 @@ function Step-EnsureWsl {
     # completes the install on next launch. Does not return.
     Enable-WindowsFeaturesForWsl
     Invoke-WslInstallWithRestart
+}
+
+function Step-ConfigureWslConfig {
+    # v1.0.1: write/merge %USERPROFILE%\.wslconfig with [wsl2] vmIdleTimeout=-1
+    # so the WSL VM (and the gateway) stays alive while Windows is up. WSL2's
+    # default vmIdleTimeout is 60s; without this the gateway flaps every minute.
+    # Singular "WslConfig" (Windows-side .wslconfig) vs the existing plural
+    # "WslConf" function below (Ubuntu-side /etc/wsl.conf).
+    Write-Log INFO 'Step 2b: Ensuring %USERPROFILE%\.wslconfig has [wsl2] vmIdleTimeout=-1.'
+    try {
+        $WslConfigPath = Join-Path $env:USERPROFILE '.wslconfig'
+        $needsShutdown = $false
+        $banner    = '# Added by ClawFactory v1.0.1 - keeps WSL VM alive so the gateway stays running.'
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
+        if (-not (Test-Path -LiteralPath $WslConfigPath)) {
+            # Branch 1: file missing - create it.
+            $content = "[wsl2]`r`nvmIdleTimeout=-1`r`n$banner`r`n"
+            [System.IO.File]::WriteAllText($WslConfigPath, $content, $utf8NoBom)
+            Write-Log INFO "Created .wslconfig at $WslConfigPath"
+            $needsShutdown = $true
+        } else {
+            $existing = [System.IO.File]::ReadAllText($WslConfigPath)
+            if ($null -eq $existing) { $existing = '' }
+
+            $hasWsl2Section = $existing -match '(?im)^\s*\[wsl2\]\s*$'
+
+            # Pull the [wsl2] section body (until next [section] or EOF) for
+            # inspection. Used to test for an existing vmIdleTimeout key only
+            # within that section, so a key in a different section doesn't
+            # confuse the merge.
+            $wsl2BodyMatch = [regex]::Match($existing, '(?ims)^\s*\[wsl2\]\s*\r?\n(.*?)(?=^\s*\[[^\]]+\]\s*\r?\n|\z)')
+            $wsl2Body      = if ($wsl2BodyMatch.Success) { $wsl2BodyMatch.Groups[1].Value } else { '' }
+            $vmIdleMatch   = [regex]::Match($wsl2Body, '(?im)^\s*vmIdleTimeout\s*=\s*(\S+)\s*$')
+
+            if (-not $hasWsl2Section) {
+                # Branch 2: file exists, no [wsl2] section - append one.
+                $sep = if ($existing.Length -gt 0 -and -not $existing.EndsWith("`n")) { "`r`n" } else { '' }
+                $newContent = $existing + $sep + "[wsl2]`r`nvmIdleTimeout=-1`r`n$banner`r`n"
+                [System.IO.File]::WriteAllText($WslConfigPath, $newContent, $utf8NoBom)
+                Write-Log INFO 'Added [wsl2] section to existing .wslconfig'
+                $needsShutdown = $true
+            } elseif (-not $vmIdleMatch.Success) {
+                # Branch 3: [wsl2] exists, no vmIdleTimeout key - inject it
+                # immediately after the [wsl2] header (only first match).
+                $patched = [regex]::Replace($existing, '(?im)^(\s*\[wsl2\]\s*)$', "`$1`r`nvmIdleTimeout=-1", 1)
+                [System.IO.File]::WriteAllText($WslConfigPath, $patched, $utf8NoBom)
+                Write-Log INFO 'Added vmIdleTimeout=-1 to existing [wsl2] section'
+                $needsShutdown = $true
+            } else {
+                $currentValue = $vmIdleMatch.Groups[1].Value.Trim()
+                if ($currentValue -eq '-1') {
+                    # Branch 4: already correct - no-op.
+                    Write-Log INFO '.wslconfig already has vmIdleTimeout=-1; no change needed'
+                    $needsShutdown = $false
+                } else {
+                    # Branch 5: different value already set. Visible install:
+                    # WARN + MessageBox + proceed (user has an opinion; respect
+                    # it but tell them). Silent install or non-interactive
+                    # session: hard-fail through Invoke-WithRollback. Shipping
+                    # a broken-on-idle gateway silently is worse than aborting.
+                    Write-Log WARN ".wslconfig has vmIdleTimeout=$currentValue (recommended: -1). File NOT modified. User must edit $WslConfigPath manually and reboot for gateway stability."
+                    $isInteractive = [System.Environment]::UserInteractive
+                    $shownDialog   = $false
+                    if ($isInteractive) {
+                        try {
+                            Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+                            [System.Windows.Forms.MessageBox]::Show(
+                                "Your .wslconfig has a vmIdleTimeout setting that is different from ClawFactory's recommended value (-1).`r`n`r`nCurrent: $currentValue`r`nRecommended: -1`r`n`r`nWe did not modify your file. ClawFactory will install but the gateway may stop unexpectedly when WSL is idle.`r`n`r`nTo fix: edit $WslConfigPath and set vmIdleTimeout=-1, then restart your machine.`r`n`r`nSee README.md for details.",
+                                'ClawFactory Setup - Manual Action Recommended',
+                                [System.Windows.Forms.MessageBoxButtons]::OK,
+                                [System.Windows.Forms.MessageBoxIcon]::Warning
+                            ) | Out-Null
+                            $shownDialog = $true
+                        } catch {
+                            Write-Log WARN "Could not show MessageBox: $($_.Exception.Message)"
+                        }
+                    }
+                    if (-not $shownDialog) {
+                        Write-Log ERROR ".wslconfig has vmIdleTimeout=$currentValue (not -1) and silent install detected. Cannot prompt user. Aborting install. Edit $WslConfigPath and set vmIdleTimeout=-1, then re-run setup."
+                        # 'ClawFactory:' prefix is the hard-fail signature - the
+                        # outer catch in this function re-throws on that prefix
+                        # so Invoke-WithRollback can run its rollback path.
+                        throw 'ClawFactory: .wslconfig conflict detected during silent install. See log for fix instructions.'
+                    }
+                    $needsShutdown = $false
+                }
+            }
+        }
+
+        if ($needsShutdown) {
+            # Need a wsl --shutdown to make .wslconfig take effect immediately.
+            # Only safe if Ubuntu is the only running distro - otherwise the
+            # user has work in flight in another distro and we must ask first.
+            $running = & wsl.exe --list --running --quiet 2>$null
+            $runningDistros = @()
+            if ($running) {
+                $runningDistros = @(($running -split "`n") |
+                    ForEach-Object { ($_ -replace "`0", '').Trim() } |
+                    Where-Object { $_ -ne '' })
+            }
+            $otherDistros = @($runningDistros | Where-Object { $_ -ne $WslDistro })
+
+            $proceedShutdown = $true
+            if ($otherDistros.Count -gt 0) {
+                $list = ($otherDistros -join "`r`n  ")
+                try {
+                    Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+                    $choice = [System.Windows.Forms.MessageBox]::Show(
+                        "ClawFactory needs to restart WSL to apply the .wslconfig change. The following WSL distros are running:`r`n  $list`r`n`r`nContinuing will shut down ALL running WSL distros. Save any work in those distros before clicking OK.`r`n`r`nClick Cancel to skip - the .wslconfig change will take effect when WSL next idles.",
+                        'ClawFactory Setup - Restart WSL?',
+                        [System.Windows.Forms.MessageBoxButtons]::OKCancel,
+                        [System.Windows.Forms.MessageBoxIcon]::Question
+                    )
+                    if ($choice -ne [System.Windows.Forms.DialogResult]::OK) {
+                        $proceedShutdown = $false
+                    }
+                } catch {
+                    Write-Log WARN "Could not show MessageBox; defaulting to skip wsl --shutdown: $($_.Exception.Message)"
+                    $proceedShutdown = $false
+                }
+            }
+
+            if ($proceedShutdown) {
+                & wsl.exe --shutdown 2>&1 | Out-Null
+                Write-Log INFO 'Ran wsl --shutdown to apply .wslconfig change'
+            } else {
+                Write-Log INFO 'Skipped wsl --shutdown per user choice; .wslconfig will take effect on next WSL idle'
+            }
+        }
+
+        Save-Checkpoint 'ConfigureWslConfig'
+    } catch {
+        if ($_.Exception.Message -like 'ClawFactory:*') {
+            # Deliberate hard-fail (e.g. silent-install Branch 5 conflict).
+            # Re-throw so Invoke-WithRollback runs the rollback path.
+            throw
+        }
+        Write-Log WARN "Step-ConfigureWslConfig hit an error and is continuing: $($_.Exception.Message)"
+    }
 }
 
 function Step-ConfigureWslConf {
@@ -1369,6 +1511,42 @@ echo 'auth profile registered'
     Save-Checkpoint 'OpenClawConfigured'
 }
 
+function Step-EnableChatCompletions {
+    # v1.0.1: enable the OpenClaw gateway's HTTP /v1/chat/completions endpoint
+    # so a future native chat app can talk to the gateway over loopback. Idempotent
+    # (`openclaw config set` is idempotent). Failure is non-fatal: gateway works
+    # without it; only the native chat app stops working.
+    Write-Log INFO 'Step 9b: Enabling gateway.http.endpoints.chatCompletions.enabled.'
+    try {
+        $tmpOut = [System.IO.Path]::GetTempFileName()
+        $tmpErr = [System.IO.Path]::GetTempFileName()
+        try {
+            $proc = Start-Process -FilePath 'wsl.exe' `
+                -ArgumentList @('-d', $WslDistro, '-u', $WslUser, '--', 'bash', '-lc', 'openclaw config set gateway.http.endpoints.chatCompletions.enabled true') `
+                -NoNewWindow -Wait -PassThru `
+                -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr
+            $exit   = $proc.ExitCode
+            $stdout = (Get-Content -LiteralPath $tmpOut -Raw -ErrorAction SilentlyContinue) -as [string]
+            $stderr = (Get-Content -LiteralPath $tmpErr -Raw -ErrorAction SilentlyContinue) -as [string]
+        } finally {
+            Remove-Item -LiteralPath $tmpOut -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $tmpErr -Force -ErrorAction SilentlyContinue
+        }
+
+        if ($exit -eq 0) {
+            Write-Log INFO 'Enabled gateway.http.endpoints.chatCompletions.enabled'
+            Save-Checkpoint 'EnableChatCompletions'
+        } else {
+            Write-Log WARN 'Failed to enable chatCompletions endpoint. The gateway will work, but the native chat app will not connect until this is fixed manually. See logs for details.'
+            if ($stdout) { Write-Log WARN "EnableChatCompletions stdout: $($stdout.Trim())" }
+            if ($stderr) { Write-Log WARN "EnableChatCompletions stderr: $($stderr.Trim())" }
+            Write-Log WARN "EnableChatCompletions exit code: $exit"
+        }
+    } catch {
+        Write-Log WARN "Step-EnableChatCompletions hit an error and is continuing: $($_.Exception.Message)"
+    }
+}
+
 function Step-CreateAgentDirectories {
     # OpenClaw's `openclaw agents add` is interactive (TUI) even with
     # --non-interactive flag and hangs reliably in scripted contexts.
@@ -1578,6 +1756,7 @@ if ($Resume) {
 Invoke-WithRollback {
     Step-Preflight
     Step-EnsureWsl
+    Step-ConfigureWslConfig      # v1.0.1: Windows-side .wslconfig (vmIdleTimeout=-1)
     Step-ConfigureWslConf
     Step-RestartWsl
     Step-CreateClawUser
@@ -1593,6 +1772,7 @@ Invoke-WithRollback {
     # writing config to ~/.openclaw/openclaw.json directly (no gateway
     # connection) avoids the cycle entirely.
     Step-ConfigureOpenClaw       # gateway, default model, auth profile registration (writes openclaw.json)
+    Step-EnableChatCompletions   # v1.0.1: turn on gateway HTTP /v1/chat/completions endpoint
     Step-PreinstallGatewayRuntime  # bypass egress firewall: install gateway deps as root, then start gateway
     Step-CreateAgentDirectories  # pre-create 4 agent dirs (orchestrator, scout, builder, publisher)
     Step-ApplySafetyRules        # SOUL.md + hash pinning

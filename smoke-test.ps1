@@ -67,5 +67,15 @@ Check 'auth-profiles.json present for all 5 agents' {
     $enc = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($script))
     (wsl -d Ubuntu -u clawuser --cd ~ -- bash -lc "echo $enc | base64 -d | bash") -eq 'OK' }
 
+# v1.0.1: confirms Step-ConfigureWslConfig wrote the gateway-stability setting
+# into %USERPROFILE%\.wslconfig. Passes if the file exists AND has
+# vmIdleTimeout=-1; fails otherwise (including the WARN-flagged "different
+# value" branch, which is the user's responsibility to fix manually).
+Check '.wslconfig has vmIdleTimeout=-1' {
+    $cfg = Join-Path $env:USERPROFILE '.wslconfig'
+    if (-not (Test-Path $cfg)) { return $false }
+    (Get-Content $cfg -Raw) -match 'vmIdleTimeout\s*=\s*-1'
+}
+
 Write-Host ""; Write-Host "Result: $ok pass, $fail fail" -ForegroundColor $(if ($fail) {'Red'} else {'Green'})
 exit $fail
