@@ -52,7 +52,7 @@ $OpenClawInstallSha256 = '57f025ba0272e2da3238984360e37fad5230bc7cea81854d154a36
 # via env var (install.sh:1012, install_spec construction at 2342) - no
 # fallback needed; install.sh:2354's @latest fallback only fires when
 # OPENCLAW_VERSION literally equals 'latest', so a pinned version skips it.
-$OpenClawNpmVersion    = '2026.4.27'
+$OpenClawNpmVersion    = '2026.4.23'
 $LogDir                = Join-Path $env:ProgramData 'ClawFactory'
 $LogFile               = Join-Path $LogDir 'install.log'
 $CheckpointFile        = Join-Path $LogDir 'checkpoint.json'
