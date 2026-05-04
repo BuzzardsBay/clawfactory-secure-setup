@@ -1314,15 +1314,24 @@ function Step-ConfigureOpenClaw {
         default  { @{ id = $null; provider = $null; modelPrefix = $null } }
     }
 
-    # Step 9a: gateway settings (loopback + port + mode).
+    # Step 9a: gateway settings (loopback + port + mode) + bonjour disable.
     # gateway.mode=local is required - without it `openclaw gateway run` refuses
     # to start with "existing config is missing gateway.mode".
+    #
+    # plugins.entries.bonjour.enabled=false: on 2026.4.23 the
+    # OPENCLAW_DISABLE_BONJOUR=1 env var (post-install drop-in, defense-in-depth)
+    # is not honored - bonjour runs anyway, gets stuck in probing state, and
+    # saturates the gateway event loop. Disabling at the config level here
+    # (pre-gateway-start, no #47133 risk) is the load-bearing fix; the env
+    # var drop-in stays as a forward-compat hedge for newer OpenClaw versions
+    # where the env var IS honored.
     $script9a = @'
 set -e
 openclaw config set gateway.bind loopback >/dev/null
 openclaw config set gateway.port 8787 >/dev/null
 openclaw config set gateway.mode local >/dev/null
-echo "gateway configured"
+openclaw config set plugins.entries.bonjour.enabled false >/dev/null
+echo "gateway configured (bonjour disabled at plugins.entries.bonjour.enabled)"
 '@
     $rc = Invoke-WslBash -Script $script9a -User $WslUser
     if ($rc -ne 0) { throw "Failed to configure gateway (exit=$rc)" }
