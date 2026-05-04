@@ -3,7 +3,7 @@
 ; Compile with: "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ClawFactory-Secure-Setup.iss
 
 #define MyAppName      "ClawFactory Secure Setup"
-#define MyAppVersion   "1.0.1"
+#define MyAppVersion   "1.0.2"
 #define MyAppPublisher "Frontier Automation Systems LLC"
 #define MyAppURL       "https://openclaw.ai"
 
@@ -66,6 +66,12 @@ Filename: "powershell.exe"; \
   Flags: waituntilterminated
 
 [UninstallRun]
+; v1.0.2: delete the WSL Host keep-alive scheduled task. Runs first so the
+; task is gone before the powershell cleanup block (which may unregister WSL).
+Filename: "schtasks.exe"; \
+  Parameters: "/Delete /TN ""ClawFactory WSL Host"" /F"; \
+  RunOnceId: "DeleteWslHostTask"; \
+  Flags: runhidden
 Filename: "powershell.exe"; \
   Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""if ((Read-Host 'Remove Ubuntu WSL distro, skills-factory workspace, and all provider credentials? [y/N]') -eq 'y') {{ wsl --unregister Ubuntu; cmdkey /delete:ClawFactory/GrokApiKey 2>$null; cmdkey /delete:ClawFactory/OpenAIApiKey 2>$null; cmdkey /delete:ClawFactory/AnthropicApiKey 2>$null; cmdkey /delete:ClawFactory/GeminiApiKey 2>$null; Remove-NetFirewallRule -DisplayName 'ClawFactory-Block-Inbound-8787' -ErrorAction SilentlyContinue }}"""; \
   RunOnceId: "ClawFactoryCleanup"; \

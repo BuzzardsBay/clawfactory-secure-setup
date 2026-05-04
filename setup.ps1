@@ -37,8 +37,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3.0
 
 #--- Constants ----------------------------------------------------------------
-# v1.0.1 - gateway stability fix (vmIdleTimeout=-1) + chatCompletions endpoint enabled
-$InstallerVersion      = '1.0.1'
+# v1.0.2 - WSL host task (keeps gateway alive through wsl.exe session cycles)
+$InstallerVersion      = '1.0.2'
 $OpenClawInstallUrl    = 'https://openclaw.ai/install.sh'
 # [R2] Pin me. See README.md section "Pinning the OpenClaw install.sh hash".
 $OpenClawInstallSha256 = '57f025ba0272e2da3238984360e37fad5230bc7cea81854d154a362ea989d49d'
@@ -1724,6 +1724,97 @@ function Step-ConfigureAgents {
     Save-Checkpoint 'AgentBootstrap'
 }
 
+function Step-RegisterWslHostTask {
+    # v1.0.2: keep one wsl.exe session alive permanently via a hidden Windows
+    # scheduled task. WSL issues a full systemd shutdown inside the distro
+    # when the LAST wsl.exe session exits, tearing down user@1000, docker,
+    # containerd, and the gateway regardless of linger or vmIdleTimeout=-1
+    # (v1.0.1). vmIdleTimeout keeps the kernel alive; this task keeps the
+    # distro-level init chain alive. Together they cover both shutdown paths.
+    # Non-fatal: gateway works without it, just won't survive idle.
+    Write-Log INFO 'Step 16: Registering ClawFactory WSL Host task (keeps gateway alive during idle).'
+    $TaskName = 'ClawFactory WSL Host'
+    $TaskDesc = 'Keeps a WSL session alive so the OpenClaw gateway stays running. Do not disable.'
+    try {
+        $currentUser = "$env:USERDOMAIN\$env:USERNAME"
+        $taskXml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>$TaskDesc</Description>
+    <Author>ClawFactory</Author>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>$currentUser</UserId>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>$currentUser</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>true</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>999</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>wsl.exe</Command>
+      <Arguments>-d $WslDistro -u $WslUser -- sleep infinity</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"@
+
+        # Idempotent: remove any prior registration so we always end up with
+        # the v1.0.2 XML, not whatever a previous install left behind.
+        $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        if ($existing) {
+            Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+            Write-Log INFO "Removed existing '$TaskName' task before re-registering."
+        }
+
+        Register-ScheduledTask -Xml $taskXml -TaskName $TaskName -Force | Out-Null
+
+        # Start immediately so the gateway has a keep-alive session right now,
+        # rather than waiting for the next logon.
+        Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+
+        $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        if ($t -and $t.State -ne 'Disabled') {
+            Write-Log INFO "Scheduled task '$TaskName' registered and enabled (state=$($t.State))."
+            Save-Checkpoint 'RegisterWslHostTask'
+        } else {
+            Write-Log WARN "Scheduled task '$TaskName' is missing or Disabled after registration. Gateway may go dark on idle."
+        }
+    } catch {
+        Write-Log WARN "Step-RegisterWslHostTask hit an error and is continuing: $($_.Exception.Message)"
+    }
+}
+
 #--- Main ---------------------------------------------------------------------
 if ($Resume) {
     # Recover provider from the resume flag (the cmdline value may be the
@@ -1772,8 +1863,8 @@ Invoke-WithRollback {
     # writing config to ~/.openclaw/openclaw.json directly (no gateway
     # connection) avoids the cycle entirely.
     Step-ConfigureOpenClaw       # gateway, default model, auth profile registration (writes openclaw.json)
-    Step-EnableChatCompletions   # v1.0.1: turn on gateway HTTP /v1/chat/completions endpoint
     Step-PreinstallGatewayRuntime  # bypass egress firewall: install gateway deps as root, then start gateway
+    Step-EnableChatCompletions   # v1.0.1, repositioned in v1.0.2: must run AFTER runtime install (`openclaw config set` needs the runtime present, or it just prints --help)
     Step-CreateAgentDirectories  # pre-create 4 agent dirs (orchestrator, scout, builder, publisher)
     Step-ApplySafetyRules        # SOUL.md + hash pinning
     Step-WireProviderKey         # write auth-profiles.json with API key
@@ -1813,6 +1904,12 @@ for ($i = 1; $i -le 15; $i++) {
 if (-not $healthy) {
     throw 'Final gateway health gate failed: http://127.0.0.1:8787/status did not return 200 within 30 seconds. Diagnose with: wsl -d Ubuntu -u clawuser -- journalctl --user -u openclaw-gateway -n 100, then `cat ~/.openclaw/logs/gateway.log`. After the underlying issue is fixed, re-run setup.ps1 (the 15 install steps will skip via checkpoints; only the final gate re-runs).'
 }
+
+# v1.0.2: register the WSL Host keep-alive task only after the gateway has
+# been proven healthy. If the health gate above throws, this never runs and
+# we don't leave a dangling task pointing at a broken install. Outside the
+# Invoke-WithRollback block on purpose - failure here is non-fatal.
+Step-RegisterWslHostTask
 
 Write-Log INFO '==== ClawFactory Secure Setup - completed successfully ===='
 Remove-ResumeFlag

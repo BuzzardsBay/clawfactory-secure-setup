@@ -77,5 +77,13 @@ Check '.wslconfig has vmIdleTimeout=-1' {
     (Get-Content $cfg -Raw) -match 'vmIdleTimeout\s*=\s*-1'
 }
 
+# v1.0.2: confirms Step-RegisterWslHostTask landed. The task holds one
+# wsl.exe session alive permanently so WSL doesn't fire its
+# last-session-exit shutdown sequence inside the distro.
+Check 'WSL Host scheduled task registered and enabled' {
+    $t = Get-ScheduledTask -TaskName 'ClawFactory WSL Host' -ErrorAction SilentlyContinue
+    $t -and $t.State -ne 'Disabled'
+}
+
 Write-Host ""; Write-Host "Result: $ok pass, $fail fail" -ForegroundColor $(if ($fail) {'Red'} else {'Green'})
 exit $fail
