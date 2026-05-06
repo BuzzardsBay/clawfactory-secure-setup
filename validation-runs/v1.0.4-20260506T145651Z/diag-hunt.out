@@ -1,0 +1,334 @@
+=== Inno Setup tmp log hunt ===
+=== is-*.tmp dirs ===
+
+
+FullName      : C:\Users\ClawTest\AppData\Local\Temp\is-TPHCM9BGAX-uninstall.tmp
+LastWriteTime : 5/6/2026 7:47:46 AM
+
+
+
+=== ClawFactory artifacts ===
+MISSING: C:\Program Files\ClawFactory
+MISSING: C:\ProgramData\ClawFactory
+MISSING: C:\install-stdout.log
+=== Application event log: ClawFactory / Inno Setup last 1h ===
+
+
+TimeCreated      : 5/6/2026 7:25:34 AM
+Id               : 1001
+LevelDisplayName : Information
+ProviderName     : Windows Error Reporting
+Message          : Fault bucket , type 0
+                   Event Name: crashpad_log
+                   Response: Not available
+                   Cab Id: 0
+                   
+                   Problem signature:
+                   P1: setup.exe
+                   P2: 147.0.3912.98
+                   P3: EdgeInstallerError|msedge
+                   P4: 0x21f
+                   P5: 
+                   P6: 
+                   P7: 
+                   P8: 
+                   P9: 
+                   P10: 
+                   
+                   Attached files:
+                   \\?\C:\Windows\SystemTemp\msedge_installer.log
+                   
+                   These files may be available here:
+                   NULL
+                   
+                   Analysis symbol: 
+                   Rechecking for solution: 0
+                   Report Id: 4a511772-a736-4c51-9b27-3a781b64160c
+                   Report Status: 268697600
+                   Hashed bucket: 
+                   Cab Guid: 0
+
+TimeCreated      : 5/6/2026 7:25:34 AM
+Id               : 1001
+LevelDisplayName : Information
+ProviderName     : Windows Error Reporting
+Message          : Fault bucket 1750691988887873077, type 5
+                   Event Name: crashpad_log
+                   Response: Not available
+                   Cab Id: 0
+                   
+                   Problem signature:
+                   P1: setup.exe
+                   P2: 147.0.3912.98
+                   P3: EdgeInstallerError|msedge
+                   P4: 0x21f
+                   P5: 
+                   P6: 
+                   P7: 
+                   P8: 
+                   P9: 
+                   P10: 
+                   
+                   Attached files:
+                   \\?\C:\Windows\SystemTemp\msedge_installer.log
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.6d787f6c-fb01-4346-a365-178de3198de3.tmp.WERIntern
+                   alMetadata.xml
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.ebb6df2a-2e39-4288-955d-386f6a331a01.tmp.csv
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.8145456a-ed05-4589-ad65-d2d70c79524f.tmp.txt
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.0794b80d-0891-4bce-b54f-ae2b7926d1a2.tmp.xml
+                   
+                   These files may be available here:
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\ReportArchive\NonCritical_setup.exe_85819c190c0a02d91649278
+                   b7b022137e78f869_00000000_4a511772-a736-4c51-9b27-3a781b64160c
+                   
+                   Analysis symbol: 
+                   Rechecking for solution: 0
+                   Report Id: 4a511772-a736-4c51-9b27-3a781b64160c
+                   Report Status: 268435456
+                   Hashed bucket: 1881b6f0ecce3c09a84bb5169cc8a635
+                   Cab Guid: 0
+
+
+
+=== Recent App-error / unhandled exception last 1h ===
+
+
+TimeCreated      : 5/6/2026 7:49:21 AM
+Id               : 1001
+LevelDisplayName : Information
+ProviderName     : Windows Error Reporting
+Message          : Fault bucket , type 0
+                   Event Name: LiveKernelEvent
+                   Response: Not available
+                   Cab Id: 0
+                   
+                   Problem signature:
+                   P1: 1a8
+                   P2: a
+                   P3: 0
+                   P4: 0
+                   P5: 0
+                   P6: 10_0_26200
+                   P7: 0_0
+                   P8: 768_1
+                   P9: 
+                   P10: 
+                   
+                   Attached files:
+                   \\?\C:\WINDOWS\LiveKernelReports\WATCHDOG\WATCHDOG-20260427-1719.dmp
+                   \\?\C:\WINDOWS\SystemTemp\WER-19437-0.sysdata.xml
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.f413d666-61f4-4014-978c-7deb6bc7a24e.tmp.WERIntern
+                   alMetadata.xml
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.ab1b2d77-907f-443e-a6bc-d1bfaf9385e1.tmp.csv
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.f356f2a8-eb2c-4759-8ab4-51c7b415115e.tmp.txt
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.1eca1ed1-de24-41e9-828a-807c8b3edfe1.tmp.xml
+                   
+                   These files may be available here:
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\ReportQueue\Kernel_1a8_edf5fb5c0e4a63db4978f4d416e1145b3dc5
+                   68_00000000_73cb0dd7-3d43-476a-810d-519c86987df6
+                   
+                   Analysis symbol: 
+                   Rechecking for solution: 0
+                   Report Id: 73cb0dd7-3d43-476a-810d-519c86987df6
+                   Report Status: 2051
+                   Hashed bucket: 
+                   Cab Guid: 0
+
+TimeCreated      : 5/6/2026 7:26:27 AM
+Id               : 1001
+LevelDisplayName : Information
+ProviderName     : Windows Error Reporting
+Message          : Fault bucket 1165766517497115890, type 5
+                   Event Name: MoAppHang
+                   Response: Not available
+                   Cab Id: 0
+                   
+                   Problem signature:
+                   P1: Microsoft.Copilot_147.0.3912.93_neutral__8wekyb3d8bbwe
+                   P2: praid:App
+                   P3: 147.0.3912.93
+                   P4: 69efb1d9
+                   P5: feb8
+                   P6: 2097152
+                   P7: 
+                   P8: 
+                   P9: 
+                   P10: 
+                   
+                   Attached files:
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.661f34c3-26d0-409f-bab8-9db4783b600e.tmp.WERIntern
+                   alMetadata.xml
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.6e75c467-bbe0-4602-9cfa-57b98f070f6d.tmp.csv
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.74309a51-9572-439a-8b86-19133cf429c3.tmp.txt
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.c120bffa-fa0e-44dd-9804-944578b3000d.tmp.xml
+                   
+                   These files may be available here:
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\ReportArchive\AppHang_Microsoft.Copilo_38564cdfc316b032f298
+                   4fb233a5828bd5554739_8b892d30_47c57f53-2573-453e-9cbc-449d7d6f503b
+                   
+                   Analysis symbol: 
+                   Rechecking for solution: 0
+                   Report Id: 0da89e9e-d7eb-41c2-85fe-d71ab2c076f2
+                   Report Status: 268435456
+                   Hashed bucket: 44b836ae715992d0a02da2789e75b4f2
+                   Cab Guid: 0
+
+TimeCreated      : 5/6/2026 7:25:34 AM
+Id               : 1001
+LevelDisplayName : Information
+ProviderName     : Windows Error Reporting
+Message          : Fault bucket , type 0
+                   Event Name: crashpad_log
+                   Response: Not available
+                   Cab Id: 0
+                   
+                   Problem signature:
+                   P1: setup.exe
+                   P2: 147.0.3912.98
+                   P3: EdgeInstallerError|msedge
+                   P4: 0x21f
+                   P5: 
+                   P6: 
+                   P7: 
+                   P8: 
+                   P9: 
+                   P10: 
+                   
+                   Attached files:
+                   \\?\C:\Windows\SystemTemp\msedge_installer.log
+                   
+                   These files may be available here:
+                   NULL
+                   
+                   Analysis symbol: 
+                   Rechecking for solution: 0
+                   Report Id: 4a511772-a736-4c51-9b27-3a781b64160c
+                   Report Status: 268697600
+                   Hashed bucket: 
+                   Cab Guid: 0
+
+TimeCreated      : 5/6/2026 7:25:34 AM
+Id               : 1001
+LevelDisplayName : Information
+ProviderName     : Windows Error Reporting
+Message          : Fault bucket 1750691988887873077, type 5
+                   Event Name: crashpad_log
+                   Response: Not available
+                   Cab Id: 0
+                   
+                   Problem signature:
+                   P1: setup.exe
+                   P2: 147.0.3912.98
+                   P3: EdgeInstallerError|msedge
+                   P4: 0x21f
+                   P5: 
+                   P6: 
+                   P7: 
+                   P8: 
+                   P9: 
+                   P10: 
+                   
+                   Attached files:
+                   \\?\C:\Windows\SystemTemp\msedge_installer.log
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.6d787f6c-fb01-4346-a365-178de3198de3.tmp.WERIntern
+                   alMetadata.xml
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.ebb6df2a-2e39-4288-955d-386f6a331a01.tmp.csv
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.8145456a-ed05-4589-ad65-d2d70c79524f.tmp.txt
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.0794b80d-0891-4bce-b54f-ae2b7926d1a2.tmp.xml
+                   
+                   These files may be available here:
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\ReportArchive\NonCritical_setup.exe_85819c190c0a02d91649278
+                   b7b022137e78f869_00000000_4a511772-a736-4c51-9b27-3a781b64160c
+                   
+                   Analysis symbol: 
+                   Rechecking for solution: 0
+                   Report Id: 4a511772-a736-4c51-9b27-3a781b64160c
+                   Report Status: 268435456
+                   Hashed bucket: 1881b6f0ecce3c09a84bb5169cc8a635
+                   Cab Guid: 0
+
+TimeCreated      : 5/6/2026 7:22:05 AM
+Id               : 1001
+LevelDisplayName : Information
+ProviderName     : Windows Error Reporting
+Message          : Fault bucket , type 0
+                   Event Name: LiveKernelEvent
+                   Response: Not available
+                   Cab Id: 0
+                   
+                   Problem signature:
+                   P1: 1a8
+                   P2: a
+                   P3: 0
+                   P4: 0
+                   P5: 0
+                   P6: 10_0_26200
+                   P7: 0_0
+                   P8: 768_1
+                   P9: 
+                   P10: 
+                   
+                   Attached files:
+                   \\?\C:\WINDOWS\LiveKernelReports\WATCHDOG\WATCHDOG-20260427-1719.dmp
+                   \\?\C:\WINDOWS\SystemTemp\WER-19437-0.sysdata.xml
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.f413d666-61f4-4014-978c-7deb6bc7a24e.tmp.WERIntern
+                   alMetadata.xml
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.ab1b2d77-907f-443e-a6bc-d1bfaf9385e1.tmp.csv
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.f356f2a8-eb2c-4759-8ab4-51c7b415115e.tmp.txt
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.1eca1ed1-de24-41e9-828a-807c8b3edfe1.tmp.xml
+                   
+                   These files may be available here:
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\ReportQueue\Kernel_1a8_edf5fb5c0e4a63db4978f4d416e1145b3dc5
+                   68_00000000_73cb0dd7-3d43-476a-810d-519c86987df6
+                   
+                   Analysis symbol: 
+                   Rechecking for solution: 0
+                   Report Id: 73cb0dd7-3d43-476a-810d-519c86987df6
+                   Report Status: 2051
+                   Hashed bucket: 
+                   Cab Guid: 0
+
+TimeCreated      : 5/6/2026 7:22:04 AM
+Id               : 1001
+LevelDisplayName : Information
+ProviderName     : Windows Error Reporting
+Message          : Fault bucket , type 0
+                   Event Name: LiveKernelEvent
+                   Response: Not available
+                   Cab Id: 0
+                   
+                   Problem signature:
+                   P1: 1a8
+                   P2: a
+                   P3: 0
+                   P4: 0
+                   P5: 0
+                   P6: 10_0_26200
+                   P7: 0_0
+                   P8: 768_1
+                   P9: 
+                   P10: 
+                   
+                   Attached files:
+                   \\?\C:\WINDOWS\LiveKernelReports\WATCHDOG\WATCHDOG-20260427-1719.dmp
+                   \\?\C:\WINDOWS\SystemTemp\WER-19437-0.sysdata.xml
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.f413d666-61f4-4014-978c-7deb6bc7a24e.tmp.WERIntern
+                   alMetadata.xml
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.ab1b2d77-907f-443e-a6bc-d1bfaf9385e1.tmp.csv
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.f356f2a8-eb2c-4759-8ab4-51c7b415115e.tmp.txt
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER.1eca1ed1-de24-41e9-828a-807c8b3edfe1.tmp.xml
+                   
+                   These files may be available here:
+                   \\?\C:\ProgramData\Microsoft\Windows\WER\ReportQueue\Kernel_1a8_edf5fb5c0e4a63db4978f4d416e1145b3dc5
+                   68_00000000_73cb0dd7-3d43-476a-810d-519c86987df6
+                   
+                   Analysis symbol: 
+                   Rechecking for solution: 0
+                   Report Id: 73cb0dd7-3d43-476a-810d-519c86987df6
+                   Report Status: 2051
+                   Hashed bucket: 
+                   Cab Guid: 0
+
+
+
+=== END ===
