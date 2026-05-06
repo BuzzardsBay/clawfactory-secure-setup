@@ -367,6 +367,15 @@ begin
       exit;
     end;
   end;
+  if WizardSilent() then
+  begin
+    if (PageID = ProviderPage.ID) or (PageID = ApiKeyPage.ID) or
+       (PageID = AckPage.ID) then
+    begin
+      Result := True;
+      exit;
+    end;
+  end;
   if PageID = ApiKeyPage.ID then
     Result := not ProviderNeedsApiKey;
 end;
@@ -382,7 +391,7 @@ begin
   if CurPageID = ApiKeyPage.ID then
   begin
     Key := Trim(ApiKeyPage.Values[0]);
-    if (Key = '') and (not ApiKeyLaterChk.Checked) then
+    if (not WizardSilent()) and (Key = '') and (not ApiKeyLaterChk.Checked) then
     begin
       MsgBox('Enter your API key, or tick "I''ll add my API key later".',
              mbError, MB_OK);
@@ -400,7 +409,7 @@ begin
   end
   else if CurPageID = AckPage.ID then
   begin
-    if not AckPage.Values[0] then
+    if (not WizardSilent()) and (not AckPage.Values[0]) then
     begin
       MsgBox('You must acknowledge the security notice before installation can continue.',
              mbError, MB_OK);
