@@ -866,12 +866,12 @@ function Step-PreInstallOpenClawDeps {
     # so there's no allowlist dependency. install.sh then finds the packages
     # already present and skips its own apt phase entirely.
     # Excludes nodejs deliberately - install.sh owns NodeSource setup.
-    Write-Log INFO 'Step 6b: Pre-installing OpenClaw build dependencies (make g++ cmake python3).'
+    Write-Log INFO 'Step 6b: Pre-installing OpenClaw build dependencies (make g++ cmake python3 iptables).'
     $script = @'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y --no-install-recommends make g++ cmake python3
+timeout 300 apt-get install -y --no-install-recommends make g++ cmake python3 iptables
 '@
     $rc = Invoke-WslBash -Script $script -User 'root'
     if ($rc -ne 0) { throw 'OpenClaw build deps install failed' }
