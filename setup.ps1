@@ -548,8 +548,21 @@ function Step-EnsureWsl {
     # Kernel-loaded check. If `wsl --status` returns 0 the feature is active
     # and we can install Ubuntu without rebooting. Otherwise enable features
     # via DISM and reboot - the resume branch above completes the install.
-    $null = & wsl.exe --status 2>&1
-    $kernelOk = ($LASTEXITCODE -eq 0)
+    # Uses Process.Start (not 2>&1) — same reason as Invoke-WslBash: PS 5.1
+    # converts each stderr line to an ErrorRecord and $ErrorActionPreference =
+    # 'Stop' turns those into terminating errors before we can check ExitCode.
+    $psiStatus = New-Object System.Diagnostics.ProcessStartInfo
+    $psiStatus.FileName               = 'wsl.exe'
+    $psiStatus.Arguments              = '--status'
+    $psiStatus.RedirectStandardOutput = $true
+    $psiStatus.RedirectStandardError  = $true
+    $psiStatus.UseShellExecute        = $false
+    $psiStatus.CreateNoWindow         = $true
+    $procStatus = [System.Diagnostics.Process]::Start($psiStatus)
+    $null = $procStatus.StandardOutput.ReadToEnd()
+    $null = $procStatus.StandardError.ReadToEnd()
+    $procStatus.WaitForExit()
+    $kernelOk = ($procStatus.ExitCode -eq 0)
 
     if ($kernelOk) {
         Write-Log INFO 'WSL2 kernel loaded but Ubuntu missing - installing Ubuntu only.'
@@ -568,16 +581,35 @@ function Step-EnsureWsl {
     # WSL not installed — install kernel (no distro), then reboot.
     # The $Resume branch above completes the distro install after restart.
     Write-Log INFO 'WSL2 not installed. Running wsl --install --no-distribution.'
-    $wslOut = & wsl.exe --install --no-distribution 2>&1
-    $wslRc  = $LASTEXITCODE
+    $psiInstall = New-Object System.Diagnostics.ProcessStartInfo
+    $psiInstall.FileName               = 'wsl.exe'
+    $psiInstall.Arguments              = '--install --no-distribution'
+    $psiInstall.RedirectStandardOutput = $true
+    $psiInstall.RedirectStandardError  = $true
+    $psiInstall.UseShellExecute        = $false
+    $psiInstall.CreateNoWindow         = $true
+    $procInstall = [System.Diagnostics.Process]::Start($psiInstall)
+    $wslOut = $procInstall.StandardOutput.ReadToEnd() + $procInstall.StandardError.ReadToEnd()
+    $procInstall.WaitForExit()
+    $wslRc  = $procInstall.ExitCode
     Write-Log INFO "wsl --install --no-distribution exit code: $wslRc"
     if ($wslRc -notin @(0, 3010)) {
         throw "wsl --install --no-distribution failed (exit $wslRc): $wslOut"
     }
 
     # Detect whether the kernel is immediately usable without a reboot.
-    $null = & wsl.exe --status 2>&1
-    if ($LASTEXITCODE -eq 0) {
+    $psiStatus2 = New-Object System.Diagnostics.ProcessStartInfo
+    $psiStatus2.FileName               = 'wsl.exe'
+    $psiStatus2.Arguments              = '--status'
+    $psiStatus2.RedirectStandardOutput = $true
+    $psiStatus2.RedirectStandardError  = $true
+    $psiStatus2.UseShellExecute        = $false
+    $psiStatus2.CreateNoWindow         = $true
+    $procStatus2 = [System.Diagnostics.Process]::Start($psiStatus2)
+    $null = $procStatus2.StandardOutput.ReadToEnd()
+    $null = $procStatus2.StandardError.ReadToEnd()
+    $procStatus2.WaitForExit()
+    if ($procStatus2.ExitCode -eq 0) {
         Write-Log INFO 'WSL kernel loaded without reboot — installing distro now.'
         $bundledTarball = if ($BundledRootfsDir) { Join-Path $BundledRootfsDir 'ubuntu-rootfs.tar.gz' } else { '' }
         $variant = Install-WslDistroWithFallback -BundledRootfs $bundledTarball
