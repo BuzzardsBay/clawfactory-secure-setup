@@ -42,7 +42,7 @@ Set-StrictMode -Version 3.0
 
 #--- Constants ----------------------------------------------------------------
 # v1.0.4 - pre-install OpenClaw build deps before install.sh runs
-$InstallerVersion      = '1.0.4'
+$InstallerVersion      = '1.0.13'
 $OpenClawInstallUrl    = 'https://openclaw.ai/install.sh'
 # [R2] Pin me. See README.md section "Pinning the OpenClaw install.sh hash".
 $OpenClawInstallSha256 = '57f025ba0272e2da3238984360e37fad5230bc7cea81854d154a362ea989d49d'
@@ -58,7 +58,7 @@ $OpenClawInstallSha256 = '57f025ba0272e2da3238984360e37fad5230bc7cea81854d154a36
 # via env var (install.sh:1012, install_spec construction at 2342) - no
 # fallback needed; install.sh:2354's @latest fallback only fires when
 # OPENCLAW_VERSION literally equals 'latest', so a pinned version skips it.
-$OpenClawNpmVersion    = '2026.4.23'
+$OpenClawNpmVersion    = '2026.4.27'
 $LogDir                = Join-Path $env:ProgramData 'ClawFactory'
 $LogFile               = Join-Path $LogDir 'install.log'
 $CheckpointFile        = Join-Path $LogDir 'checkpoint.json'
@@ -503,7 +503,7 @@ function Invoke-WithRollback {
         Write-Log ERROR $_.ScriptStackTrace
         $done = Get-CompletedSteps
         if ($done.Count -gt 0) {
-            $ans = Confirm-Or-Default 'Installation failed. Run automatic rollback? (y/N)' 'y'
+            $ans = Confirm-Or-Default 'Installation failed. Run automatic rollback? (y/N)' 'n'
             if ($ans -match '^[Yy]') {
                 Invoke-Rollback -CompletedSteps $done
             } else {
@@ -2091,8 +2091,11 @@ Invoke-WithRollback {
     # if the file already exists with root ownership (created by an earlier
     # root-context tee invocation), sticky-bit /tmp won't let clawuser
     # overwrite it - "tee: Permission denied" was the v1.0.11 symptom.
-    $null = Invoke-WslBash -Script 'rm -f /tmp/openclaw-install.log && touch /tmp/openclaw-install.log && chown clawuser:clawuser /tmp/openclaw-install.log' -User 'root'
-    Write-Log INFO 'v1.0.12: Pre-created /tmp/openclaw-install.log owned by clawuser.'
+    # v1.0.13: also chmod 0666 so any user (root, clawuser, or other)
+    # can append to the file even if install.sh internally re-creates
+    # it via a sudo context. Mode-only fix; ownership stays clawuser.
+    $null = Invoke-WslBash -Script 'rm -f /tmp/openclaw-install.log && touch /tmp/openclaw-install.log && chown clawuser:clawuser /tmp/openclaw-install.log && chmod 0666 /tmp/openclaw-install.log' -User 'root'
+    Write-Log INFO 'v1.0.13: Pre-created /tmp/openclaw-install.log owned by clawuser, mode 0666.'
     Step-CreateClawUser
     Step-SetDefaultUser
     Step-InstallDocker
