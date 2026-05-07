@@ -594,7 +594,7 @@ function Step-EnsureWsl {
     $wslRc  = $procInstall.ExitCode
     Write-Log INFO "wsl --install --no-distribution exit code: $wslRc"
     if ($wslRc -notin @(0, 3010)) {
-        throw "wsl --install --no-distribution failed (exit $wslRc): $wslOut"
+        Write-Log INFO "wsl --install returned $wslRc (elevation required or reboot pending) — proceeding to reboot-and-resume path."
     }
 
     # Detect whether the kernel is immediately usable without a reboot.
