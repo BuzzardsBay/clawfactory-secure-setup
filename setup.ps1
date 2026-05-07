@@ -508,11 +508,9 @@ function Step-EnsureWsl {
     #   1. WSL2 + Ubuntu already functional -> skip.
     #   2. WSL kernel loaded but Ubuntu missing -> install Ubuntu (with WSL1
     #      fallback on HCS_E_HYPERV_NOT_INSTALLED), no reboot.
-    #   3. WSL not installed at all (clean Win11) -> enable Windows features
-    #      via DISM (Microsoft-Windows-Subsystem-Linux, VirtualMachinePlatform,
-    #      HypervisorPlatform), persist resume state, restart. The ACTUAL
-    #      `wsl --install -d Ubuntu` runs in the resume branch below, after
-    #      the kernel features are loaded.
+    #   3. WSL not installed at all -> run wsl --install --no-distribution,
+    #      write RunOnce key, save checkpoint, show restart dialog, reboot.
+    #      The $Resume branch above completes the distro install after restart.
     Write-Log INFO 'Step 2: Ensuring WSL2 + Ubuntu are available.'
 
     if ($Resume) {
@@ -567,10 +565,45 @@ function Step-EnsureWsl {
         return
     }
 
-    # Kernel not loaded - DISM the features then reboot. Resume branch
-    # completes the install on next launch. Does not return.
-    Enable-WindowsFeaturesForWsl
-    Invoke-WslInstallWithRestart
+    # WSL not installed — install kernel (no distro), then reboot.
+    # The $Resume branch above completes the distro install after restart.
+    Write-Log INFO 'WSL2 not installed. Running wsl --install --no-distribution.'
+    $wslOut = & wsl.exe --install --no-distribution 2>&1
+    $wslRc  = $LASTEXITCODE
+    Write-Log INFO "wsl --install --no-distribution exit code: $wslRc"
+    if ($wslRc -notin @(0, 3010)) {
+        throw "wsl --install --no-distribution failed (exit $wslRc): $wslOut"
+    }
+
+    # Detect whether the kernel is immediately usable without a reboot.
+    $null = & wsl.exe --status 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Log INFO 'WSL kernel loaded without reboot — installing distro now.'
+        $bundledTarball = if ($BundledRootfsDir) { Join-Path $BundledRootfsDir 'ubuntu-rootfs.tar.gz' } else { '' }
+        $variant = Install-WslDistroWithFallback -BundledRootfs $bundledTarball
+        Write-Log INFO "WSL variant installed: $variant"
+        New-ClawUserAndSetDefault
+        Start-Sleep -Seconds 5
+        if (-not (Test-WslFunctional)) {
+            throw 'WSL could not be configured on this machine. Please contact support at hello@avitalresearch.com'
+        }
+        Save-Checkpoint 'EnsureWsl'
+        return
+    }
+
+    # Reboot required — write RunOnce key, save checkpoint, restart.
+    $runOnceVal = "`"$SourceExe`" /SILENT /SUPPRESSMSGBOXES /NORESTART /resume"
+    Set-ItemProperty -Path $RunOnceRegPath -Name 'ClawFactoryResume' -Value $runOnceVal -Type String
+    Write-Log INFO "Reboot required. RunOnce key registered: $runOnceVal"
+    Save-Checkpoint 'EnsureWsl'
+    Add-Type -AssemblyName System.Windows.Forms
+    [System.Windows.Forms.MessageBox]::Show(
+        "WSL2 requires a restart to complete setup.`nClawFactory will continue automatically after restart.`nClick OK to restart now.",
+        'Restart Required',
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Information
+    ) | Out-Null
+    Restart-Computer -Force
 }
 
 function Step-ConfigureWslConfig {
