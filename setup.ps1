@@ -18,7 +18,11 @@ param(
     # uses `wsl --import` as the primary path; otherwise falls through to
     # `wsl --install` (network). Empty on dev-tree invocations and on
     # /resume relaunches (the tarball has already been consumed).
-    [string]$BundledRootfsDir = ''
+    [string]$BundledRootfsDir = '',
+    # v1.0.12: silent-mode propagation. Set by Inno [Run] when WizardSilent()
+    # is true, so setup.ps1's helpers can refuse interactive primitives
+    # (Read-Host, MessageBox.Show) instead of hanging the install.
+    [switch]$Silent
 )
 
 # ClawFactory Secure Setup - main automation script.
@@ -134,6 +138,24 @@ function Write-Log {
     else                        { Write-Host $line }
 }
 
+#--- Silent-mode safety -----------------------------------------------------
+# v1.0.12: every interactive primitive in this script (Read-Host, MessageBox)
+# routes through one of these two helpers. Under -Silent or a non-interactive
+# session, prompts return a default and dialogs are skipped, so /SILENT installs
+# can never hang on stdin. See Task 2 of CLAWFACTORY COMPREHENSIVE HARDENING.
+function Test-IsSilent {
+    return ($script:Silent -or -not [Environment]::UserInteractive)
+}
+
+function Confirm-Or-Default {
+    param([string]$Prompt, [string]$Default)
+    if (Test-IsSilent) {
+        Write-Log INFO "Silent mode: auto-answering '$Prompt' with default '$Default'"
+        return $Default
+    }
+    return (Read-Host $Prompt)
+}
+
 function Save-Checkpoint {
     param([string]$Step)
     $state = [ordered]@{ completedSteps = @() }
@@ -155,21 +177,53 @@ function Get-CompletedSteps {
 }
 
 #--- WSL availability + restart-and-resume -----------------------------------
+function Invoke-WslExe {
+    # v1.0.12: thin Process.Start wrapper for `wsl.exe <args>` so callers
+    # never trip the PowerShell 5.1 + 2>&1 + ErrorActionPreference='Stop'
+    # bug that v1.0.7 fixed in Invoke-WslBash. Returns @{ ExitCode; StdOut;
+    # StdErr }. Stderr is captured but not merged into stdout.
+    # PS 5.1's ProcessStartInfo only has .Arguments (single string), not
+    # .ArgumentList - so we quote args here. Callers pass plain tokens and
+    # any token containing whitespace gets double-quoted.
+    param([Parameter(Mandatory)][string[]]$Arguments)
+    $quoted = $Arguments | ForEach-Object {
+        if ($_ -match '\s') { '"' + $_ + '"' } else { $_ }
+    }
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName               = 'wsl.exe'
+    $psi.Arguments              = ($quoted -join ' ')
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError  = $true
+    $psi.UseShellExecute        = $false
+    $psi.CreateNoWindow         = $true
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $stdout = $proc.StandardOutput.ReadToEnd()
+    $stderr = $proc.StandardError.ReadToEnd()
+    $proc.WaitForExit()
+    return @{ ExitCode = $proc.ExitCode; StdOut = $stdout; StdErr = $stderr }
+}
+
 function Test-WslFunctional {
     # True iff WSL2 + Ubuntu can actually run a command. Distinguishes:
     #   - WSL features just enabled but kernel not loaded (post-install,
     #     pre-reboot): `wsl --status` may succeed but `wsl -d Ubuntu -- true`
     #     fails or hangs.
     #   - WSL fully ready (post-reboot): both work.
+    # v1.0.12: replaced `& wsl.exe ... 2>&1` with Process.Start (Invoke-WslExe)
+    # for the same reason Invoke-WslBash uses Process.Start - PS 5.1 wraps
+    # native stderr lines as ErrorRecords under $ErrorActionPreference='Stop'.
     try {
-        $null = & wsl.exe --status 2>&1
-        if ($LASTEXITCODE -ne 0) { return $false }
+        $r = Invoke-WslExe -Arguments @('--status')
+        if ($r.ExitCode -ne 0) { return $false }
     } catch { return $false }
-    $list = (& wsl.exe --list --quiet 2>$null) -split "`n" |
+    try {
+        $rList = Invoke-WslExe -Arguments @('--list','--quiet')
+    } catch { return $false }
+    $list = ($rList.StdOut -split "`n") |
         ForEach-Object { $_.Trim() -replace "`0", '' }
     if (-not ($list -contains $WslDistro)) { return $false }
-    $null = & wsl.exe -d $WslDistro -u root -- true 2>&1
-    return ($LASTEXITCODE -eq 0)
+    $rTrue = Invoke-WslExe -Arguments @('-d', $WslDistro, '-u', 'root', '--', 'true')
+    return ($rTrue.ExitCode -eq 0)
 }
 
 function Save-ResumeFlag {
@@ -239,6 +293,10 @@ function Show-RestartDialog {
     # Use WPF MessageBox so we don't depend on WinForms init order. Falls back
     # to a console prompt if PresentationFramework is unavailable (very rare
     # on Win11).
+    if (Test-IsSilent) {
+        Write-Log INFO "Silent mode: skipping restart-notice dialog ($Title)."
+        return
+    }
     try {
         Add-Type -AssemblyName PresentationFramework -ErrorAction Stop
         [System.Windows.MessageBox]::Show($Message, $Title, 'OK', 'Information') | Out-Null
@@ -246,7 +304,7 @@ function Show-RestartDialog {
         Write-Host ''
         Write-Host "==== $Title ====" -ForegroundColor Yellow
         Write-Host $Message
-        Read-Host 'Press Enter to restart now'
+        $null = Confirm-Or-Default 'Press Enter to restart now' ''
     }
 }
 
@@ -292,46 +350,53 @@ function Install-WslDistroWithFallback {
             New-Item -ItemType Directory -Path $WslInstallDir -Force | Out-Null
         }
         Write-Log INFO 'Installing Ubuntu from bundled rootfs (offline).'
-        & wsl.exe --import $WslDistro $WslInstallDir $BundledRootfs --version 2 2>&1 |
-            ForEach-Object { Add-Content -LiteralPath $LogFile -Value "[wsl --import v2] $_" -Encoding UTF8 }
-        $exit = $LASTEXITCODE
-        if ($exit -eq 0) {
+        # v1.0.12: Process.Start instead of `wsl ... 2>&1 | ForEach-Object`
+        # for the same reason as Invoke-WslBash.
+        $rImp = Invoke-WslExe -Arguments @('--import', $WslDistro, $WslInstallDir, $BundledRootfs, '--version', '2')
+        foreach ($line in (($rImp.StdOut + "`n" + $rImp.StdErr) -split "`r?`n")) {
+            $t = $line.Trim()
+            if ($t) { Add-Content -LiteralPath $LogFile -Value "[wsl --import v2] $t" -Encoding UTF8 }
+        }
+        if ($rImp.ExitCode -eq 0) {
             Write-Log INFO 'WSL2 import from bundle succeeded.'
             return 'wsl2'
         }
-        Write-Log WARN "wsl --import failed (exit $exit), falling through to wsl --install."
+        Write-Log WARN "wsl --import failed (exit $($rImp.ExitCode)), falling through to wsl --install."
     }
 
     Write-Log INFO 'Installing Ubuntu (attempting WSL2 first).'
-    $output = & wsl.exe --install --no-launch -d $WslDistro 2>&1
-    $exit = $LASTEXITCODE
-    foreach ($line in @($output)) {
-        $t = ($line | Out-String).TrimEnd()
+    $rInst = Invoke-WslExe -Arguments @('--install', '--no-launch', '-d', $WslDistro)
+    $output = $rInst.StdOut + "`n" + $rInst.StdErr
+    foreach ($line in ($output -split "`r?`n")) {
+        $t = $line.TrimEnd()
         if ($t) { Add-Content -LiteralPath $LogFile -Value "[wsl install out] $t" -Encoding UTF8 }
     }
-    if ($exit -eq 0) {
+    if ($rInst.ExitCode -eq 0) {
         Write-Log INFO 'WSL2 install succeeded.'
         return 'wsl2'
     }
-    $hyperVMissing = $false
-    foreach ($line in @($output)) {
-        $t = ($line | Out-String)
-        if ($t -match 'HCS_E_HYPERV_NOT_INSTALLED' -or $t -match '0x80370102') {
-            $hyperVMissing = $true; break
-        }
-    }
+    $hyperVMissing = ($output -match 'HCS_E_HYPERV_NOT_INSTALLED' -or $output -match '0x80370102')
     if (-not $hyperVMissing) {
-        throw "wsl --install failed (exit $exit) and no fallback signal detected. See $LogFile."
+        throw "wsl --install failed (exit $($rInst.ExitCode)) and no fallback signal detected. See $LogFile."
     }
     Write-Log WARN 'WSL2 unavailable (HCS_E_HYPERV_NOT_INSTALLED). Falling back to WSL1.'
-    & wsl.exe --install --no-distribution 2>&1 |
-        ForEach-Object { Add-Content -LiteralPath $LogFile -Value "[wsl install fallback] $_" -Encoding UTF8 }
-    & wsl.exe --set-default-version 1 2>&1 |
-        ForEach-Object { Add-Content -LiteralPath $LogFile -Value "[wsl set-default-version] $_" -Encoding UTF8 }
-    & wsl.exe --install -d $WslDistro --no-launch 2>&1 |
-        ForEach-Object { Add-Content -LiteralPath $LogFile -Value "[wsl install -d $WslDistro] $_" -Encoding UTF8 }
-    if ($LASTEXITCODE -ne 0) {
-        throw "WSL1 fallback install also failed (exit $LASTEXITCODE)."
+    $rFb1 = Invoke-WslExe -Arguments @('--install', '--no-distribution')
+    foreach ($line in (($rFb1.StdOut + "`n" + $rFb1.StdErr) -split "`r?`n")) {
+        $t = $line.Trim()
+        if ($t) { Add-Content -LiteralPath $LogFile -Value "[wsl install fallback] $t" -Encoding UTF8 }
+    }
+    $rFb2 = Invoke-WslExe -Arguments @('--set-default-version', '1')
+    foreach ($line in (($rFb2.StdOut + "`n" + $rFb2.StdErr) -split "`r?`n")) {
+        $t = $line.Trim()
+        if ($t) { Add-Content -LiteralPath $LogFile -Value "[wsl set-default-version] $t" -Encoding UTF8 }
+    }
+    $rFb3 = Invoke-WslExe -Arguments @('--install', '-d', $WslDistro, '--no-launch')
+    foreach ($line in (($rFb3.StdOut + "`n" + $rFb3.StdErr) -split "`r?`n")) {
+        $t = $line.Trim()
+        if ($t) { Add-Content -LiteralPath $LogFile -Value "[wsl install -d $WslDistro] $t" -Encoding UTF8 }
+    }
+    if ($rFb3.ExitCode -ne 0) {
+        throw "WSL1 fallback install also failed (exit $($rFb3.ExitCode))."
     }
     Write-Log WARN 'WSL1 fallback install succeeded. Some features (systemd, networking) behave differently on WSL1.'
     return 'wsl1'
@@ -383,6 +448,10 @@ function Invoke-WslInstallWithRestart {
     )
 
     Write-Log INFO 'Initiating restart.'
+    # v1.0.12: pre-reboot path is not "done" - the resume run after reboot
+    # will write the real INSTALLER_DONE marker. Setting this flag tells the
+    # top-level finally to skip writing failure on this exit path.
+    $script:RebootPending = $true
     try {
         Restart-Computer -Force
         # Restart-Computer is async - give the OS time to tear us down.
@@ -407,10 +476,16 @@ function Invoke-Rollback {
                 Remove-NetFirewallRule -DisplayName $FirewallRuleName -ErrorAction SilentlyContinue
             }
             'EnsureWsl' {
-                $ans = Read-Host "Rollback: unregister WSL '$WslDistro' distro? This deletes the Ubuntu distro and any files inside it. Type YES to confirm"
+                $ans = Confirm-Or-Default "Rollback: unregister WSL '$WslDistro' distro? This deletes the Ubuntu distro and any files inside it. Type YES to confirm" 'YES'
                 if ($ans -eq 'YES') {
-                    wsl --unregister $WslDistro 2>&1 | Out-Null
-                    Write-Log INFO "WSL distro '$WslDistro' unregistered."
+                    # v1.0.12: Process.Start instead of `wsl ... 2>&1` for the
+                    # same reason as Invoke-WslBash - PS 5.1 turns native stderr
+                    # lines into terminating errors under $ErrorActionPreference='Stop'.
+                    $rUnreg = Invoke-WslExe -Arguments @('--unregister', $WslDistro)
+                    Write-Log INFO "WSL distro '$WslDistro' unregistered (exit=$($rUnreg.ExitCode))."
+                    if ($rUnreg.ExitCode -ne 0 -and $rUnreg.StdErr) {
+                        Write-Log WARN "wsl --unregister stderr: $($rUnreg.StdErr.Trim())"
+                    }
                 } else {
                     Write-Log WARN 'WSL distro left in place by user choice.'
                 }
@@ -428,7 +503,7 @@ function Invoke-WithRollback {
         Write-Log ERROR $_.ScriptStackTrace
         $done = Get-CompletedSteps
         if ($done.Count -gt 0) {
-            $ans = Read-Host 'Installation failed. Run automatic rollback? (y/N)'
+            $ans = Confirm-Or-Default 'Installation failed. Run automatic rollback? (y/N)' 'y'
             if ($ans -match '^[Yy]') {
                 Invoke-Rollback -CompletedSteps $done
             } else {
@@ -628,13 +703,20 @@ function Step-EnsureWsl {
     Set-ItemProperty -Path $RunOnceRegPath -Name 'ClawFactoryResume' -Value $runOnceVal -Type String
     Write-Log INFO "Reboot required. RunOnce key registered: $runOnceVal"
     Save-Checkpoint 'EnsureWsl'
-    Add-Type -AssemblyName System.Windows.Forms
-    [System.Windows.Forms.MessageBox]::Show(
-        "WSL2 requires a restart to complete setup.`nClawFactory will continue automatically after restart.`nClick OK to restart now.",
-        'Restart Required',
-        [System.Windows.Forms.MessageBoxButtons]::OK,
-        [System.Windows.Forms.MessageBoxIcon]::Information
-    ) | Out-Null
+    if (-not (Test-IsSilent)) {
+        Add-Type -AssemblyName System.Windows.Forms
+        [System.Windows.Forms.MessageBox]::Show(
+            "WSL2 requires a restart to complete setup.`nClawFactory will continue automatically after restart.`nClick OK to restart now.",
+            'Restart Required',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
+    } else {
+        Write-Log INFO 'Silent mode: skipping restart-required dialog; rebooting now.'
+    }
+    # v1.0.12: same as Initiate-Restart - pre-reboot is not "done"; the
+    # resume run will emit the real marker.
+    $script:RebootPending = $true
     Restart-Computer -Force
 }
 
@@ -698,9 +780,10 @@ function Step-ConfigureWslConfig {
                     # session: hard-fail through Invoke-WithRollback. Shipping
                     # a broken-on-idle gateway silently is worse than aborting.
                     Write-Log WARN ".wslconfig has vmIdleTimeout=$currentValue (recommended: -1). File NOT modified. User must edit $WslConfigPath manually and reboot for gateway stability."
-                    $isInteractive = [System.Environment]::UserInteractive
-                    $shownDialog   = $false
-                    if ($isInteractive) {
+                    # v1.0.12: use Test-IsSilent (covers both /SILENT and
+                    # non-interactive contexts) instead of bare UserInteractive.
+                    $shownDialog = $false
+                    if (-not (Test-IsSilent)) {
                         try {
                             Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
                             [System.Windows.Forms.MessageBox]::Show(
@@ -741,6 +824,12 @@ function Step-ConfigureWslConfig {
 
             $proceedShutdown = $true
             if ($otherDistros.Count -gt 0) {
+                if (Test-IsSilent) {
+                    Write-Log INFO "Silent mode: skipping wsl --shutdown to avoid disturbing other distros: $($otherDistros -join ', ')"
+                    $proceedShutdown = $false
+                }
+            }
+            if ($otherDistros.Count -gt 0 -and $proceedShutdown) {
                 $list = ($otherDistros -join "`r`n  ")
                 try {
                     Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
@@ -760,7 +849,8 @@ function Step-ConfigureWslConfig {
             }
 
             if ($proceedShutdown) {
-                & wsl.exe --shutdown 2>&1 | Out-Null
+                # v1.0.12: Process.Start - see Invoke-WslExe rationale.
+                $null = Invoke-WslExe -Arguments @('--shutdown')
                 Write-Log INFO 'Ran wsl --shutdown to apply .wslconfig change'
             } else {
                 Write-Log INFO 'Skipped wsl --shutdown per user choice; .wslconfig will take effect on next WSL idle'
@@ -860,24 +950,28 @@ chmod 644 /etc/wsl.conf
 
 function Step-InstallDocker {
     Write-Log INFO 'Step 6: Installing Docker Engine (rootless for clawuser).'
+    # v1.0.12: every apt-get / curl is wrapped in `timeout 300`. The same
+    # protection is already present in Step-PreInstallOpenClawDeps (added
+    # v1.0.7); back-porting it here closes the remaining stall surface for
+    # Docker's apt mirror or the docker.com gpg fetch.
     $script = @'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -y
-apt-get install -y --no-install-recommends \
+timeout 300 apt-get update -y
+timeout 300 apt-get install -y --no-install-recommends \
     ca-certificates curl gnupg uidmap dbus-user-session \
     iptables nftables fuse-overlayfs slirp4netns
 install -m 0755 -d /etc/apt/keyrings
 if [ ! -f /etc/apt/keyrings/docker.gpg ]; then
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    timeout 120 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
     chmod a+r /etc/apt/keyrings/docker.gpg
 fi
 CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
 ARCH=$(dpkg --print-architecture)
 echo "deb [arch=$ARCH signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $CODENAME stable" \
     > /etc/apt/sources.list.d/docker.list
-apt-get update -y
-apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
+timeout 300 apt-get update -y
+timeout 300 apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
 loginctl enable-linger clawuser || true
 su - clawuser -c 'dockerd-rootless-setuptool.sh install --force' || true
 grep -q 'DOCKER_HOST=unix' /home/clawuser/.bashrc || \
@@ -1097,10 +1191,14 @@ function Step-InstallOllama {
     # Only runs if Provider = ollama. Installs Ollama daemon inside WSL, pulls default model.
     if ($Provider -ne 'ollama') { return }
     Write-Log INFO 'Step 7b: Installing Ollama (local LLM runtime) inside WSL.'
+    # v1.0.12: timeout 120 on the install.sh download (small file, but
+    # ollama.com has been flaky); timeout 1800 on the model pull (4.7 GB,
+    # 30 min ceiling). Without these the entire installer can wedge here
+    # on slow networks with no error visible to the validation harness.
     $script = @'
 set -euo pipefail
 if ! command -v ollama >/dev/null 2>&1; then
-    curl -fsSL https://ollama.com/install.sh -o /tmp/ollama-install.sh
+    timeout 120 curl -fsSL https://ollama.com/install.sh -o /tmp/ollama-install.sh
     # Basic integrity check: must be a shell script, not HTML
     head -c 2 /tmp/ollama-install.sh | grep -q '#!' || { echo "ollama install.sh is not a shell script"; exit 1; }
     bash /tmp/ollama-install.sh
@@ -1109,7 +1207,7 @@ fi
 systemctl enable ollama 2>/dev/null || true
 systemctl restart ollama 2>/dev/null || true
 sleep 3
-su - clawuser -c 'ollama pull llama3.1:8b' || echo "ollama pull failed - you can retry later with: wsl -u clawuser -- ollama pull llama3.1:8b"
+su - clawuser -c 'timeout 1800 ollama pull llama3.1:8b || echo "[WARN] ollama pull timed out or failed - model will need to be pulled manually"'
 '@
     $rc = Invoke-WslBash -Script $script -User 'root'
     if ($rc -ne 0) { Write-Log WARN 'Ollama install returned non-zero; you may need to run `wsl -u clawuser -- ollama pull llama3.1:8b` manually.' }
@@ -1541,6 +1639,21 @@ exit 0
         if ($i -lt 6) { Start-Sleep -Seconds 10 }
     }
     if (-not $healthy) {
+        # v1.0.12: capture diagnostics before throwing so the validation
+        # harness (and any future incident review) can see WHY the gateway
+        # didn't bind. Each Invoke-WslBash call writes its output to
+        # install.log under [wsl:clawuser out]/[wsl:clawuser err] prefixes;
+        # the GW-* markers below are just human-readable section headers
+        # for log scanners.
+        Write-Log INFO 'Collecting gateway diagnostics before failure...'
+        $gwJournal = Invoke-WslBash -Script 'journalctl --user -u openclaw-gateway --no-pager --since "10 min ago" 2>&1 || echo "journalctl unavailable"' -User 'clawuser'
+        $gwStatus  = Invoke-WslBash -Script 'systemctl --user status openclaw-gateway --no-pager 2>&1 || echo "systemctl unavailable"' -User 'clawuser'
+        $gwPort    = Invoke-WslBash -Script 'ss -tlnp 2>&1 | grep -E "8787|LISTEN" || echo "nothing listening on 8787"' -User 'clawuser'
+        $gwTmpLog  = Invoke-WslBash -Script 'ls -la /tmp/openclaw-install.log 2>&1; cat /tmp/openclaw-install.log 2>&1 || echo "log not found"' -User 'clawuser'
+        Write-Log INFO "GW-JOURNAL: $gwJournal"
+        Write-Log INFO "GW-STATUS:  $gwStatus"
+        Write-Log INFO "GW-PORT:    $gwPort"
+        Write-Log INFO "GW-TMPLOG:  $gwTmpLog"
         throw 'Gateway did not respond after 60 seconds'
     }
     Save-Checkpoint 'GatewayRuntime'
@@ -1924,6 +2037,16 @@ function Step-RegisterWslHostTask {
 }
 
 #--- Main ---------------------------------------------------------------------
+# v1.0.12: every exit path - success, install failure, final-health-gate
+# failure, or pre-Invoke-WithRollback failure - must write INSTALLER_DONE
+# to both install.log and C:\install-result.txt. The validation harness
+# polls for INSTALLER_DONE; before v1.0.12 it was never emitted, so even
+# a clean failure looked like a TIMEOUT to the harness.
+$script:InstallSucceeded = $false
+$script:InstallFailReason = ''
+$script:RebootPending = $false
+try {
+
 if ($Resume) {
     # Recover provider from the resume flag (the cmdline value may be the
     # default 'grok' if Inno didn't pass -Provider on the silent relaunch).
@@ -1963,6 +2086,13 @@ Invoke-WithRollback {
     # denied" during gateway install. Fix immediately after WSL is running.
     $null = Invoke-WslBash -Script 'chmod 1777 /tmp && chmod 1777 /var/tmp' -User 'root'
     Write-Log INFO 'v1.0.11: Set /tmp and /var/tmp to 1777 (sticky+world-writable).'
+    # v1.0.12: pre-create /tmp/openclaw-install.log owned by clawuser. The
+    # gateway-install step runs `tee /tmp/openclaw-install.log` as clawuser;
+    # if the file already exists with root ownership (created by an earlier
+    # root-context tee invocation), sticky-bit /tmp won't let clawuser
+    # overwrite it - "tee: Permission denied" was the v1.0.11 symptom.
+    $null = Invoke-WslBash -Script 'rm -f /tmp/openclaw-install.log && touch /tmp/openclaw-install.log && chown clawuser:clawuser /tmp/openclaw-install.log' -User 'root'
+    Write-Log INFO 'v1.0.12: Pre-created /tmp/openclaw-install.log owned by clawuser.'
     Step-CreateClawUser
     Step-SetDefaultUser
     Step-InstallDocker
@@ -2034,4 +2164,42 @@ Write-Host 'SUCCESS. Your hardened Skills Factory is ready.' -ForegroundColor Gr
 Write-Host "Log: $LogFile"
 Write-Host "Provider: $($ThisProvider.DisplayName)  |  Default model: $($ThisProvider.DefaultModel)"
 # Next-step commands are printed by bootstrap.ps1 (Step 15).
-exit 0
+$script:InstallSucceeded = $true
+
+} catch {
+    $script:InstallFailReason = $_.Exception.Message
+    Write-Log ERROR "Top-level handler caught: $($_.Exception.Message)"
+    throw
+} finally {
+    # v1.0.12: emit INSTALLER_DONE marker on EVERY exit path EXCEPT
+    # mid-install reboot. The reboot path's resume run will emit the
+    # real marker after the rest of the install completes.
+    # PowerShell forbids `return` inside a finally block, so we gate
+    # the entire emit logic on a single guard expression.
+    if ($script:RebootPending) {
+        Write-Log INFO 'INSTALLER_PAUSED=reboot (resume run will emit INSTALLER_DONE).'
+    } else {
+        $marker = if ($script:InstallSucceeded) { 'success' } else { 'failure' }
+        $reason = if ($script:InstallFailReason) { " reason=$($script:InstallFailReason)" } else { '' }
+        Write-Log INFO "INSTALLER_DONE=$marker$reason"
+        # Best-effort write to a stable filesystem location. Write to ProgramData
+        # first (always exists, always writable by the install context); also
+        # try C:\ for compatibility with the existing validation harness, but
+        # don't fail if it's locked down.
+        $pdMarker = Join-Path $LogDir 'install-result.txt'
+        try {
+            Set-Content -LiteralPath $pdMarker -Value "INSTALLER_DONE=$marker$reason" -Encoding Ascii -ErrorAction Stop
+        } catch {
+            # ProgramData write should never fail; if it does, install.log still
+            # contains the marker, which the validation harness already scans.
+        }
+        try {
+            Set-Content -LiteralPath 'C:\install-result.txt' -Value "INSTALLER_DONE=$marker$reason" -Encoding Ascii -ErrorAction Stop
+        } catch {
+            # C:\ may be locked down on some hosts - non-fatal, the ProgramData
+            # copy and install.log marker are sufficient.
+        }
+    }
+}
+
+exit ([int](-not $script:InstallSucceeded))

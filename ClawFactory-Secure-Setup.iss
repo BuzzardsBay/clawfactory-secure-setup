@@ -60,7 +60,7 @@ Source: "resources\ubuntu-rootfs.tar.gz";    DestDir: "{tmp}";            Flags:
 ; same .exe with /SILENT /resume after a WSL2-install reboot. {code:GetResumeFlag}
 ; appends ' -Resume' iff the wizard was relaunched with /resume.
 Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup.ps1"" -AcknowledgedOpenClawUrl -Provider {code:GetProviderLabel} -SourceExe ""{srcexe}"" -BundledRootfsDir ""{tmp}""{code:GetResumeFlag}"; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup.ps1"" -AcknowledgedOpenClawUrl -Provider {code:GetProviderLabel} -SourceExe ""{srcexe}"" -BundledRootfsDir ""{tmp}""{code:GetResumeFlag}{code:GetSilentFlag}"; \
   WorkingDir: "{app}"; \
   StatusMsg: "{code:GetStatusMsg}"; \
   Flags: waituntilterminated
@@ -186,6 +186,18 @@ function GetResumeFlag(Param: string): string;
 begin
   if IsResumeRun then
     Result := ' -Resume'
+  else
+    Result := '';
+end;
+
+{ v1.0.12: propagate /SILENT to setup.ps1 so its Confirm-Or-Default
+  helper can refuse interactive primitives instead of hanging. Without
+  this, /SILENT only suppresses the Inno wizard - setup.ps1 has no idea
+  it's running unattended and Read-Host calls block forever. }
+function GetSilentFlag(Param: string): string;
+begin
+  if WizardSilent() then
+    Result := ' -Silent'
   else
     Result := '';
 end;
