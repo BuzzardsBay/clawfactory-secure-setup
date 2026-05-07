@@ -281,7 +281,7 @@ function Install-WslDistroWithFallback {
     #
     # FALLBACK: existing `wsl --install` (network) path. Used when no
     # bundle was passed, the tarball is absent, or the bundled import
-    # failed. Same WSL2 → WSL1 fallback shape as before, unchanged.
+    # failed. Same WSL2 -> WSL1 fallback shape as before, unchanged.
     #
     # Returns the variant string ('wsl2' or 'wsl1') for logging.
     param([string]$BundledRootfs = '')
@@ -548,7 +548,7 @@ function Step-EnsureWsl {
     # Kernel-loaded check. If `wsl --status` returns 0 the feature is active
     # and we can install Ubuntu without rebooting. Otherwise enable features
     # via DISM and reboot - the resume branch above completes the install.
-    # Uses Process.Start (not 2>&1) — same reason as Invoke-WslBash: PS 5.1
+    # Uses Process.Start (not 2>&1) - same reason as Invoke-WslBash: PS 5.1
     # converts each stderr line to an ErrorRecord and $ErrorActionPreference =
     # 'Stop' turns those into terminating errors before we can check ExitCode.
     $psiStatus = New-Object System.Diagnostics.ProcessStartInfo
@@ -578,7 +578,7 @@ function Step-EnsureWsl {
         return
     }
 
-    # WSL not installed — install kernel (no distro), then reboot.
+    # WSL not installed - install kernel (no distro), then reboot.
     # The $Resume branch above completes the distro install after restart.
     Write-Log INFO 'WSL2 not installed. Running wsl --install --no-distribution.'
     $psiInstall = New-Object System.Diagnostics.ProcessStartInfo
@@ -594,7 +594,7 @@ function Step-EnsureWsl {
     $wslRc  = $procInstall.ExitCode
     Write-Log INFO "wsl --install --no-distribution exit code: $wslRc"
     if ($wslRc -notin @(0, 3010)) {
-        Write-Log INFO "wsl --install returned $wslRc (elevation required or reboot pending) — proceeding to reboot-and-resume path."
+        Write-Log INFO "wsl --install returned $wslRc (elevation required or reboot pending) - proceeding to reboot-and-resume path."
     }
 
     # Detect whether the kernel is immediately usable without a reboot.
@@ -610,7 +610,7 @@ function Step-EnsureWsl {
     $null = $procStatus2.StandardError.ReadToEnd()
     $procStatus2.WaitForExit()
     if ($procStatus2.ExitCode -eq 0) {
-        Write-Log INFO 'WSL kernel loaded without reboot — installing distro now.'
+        Write-Log INFO 'WSL kernel loaded without reboot - installing distro now.'
         $bundledTarball = if ($BundledRootfsDir) { Join-Path $BundledRootfsDir 'ubuntu-rootfs.tar.gz' } else { '' }
         $variant = Install-WslDistroWithFallback -BundledRootfs $bundledTarball
         Write-Log INFO "WSL variant installed: $variant"
@@ -623,7 +623,7 @@ function Step-EnsureWsl {
         return
     }
 
-    # Reboot required — write RunOnce key, save checkpoint, restart.
+    # Reboot required - write RunOnce key, save checkpoint, restart.
     $runOnceVal = "`"$SourceExe`" /SILENT /SUPPRESSMSGBOXES /NORESTART /resume"
     Set-ItemProperty -Path $RunOnceRegPath -Name 'ClawFactoryResume' -Value $runOnceVal -Type String
     Write-Log INFO "Reboot required. RunOnce key registered: $runOnceVal"
@@ -1065,7 +1065,7 @@ systemctl enable clawfactory-fw.service 2>/dev/null || true
     # v1.0.3 regression guard: the laptop's runtime log showed bash receiving
     # 'ft' instead of 'nft' (line 41: ft: command not found) despite static
     # analysis showing intact source. We now use full path /usr/sbin/nft
-    # throughout — this assertion fails the install if a future edit
+    # throughout - this assertion fails the install if a future edit
     # accidentally drops back to the bare 'nft' form or otherwise loses
     # the full-path token before transport to bash.
     if ($script -notmatch '/usr/sbin/nft') {
@@ -1290,7 +1290,7 @@ EOF
 
 # --- c. Per-agent auth-profiles ------------------------------------------
 # The gateway looks for API keys at ~/.openclaw/agents/<agent>/agent/auth-profiles.json,
-# NOT the global ~/.openclaw/auth-profiles.json. Copy global → per-agent for
+# NOT the global ~/.openclaw/auth-profiles.json. Copy global -> per-agent for
 # every agent dir we set up.
 if [ -f /home/clawuser/.openclaw/auth-profiles.json ]; then
     for agent_dir in /home/clawuser/.openclaw/agents/*/; do
@@ -1817,7 +1817,7 @@ function Step-ConfigureAgents {
     # Why we run on Windows (not pwsh inside WSL): stock Ubuntu has no pwsh,
     # and the egress firewall (Step 7) does not whitelist packages.microsoft.com
     # so apt-installing pwsh would fail without firewall changes (out of scope).
-    # Running on Windows is functionally equivalent — the agent.md files still
+    # Running on Windows is functionally equivalent - the agent.md files still
     # land in clawuser's home inside WSL, owned by clawuser, mode 644.
     Write-Log INFO 'Step 15 of 15: Configuring agents (running bootstrap.ps1).'
     $bootstrap = Join-Path $PSScriptRoot 'resources\bootstrap.ps1'
@@ -1984,13 +1984,13 @@ Invoke-WithRollback {
 
 #--- Final gateway health gate ------------------------------------------------
 # After all install steps complete, confirm the gateway is responding before
-# reporting success. This is the real health gate — replaces the old
+# reporting success. This is the real health gate - replaces the old
 # `openclaw doctor` final-check (removed because of openclaw/openclaw#47133:
 # CLI commands that open a WS connection to the running gateway trigger
 # SIGTERM on disconnect, restart cycle). HTTP /status uses no WS and never
 # triggers #47133. Polled from the Windows side (Invoke-WebRequest), which
 # reaches WSL2's loopback via the kernel's localhost forwarding.
-# 15 attempts × 2-second intervals = 30 seconds total.
+# 15 attempts x 2-second intervals = 30 seconds total.
 Write-Log INFO 'Final gateway health gate: polling http://127.0.0.1:8787/status for up to 30s.'
 $healthy = $false
 for ($i = 1; $i -le 15; $i++) {
