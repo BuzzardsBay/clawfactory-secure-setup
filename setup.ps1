@@ -973,7 +973,7 @@ done
 
 # --- Try nftables first; fall back to iptables-legacy on Netlink failure ---
 # Default WSL2 kernels often ship without nf_tables loaded, in which case
-# `nft -f` exits non-zero with `Unable to initialize Netlink socket`. We
+# nft -f exits non-zero with "Unable to initialize Netlink socket". We
 # detect that specific signal and re-apply equivalent rules using
 # iptables-legacy (xt_owner + xt_conntrack are usually available on the
 # same kernels that lack nf_tables).
@@ -1958,6 +1958,11 @@ Invoke-WithRollback {
     Step-ConfigureWslConfig      # v1.0.1: Windows-side .wslconfig (vmIdleTimeout=-1)
     Step-ConfigureWslConf
     Step-RestartWsl
+    # v1.0.11: rootfs bundle ships with /tmp owned root:root 755; clawuser
+    # cannot write there, causing "tee: /tmp/openclaw-install.log: Permission
+    # denied" during gateway install. Fix immediately after WSL is running.
+    $null = Invoke-WslBash -Script 'chmod 1777 /tmp && chmod 1777 /var/tmp' -User 'root'
+    Write-Log INFO 'v1.0.11: Set /tmp and /var/tmp to 1777 (sticky+world-writable).'
     Step-CreateClawUser
     Step-SetDefaultUser
     Step-InstallDocker
