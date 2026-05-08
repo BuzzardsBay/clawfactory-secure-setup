@@ -45,6 +45,7 @@ Source: "resources\rename-agent.ps1";        DestDir: "{app}\resources";  Flags:
 Source: "resources\launcher.ps1";            DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\clawfactory-stop.ps1";    DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\switch-provider.ps1";     DestDir: "{app}\resources";  Flags: ignoreversion
+Source: "smoke-test.ps1";                    DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\logo.png";                DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\logo.README.txt";         DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\lobster.ico";             DestDir: "{app}\resources";  Flags: ignoreversion
