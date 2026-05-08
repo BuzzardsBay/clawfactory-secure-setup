@@ -1,36 +1,157 @@
 # Changelog
 
-All notable changes to ClawFactory Secure Setup are documented here.
+All notable changes to ClawFactory are documented here.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [1.0.0] — 2026-05-03
-
-First public release. 7/7 smoke test passing on real hardware.
-
-### Added
-
-- **Bundled Ubuntu rootfs for offline install** ([`a702b2d`](../../commit/a702b2d)). 341 MB rootfs ships with the installer; `wsl --import` is the primary path with `wsl --install` (network) as fallback. Eliminates Microsoft Store dependency and works on machines with no internet after the `.exe` is downloaded.
-- **OpenClaw version pin to 2026.4.27** ([`826fe74`](../../commit/826fe74)). `OPENCLAW_VERSION=2026.4.27` passed to `install.sh` so customers receive a tested, deterministic install rather than tracking upstream `@latest`. Bump only after manually re-validating the four bundled bug-workarounds against the new version.
-- **Diagnostic reference pack** ([`32c594c`](../../commit/32c594c)). Sections 13–18 of `CLAUDE_ClawFactory.md` capture the install execution map, code interconnect map, diagnostic quick reference, Inno Setup script, OpenClaw 2026.4.27 config schema, and a healthy install state baseline. Plus a `v1.1_backlog.md` tracking deferred items.
-- **Health-poll on gateway install** ([`cf38a65`](../../commit/cf38a65)). Step 8b polls `http://127.0.0.1:8787/status` for up to 60 s after `openclaw gateway install --force` returns. The HTTP probe is the source of truth for health, not the install command's exit code.
-- **`Install-WslDistroWithFallback`** with two-tier strategy: bundled `wsl --import --version 2` first, network `wsl --install` fallback (which retains its own `HCS_E_HYPERV_NOT_INSTALLED` → WSL1 fallback).
-- **Smoke test script** at `smoke-test.ps1`. Seven checks, exit 0 only on full pass. Runs from admin PowerShell on the install target.
-- **Defense-in-depth bonjour disable** — systemd drop-in setting `OPENCLAW_DISABLE_BONJOUR=1`. Harmless on 2026.4.27 (env var ignored); documented protection against future version-bump regressions of the bonjour SIGTERM bug.
-- **Per-agent `auth-profiles.json` fan-out** in `bootstrap.ps1`. Five agents (main, orchestrator, publisher, skill-builder, skill-scout) each get the legacy `~/.openclaw/auth-profiles.json` copied to their canonical per-agent path at mode 600.
+## [1.0.16] — 2026-05-08
 
 ### Fixed
 
-- **CR line-ending corruption in `Invoke-WslBash`** ([`17172d5`](../../commit/17172d5), [`93c0bf7`](../../commit/93c0bf7)). PowerShell here-strings on Windows have CRLF endings; when base64-decoded inside bash, `\r` was being parsed as part of the option name (`set -e\r` → "set: invalid option"). All three `Invoke-WslBash` sites (one in `setup.ps1`, two in `bootstrap.ps1`) now strip CRLF→LF before encoding.
-- **Gateway config order** ([`3da92fa`](../../commit/3da92fa)). `openclaw config set gateway.{mode,bind,port}` now runs before `openclaw gateway install --force` instead of after. The install command starts the service immediately and the service exits 78/CONFIG if `gateway.mode` isn't already set in `openclaw.json`.
-- **`tee -a` permission-denied trapping install success** ([`42869d8`](../../commit/42869d8)). Step 8 created `/tmp/openclaw-install.log` as root; Step 8b ran as clawuser and couldn't append, but the pipeline exit code was tee's (1), masking openclaw's (0). Dropped the tee from the gateway-install line; output is captured via `Invoke-WslBash`'s stdout routing.
-- **Throw-on-exit-1 from `gateway install --force`** ([`cf38a65`](../../commit/cf38a65)). Non-zero exit from the install command is now WARN-only; only a non-responsive gateway after the 60 s `/status` poll throws.
-- **`openclaw doctor` blocking on interactive prompts** ([`93c0bf7`](../../commit/93c0bf7)). Added `--non-interactive --no-workspace-suggestions`. Safe in this architecture because Step 8b's `gateway install --force` already handles the systemd unit install that `--non-interactive` skips.
-- **`post-install.ps1` aborting on first stderr line** ([`93c0bf7`](../../commit/93c0bf7)). With `$ErrorActionPreference = 'Stop'`, raw `wsl -- … 2>&1 | ForEach-Object` calls were terminating the script when wsl.exe printed `wsl: Failed to translate '<path>'` warnings (which fire reliably on every wsl invocation from a Windows shell). Refactored four sites to use a `Process.Start`-based `Invoke-WslBash` that filters those lines.
-- **Silent failure on `openclaw models set`** ([`93c0bf7`](../../commit/93c0bf7)). Exit code is now captured and a WARN logged on non-zero with a manual-recovery hint.
-- **Stale doctor comment block** ([`93c0bf7`](../../commit/93c0bf7)). Comment in `post-install.ps1` warning against `--non-interactive` was from the pre-Step-8b architecture; rewritten to match the current state where doctor is a final health check.
-- **Stale "What to do next" instructions in `bootstrap.ps1`** ([`93c0bf7`](../../commit/93c0bf7)). Removed the misleading "Start the gateway" step (already started by Step 8b); fixed the log paths from `/tmp/openclaw/` to `~/.openclaw/logs/gateway.log`.
+- `/v1/chat/completions` returned HTTP 404 on every install since v1.0.1. Four `openclaw config set` calls were missing `--strict-json`, causing boolean and integer values to be silently dropped while the command still returned exit 0. Affected: `gateway.port` (x2), `plugins.entries.bonjour.enabled`, and `gateway.http.endpoints.chatCompletions.enabled`. The chatCompletions flag was the only one with user-visible impact (the others matched defaults), but all four are now correct.
 
-[1.0.0]: ../../releases/tag/v1.0.0
+## [1.0.15] — 2026-05-08
+
+### Fixed
+
+- `smoke-test.ps1` produced 7 false-failures when invoked via `az vm run-command`, which runs scripts as `NT AUTHORITY\SYSTEM`. WSL refuses to run as LocalSystem (`WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED`), so every `wsl ... bash -lc ...` call returned an error string instead of expected output. Added SYSTEM-context detection; WSL-dependent checks now SKIP cleanly under SYSTEM rather than failing.
+- An `[int]$result -ge 4` cast in smoke-test crashed with "Cannot convert Object[] to Int32" when wsl returned multi-line error text. Replaced with defensive regex parse.
+
+### Added
+
+- `smoke-test.ps1` is now bundled in the installer at `{app}\resources\smoke-test.ps1` (was previously not shipped).
+
+## [1.0.14] — 2026-05-07
+
+### Fixed
+
+- `Test-WslFunctional` always returned false on fresh installs because `Invoke-WslExe` decoded `wsl.exe`'s UTF-16-LE output as CP1252, leaving embedded NULs that blocked `Trim` from removing the trailing `\r`. Set explicit Unicode encoding for wsl.exe-native output paths.
+- `Invoke-WithRollback` crashed with "the property 'Count' cannot be found" under StrictMode 3 when only one checkpoint had been saved, because PowerShell 5.1 unrolls single-element array returns to scalar strings. Wrapped the call sites in `@(...)` to force array context.
+
+## [1.0.13] — 2026-05-07
+
+### Changed
+
+- Bumped `OpenClawNpmVersion` pin from `2026.4.23` to `2026.4.27`. The 2026.4.23 release had a known bonjour mDNS crash loop that wedged the gateway event loop after systemd reported the unit active; 2026.4.27 fixes it (issues #72355, #64928).
+
+### Fixed
+
+- Silent-mode auto-rollback default flipped from `'y'` to `'n'`. A failed silent install was wiping its own forensics by auto-unregistering the WSL distro before logs could be collected.
+- `/tmp/openclaw-install.log` is now pre-created with `chown clawuser:clawuser` AND `chmod 0666` (was chown only). Defends against an internal `sudo'd tee` re-creating the file as root.
+- `$InstallerVersion` constant in `setup.ps1` was stale at `1.0.4`; now matches the release version.
+
+## [1.0.12] — 2026-05-07
+
+### Added
+
+- New `Confirm-Or-Default` helper gating every interactive primitive on a `$Silent` flag. The `$Silent` switch is propagated from Inno's `WizardSilent()` via the `.iss` `[Run]` block, so `/SILENT` installs no longer hang on `Read-Host` or `MessageBox.Show`.
+- New `Invoke-WslExe` helper for direct `wsl.exe` calls, paired with the existing `Invoke-WslBash` for bash-via-wsl.
+- Top-level `try/catch/finally` in `setup.ps1` writes `INSTALLER_DONE=success` or `INSTALLER_DONE=failure reason=<msg>` to `install.log`, `C:\install-result.txt`, and `C:\ProgramData\ClawFactory\install-result.txt` on every exit path. The Azure validation harness was previously treating all clean failures as TIMEOUT because no marker was emitted.
+- Gateway-failure path now collects `journalctl --user -u openclaw-gateway`, `systemctl status`, and `ss -tlnp` before throwing, so post-mortem has the data it needs.
+
+### Fixed
+
+- `timeout 300` added to all `Step-InstallDocker` apt-get calls; `timeout 1800` on `ollama pull`. Previous lack of timeouts could hang silent installs indefinitely.
+- Ten more `& wsl.exe ... 2>&1` calls (in `Test-WslFunctional`, `Install-WslDistroWithFallback`, `Step-ConfigureWslConfig`, and rollback `--unregister`) converted to use `Invoke-WslExe`. PowerShell 5.1's `2>&1` interaction wraps native stderr as terminating ErrorRecords under `$ErrorActionPreference = 'Stop'`.
+
+## [1.0.11] — 2026-05-07
+
+### Fixed
+
+- `nft` token corrupted to `ft` again — a different mechanism this time (a backtick inside a PowerShell here-string ate the leading `n`). Rewrote the affected lines so `nft` is never adjacent to a backtick.
+- `tee -a /tmp/openclaw-install.log` failing with permission denied on rootfs that ships `/tmp` mode 0755 root:root. Added `chmod 1777 /tmp && chmod 1777 /var/tmp` immediately after WSL distro import.
+
+## [1.0.10] — 2026-05-07
+
+### Fixed
+
+- Non-ASCII characters (em-dash, arrow, multiplication sign) in `setup.ps1` caused PS 5.1 parse-time terminating errors. Without a UTF-8 BOM, PS 5.1 reads `.ps1` files as Windows-1252 and the multi-byte UTF-8 sequences decode as garbage tokens. Replaced every non-ASCII byte; added a pre-build scan that fails the build on any byte > 0x7F.
+
+## [1.0.9] — 2026-05-07
+
+### Fixed
+
+- `Step-EnsureWsl` exit-code routing was wrong: `wsl --install` exit 1 ("elevation required, reboot pending") was being caught by `Invoke-WithRollback` as a fatal failure instead of routing to the RunOnce + reboot path. Reworked the branches so any non-zero from `wsl --install` (including the documented exit 1) routes to reboot-and-resume; only genuine install failures throw.
+
+## [1.0.8] — 2026-05-07
+
+### Fixed
+
+- Three `& wsl.exe ... 2>&1` calls in `Step-EnsureWsl` were turning native-command stderr into `ErrorRecord`s under `$ErrorActionPreference = 'Stop'`, throwing on harmless WSL warnings before the exit code could be checked. The reboot-and-resume code from v1.0.6 had been unreachable as a result. Replaced all three with `[System.Diagnostics.Process]::Start($psi)` invocations that capture stdout/stderr separately.
+
+## [1.0.7] — 2026-05-06
+
+### Fixed
+
+- `iptables` was missing from `Step-PreInstallOpenClawDeps` — required for nftables fallback (`iptables-legacy`) on kernels that don't expose nft hooks. Added it to the build-deps list.
+- 60-second `apt-get` timeout was too tight on slow mirrors. Extended to 300 seconds.
+
+## [1.0.6] — 2026-05-06
+
+### Added
+
+- RunOnce registry key + `Restart-Computer -Force` in `Step-EnsureWsl` so fresh Win11 VMs without WSL features pre-enabled reboot, auto-log back in, and continue from the same install step. Note: this code path was unreachable on real first-install hardware until v1.0.8 (exit-code routing) and v1.0.9 (elevation-exit) fixed the surrounding flow.
+
+## [1.0.5] — 2026-05-06
+
+### Fixed
+
+- Inno wizard pages (API key, Ack, Provider) prompted the user even when `/SILENT` was passed — silent installs blocked on what was supposed to be wizard UI. Added `WizardSilent()` bypass to all three pages.
+
+## [1.0.4] — 2026-05-04
+
+### Added
+
+- New `Step-PreInstallOpenClawDeps` runs `apt-get install -y --no-install-recommends make g++ cmake python3` BEFORE `Step-EgressFirewall`, so `install.sh` finds the build tools already present and skips its own apt phase. Eliminates a 15-minute timeout that was firing on laptops with slow apt mirrors. `nodejs` is intentionally excluded — install.sh owns NodeSource setup.
+
+## [1.0.3] — 2026-05-04
+
+### Fixed
+
+- Egress firewall never activated on any install. `nft` was being mangled to `ft` at runtime somewhere in the PowerShell -> base64 -> bash transport chain. Rewrote `Step-EgressFirewall` to use full path `/usr/sbin/nft` throughout the embedded script; added an assertion guard that throws if the literal `/usr/sbin/nft` token is missing before transport.
+- `Step-EgressFirewall` always saved its checkpoint, even on exit 127 from the mangled `nft` call, so every install since v1.0.0 marked the firewall as installed when it had never run. Exit non-zero now logs ERROR and returns from the function before `Save-Checkpoint`; `-Resume` re-runs will retry the firewall step.
+- `Step-InstallOpenClaw` error strings claimed "5 minutes" timeout when the actual `timeout` argument was 900s (15 min). Updated all three stale strings and replaced the canned blame on `openclaw-onboard` with a list of real candidate causes.
+
+### Added
+
+- Egress firewall allowlist now includes Ubuntu apt mirrors (`archive.ubuntu.com`, `security.ubuntu.com`, `ports.ubuntu.com`, `esm.ubuntu.com`, `ppa.launchpad.net`) as defense-in-depth.
+
+## [1.0.2] — 2026-05-04
+
+### Added
+
+- New `Step-RegisterWslHostTask` registers a hidden Windows scheduled task that runs `wsl.exe -d Ubuntu -u clawuser -- sleep infinity` at user logon, holding one session alive permanently. Prevents the wsl.exe last-session-exit trigger from firing a full systemd shutdown inside the distro (which would tear down `user@1000`, docker, containerd, and the gateway regardless of linger or `vmIdleTimeout` settings).
+
+### Changed
+
+- Moved `Step-EnableChatCompletions` to run AFTER `Step-PreinstallGatewayRuntime`. `openclaw config set` requires the runtime to be present; previously it was printing `--help` instead of writing config.
+
+## [1.0.1] — 2026-05-04
+
+### Added
+
+- New `Step-ConfigureWslConfig` writes `[wsl2] vmIdleTimeout=-1` into `%USERPROFILE%\.wslconfig` (creates or merges) so the WSL VM stays alive while Windows is up. Fixes the gateway flapping every 60-180s on idle (WSL2's default `vmIdleTimeout` is 60000 ms).
+- New `Step-EnableChatCompletions` enables `gateway.http.endpoints.chatCompletions.enabled` for the future native chat app. (Note: the underlying `openclaw config set` call was missing `--strict-json` until v1.0.16, so this flag was silently dropped on every install in the v1.0.1 -> v1.0.15 range.)
+
+## [1.0.0] — 2026-05-03
+
+### Added
+
+- Initial release. 7/7 smoke test passing on real hardware.
+- Bundled Ubuntu rootfs (~341 MB) for offline install via `wsl --import`, with `wsl --install` (network) as fallback.
+- OpenClaw version pin to `2026.4.27` passed via `OPENCLAW_VERSION` env var to `install.sh`.
+- Health-poll on gateway install: Step 8b polls `http://127.0.0.1:8787/status` for up to 60s after `openclaw gateway install --force` returns. The HTTP probe is the source of truth, not the install command's exit code.
+- `smoke-test.ps1` health check (7 checks, exit 0 only on full pass).
+- Defense-in-depth bonjour disable via systemd drop-in setting `OPENCLAW_DISABLE_BONJOUR=1`.
+- Per-agent `auth-profiles.json` fan-out in `bootstrap.ps1` (5 agents: main, orchestrator, publisher, skill-builder, skill-scout) at mode 600.
+
+### Fixed
+
+- CR line-ending corruption in `Invoke-WslBash` (CRLF in PowerShell here-strings turned `set -e` into `set -e\r` after base64 decode in bash). All three call sites now strip CRLF -> LF before encoding.
+- Gateway config order: `openclaw config set gateway.{mode,bind,port}` now runs BEFORE `openclaw gateway install --force`. The install command starts the service immediately and the service exits 78/CONFIG if `gateway.mode` isn't already set.
+- Tee-pipe trapping the install command's success exit code as tee's permission-denied failure. Dropped the `tee` from Step 8b's gateway-install line; output captured via `Invoke-WslBash`'s stdout routing.
+- `openclaw gateway install --force` exit 1 is now WARN-only; only a non-responsive gateway after the 60s `/status` poll throws.
+- `openclaw doctor` blocking on interactive prompts. Added `--non-interactive --no-workspace-suggestions`.
+- `post-install.ps1` aborting on first stderr line under `$ErrorActionPreference = 'Stop'`. Refactored four sites to use `Process.Start`-based `Invoke-WslBash`.

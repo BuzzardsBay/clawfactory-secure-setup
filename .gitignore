@@ -24,3 +24,7 @@ secrets/
 
 # Node (if any tooling is added)
 node_modules/
+
+# 2.4 MB schema dump from openclaw 2026.4.27 phase-3 investigation
+# (already covered by *.log above, listed explicitly for clarity)
+schema-investigation.log

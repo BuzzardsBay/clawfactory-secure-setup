@@ -42,7 +42,7 @@ Set-StrictMode -Version 3.0
 
 #--- Constants ----------------------------------------------------------------
 # v1.0.4 - pre-install OpenClaw build deps before install.sh runs
-$InstallerVersion      = '1.0.13'
+$InstallerVersion      = '1.0.16'
 $OpenClawInstallUrl    = 'https://openclaw.ai/install.sh'
 # [R2] Pin me. See README.md section "Pinning the OpenClaw install.sh hash".
 $OpenClawInstallSha256 = '57f025ba0272e2da3238984360e37fad5230bc7cea81854d154a362ea989d49d'
@@ -1572,7 +1572,7 @@ echo "[gateway-preinstall] complete"
 set -e
 openclaw config set gateway.mode local >/dev/null
 openclaw config set gateway.bind loopback >/dev/null
-openclaw config set gateway.port 8787 >/dev/null
+openclaw config set gateway.port 8787 --strict-json >/dev/null
 echo "[gateway-preconfig] gateway.{mode,bind,port} set"
 '@
     $rcPreconfig = Invoke-WslBash -Script $script8c -User $WslUser
@@ -1705,9 +1705,9 @@ function Step-ConfigureOpenClaw {
     $script9a = @'
 set -e
 openclaw config set gateway.bind loopback >/dev/null
-openclaw config set gateway.port 8787 >/dev/null
+openclaw config set gateway.port 8787 --strict-json >/dev/null
 openclaw config set gateway.mode local >/dev/null
-openclaw config set plugins.entries.bonjour.enabled false >/dev/null
+openclaw config set plugins.entries.bonjour.enabled false --strict-json >/dev/null
 echo "gateway configured (bonjour disabled at plugins.entries.bonjour.enabled)"
 '@
     $rc = Invoke-WslBash -Script $script9a -User $WslUser
@@ -1757,7 +1757,7 @@ function Step-EnableChatCompletions {
         $tmpErr = [System.IO.Path]::GetTempFileName()
         try {
             $proc = Start-Process -FilePath 'wsl.exe' `
-                -ArgumentList @('-d', $WslDistro, '-u', $WslUser, '--', 'bash', '-lc', 'openclaw config set gateway.http.endpoints.chatCompletions.enabled true') `
+                -ArgumentList @('-d', $WslDistro, '-u', $WslUser, '--', 'bash', '-lc', 'openclaw config set gateway.http.endpoints.chatCompletions.enabled true --strict-json') `
                 -NoNewWindow -Wait -PassThru `
                 -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr
             $exit   = $proc.ExitCode
