@@ -6,11 +6,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). This project a
 
 ---
 
-## [1.0.16] — 2026-05-08
+## [1.0.17] — 2026-05-08
 
 ### Fixed
 
-- `/v1/chat/completions` returned HTTP 404 on every install since v1.0.1. Four `openclaw config set` calls were missing `--strict-json`, causing boolean and integer values to be silently dropped while the command still returned exit 0. Affected: `gateway.port` (x2), `plugins.entries.bonjour.enabled`, and `gateway.http.endpoints.chatCompletions.enabled`. The chatCompletions flag was the only one with user-visible impact (the others matched defaults), but all four are now correct.
+- `/v1/chat/completions` returned HTTP 404 on every install since v1.0.1 — the chatCompletions route was never registered. v1.0.16 attempted to fix this with `--strict-json` but the patch did not work; live VM investigation pinned three independent issues, all resolved here:
+  1. The boolean-writing flag is `--json`, not `--strict-json`. Replaced at three sites (`gateway.port` x2, `plugins.entries.bonjour.enabled`, `gateway.http.endpoints.chatCompletions.enabled`).
+  2. openclaw caches gateway config at startup. Added `systemctl --user restart openclaw-gateway` + `/status` health poll inside the new `$script9b` so the route is registered before the install completes.
+  3. `Step-EnableChatCompletions`'s `Start-Process -FilePath wsl.exe` direct call returned exit 1 with no openclaw stdout under the wrapper.cmd auto-logon context. Refactored to use `Invoke-WslBash` (the proven base64-script transport that `$script8c` / `$script9a` use), which works reliably in the same install context.
+
+## [1.0.16] — 2026-05-08
+
+### Fixed (attempt — superseded by v1.0.17)
+
+- Tried to fix the v1.0.1+ chatCompletions=404 bug by adding `--strict-json` to four `openclaw config set` calls. The Azure validation cycle on commit `14b0001` showed install completed and smoke passed, but the chatCompletions probe still returned HTTP 404 and the openclaw.json had no `chatCompletions.enabled` key. The fix was incorrect on multiple counts; v1.0.17 supersedes it. See `validation-runs/v1.0.16-20260508-165245/REPORT.md` for the live-VM diagnosis that drove v1.0.17.
 
 ## [1.0.15] — 2026-05-08
 

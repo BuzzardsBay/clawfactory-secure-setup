@@ -42,7 +42,7 @@ Set-StrictMode -Version 3.0
 
 #--- Constants ----------------------------------------------------------------
 # v1.0.4 - pre-install OpenClaw build deps before install.sh runs
-$InstallerVersion      = '1.0.16'
+$InstallerVersion      = '1.0.17'
 $OpenClawInstallUrl    = 'https://openclaw.ai/install.sh'
 # [R2] Pin me. See README.md section "Pinning the OpenClaw install.sh hash".
 $OpenClawInstallSha256 = '57f025ba0272e2da3238984360e37fad5230bc7cea81854d154a362ea989d49d'
@@ -1572,7 +1572,7 @@ echo "[gateway-preinstall] complete"
 set -e
 openclaw config set gateway.mode local >/dev/null
 openclaw config set gateway.bind loopback >/dev/null
-openclaw config set gateway.port 8787 --strict-json >/dev/null
+openclaw config set gateway.port 8787 --json >/dev/null
 echo "[gateway-preconfig] gateway.{mode,bind,port} set"
 '@
     $rcPreconfig = Invoke-WslBash -Script $script8c -User $WslUser
@@ -1705,9 +1705,9 @@ function Step-ConfigureOpenClaw {
     $script9a = @'
 set -e
 openclaw config set gateway.bind loopback >/dev/null
-openclaw config set gateway.port 8787 --strict-json >/dev/null
+openclaw config set gateway.port 8787 --json >/dev/null
 openclaw config set gateway.mode local >/dev/null
-openclaw config set plugins.entries.bonjour.enabled false --strict-json >/dev/null
+openclaw config set plugins.entries.bonjour.enabled false --json >/dev/null
 echo "gateway configured (bonjour disabled at plugins.entries.bonjour.enabled)"
 '@
     $rc = Invoke-WslBash -Script $script9a -User $WslUser
@@ -1751,31 +1751,41 @@ function Step-EnableChatCompletions {
     # so a future native chat app can talk to the gateway over loopback. Idempotent
     # (`openclaw config set` is idempotent). Failure is non-fatal: gateway works
     # without it; only the native chat app stops working.
+    #
+    # v1.0.17: switched from `Start-Process -FilePath wsl.exe` to `Invoke-WslBash`
+    # to match the working pattern used by $script8c / $script9a in
+    # Step-PreinstallGatewayRuntime / Step-ConfigureOpenClaw. The Start-Process
+    # path returned exit 1 with no openclaw stdout during install (silent
+    # bash-launch failure under the wrapper.cmd auto-logon context) even though
+    # identical commands ran fine via scheduled task. Invoke-WslBash uses the
+    # base64-script transport that the rest of the installer relies on. Same
+    # call also adds the gateway restart inside the bash script (openclaw
+    # caches gateway config at startup; route stays unregistered until restart).
+    # Also: --strict-json was the wrong flag for boolean values - --json is
+    # what writes booleans correctly.
     Write-Log INFO 'Step 9b: Enabling gateway.http.endpoints.chatCompletions.enabled.'
+    $script9b = @'
+set -e
+openclaw config set gateway.http.endpoints.chatCompletions.enabled true --json >/dev/null
+echo "[chatCompletions-set] gateway.http.endpoints.chatCompletions.enabled = true"
+systemctl --user restart openclaw-gateway 2>&1 || true
+for i in 1 2 3 4 5 6; do
+    if curl -fsS --max-time 5 http://127.0.0.1:8787/status >/dev/null 2>&1; then
+        echo "[chatCompletions-restart] gateway healthy on attempt $i"
+        exit 0
+    fi
+    sleep 2
+done
+echo "[chatCompletions-restart] WARNING: gateway did not respond within 12s after restart" >&2
+exit 1
+'@
     try {
-        $tmpOut = [System.IO.Path]::GetTempFileName()
-        $tmpErr = [System.IO.Path]::GetTempFileName()
-        try {
-            $proc = Start-Process -FilePath 'wsl.exe' `
-                -ArgumentList @('-d', $WslDistro, '-u', $WslUser, '--', 'bash', '-lc', 'openclaw config set gateway.http.endpoints.chatCompletions.enabled true --strict-json') `
-                -NoNewWindow -Wait -PassThru `
-                -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr
-            $exit   = $proc.ExitCode
-            $stdout = (Get-Content -LiteralPath $tmpOut -Raw -ErrorAction SilentlyContinue) -as [string]
-            $stderr = (Get-Content -LiteralPath $tmpErr -Raw -ErrorAction SilentlyContinue) -as [string]
-        } finally {
-            Remove-Item -LiteralPath $tmpOut -Force -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath $tmpErr -Force -ErrorAction SilentlyContinue
-        }
-
-        if ($exit -eq 0) {
-            Write-Log INFO 'Enabled gateway.http.endpoints.chatCompletions.enabled'
+        $rc = Invoke-WslBash -Script $script9b -User $WslUser
+        if ($rc -eq 0) {
+            Write-Log INFO 'Enabled gateway.http.endpoints.chatCompletions.enabled and confirmed gateway healthy after restart.'
             Save-Checkpoint 'EnableChatCompletions'
         } else {
-            Write-Log WARN 'Failed to enable chatCompletions endpoint. The gateway will work, but the native chat app will not connect until this is fixed manually. See logs for details.'
-            if ($stdout) { Write-Log WARN "EnableChatCompletions stdout: $($stdout.Trim())" }
-            if ($stderr) { Write-Log WARN "EnableChatCompletions stderr: $($stderr.Trim())" }
-            Write-Log WARN "EnableChatCompletions exit code: $exit"
+            Write-Log WARN "Step-EnableChatCompletions returned exit=$rc. The gateway may still be operational; the native chat app may not connect until this is fixed manually."
         }
     } catch {
         Write-Log WARN "Step-EnableChatCompletions hit an error and is continuing: $($_.Exception.Message)"
