@@ -196,6 +196,11 @@ function Invoke-WslExe {
     $psi.RedirectStandardError  = $true
     $psi.UseShellExecute        = $false
     $psi.CreateNoWindow         = $true
+    # v1.0.14: wsl.exe always outputs UTF-16-LE. Without explicit encoding
+    # the StreamReader uses Console.OutputEncoding (CP1252/CP437) and decodes
+    # output as null-padded bytes, breaking -contains checks and HCS_E detection.
+    $psi.StandardOutputEncoding = [System.Text.Encoding]::Unicode
+    $psi.StandardErrorEncoding  = [System.Text.Encoding]::Unicode
     $proc = [System.Diagnostics.Process]::Start($psi)
     $stdout = $proc.StandardOutput.ReadToEnd()
     $stderr = $proc.StandardError.ReadToEnd()
@@ -501,7 +506,11 @@ function Invoke-WithRollback {
     catch {
         Write-Log ERROR "Install failed: $($_.Exception.Message)"
         Write-Log ERROR $_.ScriptStackTrace
-        $done = Get-CompletedSteps
+        # v1.0.14: @() forces array context. PS 5.1 unrolls single-element
+        # array returns to a bare scalar; under StrictMode 3 a string has no
+        # .Count property, which threw "property 'Count' cannot be found"
+        # in v1.0.13 when only the Preflight checkpoint had been saved.
+        $done = @(Get-CompletedSteps)
         if ($done.Count -gt 0) {
             $ans = Confirm-Or-Default 'Installation failed. Run automatic rollback? (y/N)' 'n'
             if ($ans -match '^[Yy]') {
@@ -892,10 +901,15 @@ generateResolvConf=true
 
 function Step-RestartWsl {
     Write-Log INFO 'Step 4: Restarting WSL.'
-    wsl --shutdown | Out-Null
+    # v1.0.14: route through Invoke-WslExe for consistency with the rest
+    # of the script. These calls don't parse output but the bare `wsl ...`
+    # form sits in the same hazard class as the v1.0.7 fix targeted.
+    $rShutdown = Invoke-WslExe -Arguments @('--shutdown')
+    Write-Log INFO "wsl --shutdown exit=$($rShutdown.ExitCode)"
     Start-Sleep -Seconds 3
     # -u root explicitly: avoids getpwnam errors if wsl.conf default user is stale/missing.
-    wsl -d $WslDistro -u root -- true | Out-Null
+    $rBoot = Invoke-WslExe -Arguments @('-d', $WslDistro, '-u', 'root', '--', 'true')
+    Write-Log INFO "wsl -d $WslDistro boot exit=$($rBoot.ExitCode)"
     Save-Checkpoint 'WslRestart'
 }
 
@@ -2063,7 +2077,11 @@ if ($Resume) {
     # RunOnce auto-deletes when it fires; this is belt-and-suspenders for the
     # case where it didn't (manually triggered resume, etc).
     Remove-RunOnceResume
-    $existing = Get-CompletedSteps
+    # v1.0.14: @() defends against PS 5.1 single-element-array unrolling
+    # for consistency with the Invoke-WithRollback fix. Current downstream
+    # use is -join only, so the bug wouldn't fire here, but the array-wrap
+    # discipline is cheaper than discovering the same bug a third time.
+    $existing = @(Get-CompletedSteps)
     Write-Log INFO "==== ClawFactory Secure Setup - resuming after restart (provider=$Provider) ===="
     Write-Host ''
     Write-Host 'Welcome back - continuing installation.' -ForegroundColor Cyan
