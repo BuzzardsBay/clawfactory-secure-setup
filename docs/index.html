@@ -187,6 +187,40 @@ nav.scrolled { border-bottom-color: var(--border); }
 .cta-button:hover { background: var(--accent-hover); color: var(--bg); }
 .cta-button:active { background: var(--accent-press); transform: translateY(1px); }
 
+.cta-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    align-items: center;
+}
+
+.cta-button-ghost {
+    display: inline-block;
+    font-family: var(--font-head);
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--accent);
+    background: transparent;
+    padding: 15px 27px;
+    border-radius: 4px;
+    border: 1px solid var(--accent);
+    transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+    cursor: pointer;
+    letter-spacing: -0.01em;
+}
+
+.cta-button-ghost:hover { background: var(--accent); color: #0c0c0b; }
+.cta-button-ghost:active { background: var(--accent-press); border-color: var(--accent-press); color: #0c0c0b; transform: translateY(1px); }
+
+.cta-tier-note {
+    margin-top: 14px;
+    font-family: var(--font-head);
+    font-size: 12.5px;
+    color: var(--text-dim);
+    line-height: 1.55;
+    max-width: 56ch;
+}
+
 .hero-meta {
     margin-top: 18px;
     font-family: var(--font-head);
@@ -426,7 +460,7 @@ footer {
 <nav id="nav">
     <div class="nav-inner">
         <span class="wordmark">ClawFactory</span>
-        <a class="nav-cta" href="https://github.com/BuzzardsBay/clawfactory-secure-setup/releases/latest">Download v1.0.17 &rarr;</a>
+        <a class="nav-cta" href="https://buy.stripe.com/6oU4gzbJ7coYgIQbPZ8g001">Buy Now &rarr;</a>
     </div>
 </nav>
 
@@ -435,9 +469,13 @@ footer {
         <div class="hero-text">
             <h1>OpenClaw. <span class="accent">Hardened.</span><br>One click.</h1>
             <p class="hero-sub">A local AI runtime that doesn't phone home. ClawFactory installs OpenClaw inside a WSL2 sandbox with an egress firewall, loopback-only gateway, and one-click kill switch &mdash; for developers and operators who need their agent isolated, not connected.</p>
-            <a class="cta-button" href="https://github.com/BuzzardsBay/clawfactory-secure-setup/releases/latest">Download v1.0.17 &rarr;</a>
+            <div class="cta-group">
+                <a class="cta-button" href="https://buy.stripe.com/6oU4gzbJ7coYgIQbPZ8g001">Buy ClawFactory &mdash; $149 &rarr;</a>
+                <a class="cta-button-ghost" href="https://buy.stripe.com/dRmdR95kJ1KkfEM5rB8g000">Get ClawAgent &mdash; $49 &rarr;</a>
+            </div>
+            <p class="cta-tier-note">ClawAgent: single agent, 5 min setup &middot; ClawFactory: full security substrate, 5 agents, kill switch</p>
             <div class="hero-meta">
-                <span>Windows 10/11</span> &nbsp;&middot;&nbsp; <span>Free to build</span> &nbsp;&middot;&nbsp; <span>$299 pre-built installer</span>
+                <span>Windows 10/11</span> &nbsp;&middot;&nbsp; <span>Source on GitHub</span> &nbsp;&middot;&nbsp; <span>From $49</span>
             </div>
         </div>
         <div class="hero-mascot" aria-hidden="true">
@@ -547,7 +585,7 @@ footer {
     <div class="container">
         <div class="footer-inner">
             <div class="footer-left">&copy; 2026 Frontier Automation Systems LLC</div>
-            <div class="footer-center">MIT License<span class="sep">&middot;</span><a href="mailto:support@clawfactory.app">support@clawfactory.app</a></div>
+            <div class="footer-center">MIT License<span class="sep">&middot;</span><a href="https://github.com/BuzzardsBay/clawfactory-secure-setup">Build from source</a><span class="sep">&middot;</span><a href="mailto:support@clawfactory.app">support@clawfactory.app</a></div>
             <div class="footer-right"><a href="https://github.com/BuzzardsBay/clawfactory-secure-setup">GitHub &rarr;</a></div>
         </div>
     </div>
