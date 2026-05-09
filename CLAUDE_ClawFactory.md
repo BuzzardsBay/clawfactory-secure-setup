@@ -93,7 +93,7 @@ The v1.0.17 fix folds all three: $script9b in Step-EnableChatCompletions writes 
 | 2026-05-07 | `028f0c7` (v1.0.14) | **Azure PASS** (first install pass; smoke FAIL) | Invoke-WslExe UTF-16-LE + .Count unrolling fix. Install + gateway both green. Smoke 7/11 fail (cause: SYSTEM-context, not source). |
 | 2026-05-07 | `82ef187` (v1.0.15) | **Azure PASS, 4 cycles (3 first-try + 1 retry)** | Smoke SYSTEM detection + bundle in .iss. Stability cycles 1, 2, 3-retry all PASS. Cycle 3-original FAIL was a 5-second probe timeout while gateway alive (harness flake). |
 | 2026-05-08 | `14b0001` (v1.0.16) | **Azure FAIL** (install/smoke pass, chatCompletions=404) | --strict-json patch attempted; Step-EnableChatCompletions returned exit 1 silently and no flag was written. Live VM RDP investigation pinpointed correct fix path (--json + Invoke-WslBash + gateway restart). Drove v1.0.17. |
-| TBD | TBD (v1.0.17) | pending | --json (not --strict-json) for booleans, Invoke-WslBash transport for Step-EnableChatCompletions, explicit gateway restart in $script9b. Pending Azure validation. |
+| 2026-05-08 | `18516a6` (v1.0.17) | **Azure PASS** | First green chatCompletions probe ever. --json + Invoke-WslBash + gateway restart in $script9b. Probe HTTP 400 (route registered, model-format error downstream). Smoke 4P/0F/7S, idle 200/200 first-try. Cosmetic: Invoke-WslBash returns exit=1 even when bash hits exit 0 — false WARN, no functional impact, fix in v1.0.18. |
 
 The smoke test script lives at [`smoke-test.ps1`](smoke-test.ps1). Re-run it on every clean-VM rebuild before tagging.
 
