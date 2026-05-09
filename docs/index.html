@@ -121,6 +121,33 @@ nav.scrolled { border-bottom-color: var(--border); }
     opacity: 0.25;
 }
 
+.hero .container {
+    display: flex;
+    align-items: center;
+    gap: 60px;
+}
+
+.hero-text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.hero-mascot {
+    flex: 0 0 auto;
+    width: 340px;
+    max-width: 38%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.hero-mascot svg {
+    width: 100%;
+    height: auto;
+    display: block;
+    filter: drop-shadow(0 12px 40px rgba(212, 163, 90, 0.18));
+}
+
 .hero h1 {
     font-family: var(--font-head);
     font-weight: 700;
@@ -350,6 +377,8 @@ footer {
     .nav-inner { padding: 14px 20px; }
     .container { padding: 0 20px; }
     .hero { padding: 140px 0 80px; }
+    .hero .container { display: block; }
+    .hero-mascot { display: none; }
     .hero h1 { font-size: 38px; }
     .hero-sub { font-size: 17px; }
     section { padding: 64px 0; }
@@ -403,11 +432,33 @@ footer {
 
 <header class="hero">
     <div class="container">
-        <h1>OpenClaw. <span class="accent">Hardened.</span><br>One click.</h1>
-        <p class="hero-sub">A local AI runtime that doesn't phone home. ClawFactory installs OpenClaw inside a WSL2 sandbox with an egress firewall, loopback-only gateway, and one-click kill switch &mdash; for developers and operators who need their agent isolated, not connected.</p>
-        <a class="cta-button" href="https://github.com/BuzzardsBay/clawfactory-secure-setup/releases/latest">Download v1.0.17 &rarr;</a>
-        <div class="hero-meta">
-            <span>Windows 10/11</span> &nbsp;&middot;&nbsp; <span>Free to build</span> &nbsp;&middot;&nbsp; <span>$299 pre-built installer</span>
+        <div class="hero-text">
+            <h1>OpenClaw. <span class="accent">Hardened.</span><br>One click.</h1>
+            <p class="hero-sub">A local AI runtime that doesn't phone home. ClawFactory installs OpenClaw inside a WSL2 sandbox with an egress firewall, loopback-only gateway, and one-click kill switch &mdash; for developers and operators who need their agent isolated, not connected.</p>
+            <a class="cta-button" href="https://github.com/BuzzardsBay/clawfactory-secure-setup/releases/latest">Download v1.0.17 &rarr;</a>
+            <div class="hero-meta">
+                <span>Windows 10/11</span> &nbsp;&middot;&nbsp; <span>Free to build</span> &nbsp;&middot;&nbsp; <span>$299 pre-built installer</span>
+            </div>
+        </div>
+        <div class="hero-mascot" aria-hidden="true">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
+                <rect x="12" y="10" width="28" height="28" rx="5" fill="#d4a35a"/>
+                <circle cx="21" cy="22" r="3" fill="#0c0c0b"/>
+                <circle cx="31" cy="22" r="3" fill="#0c0c0b"/>
+                <path d="M20 30 Q26 35 32 30" stroke="#0c0c0b" stroke-width="2" fill="none" stroke-linecap="round"/>
+                <rect x="4"  y="24" width="10" height="6" rx="2" fill="#d4a35a"/>
+                <rect x="2"  y="18" width="6"  height="8" rx="2" fill="#d4a35a"/>
+                <rect x="2"  y="29" width="6"  height="7" rx="2" fill="#d4a35a"/>
+                <rect x="38" y="24" width="10" height="6" rx="2" fill="#d4a35a"/>
+                <rect x="44" y="18" width="6"  height="8" rx="2" fill="#d4a35a"/>
+                <rect x="44" y="29" width="6"  height="7" rx="2" fill="#d4a35a"/>
+                <rect x="17" y="36" width="5"  height="9" rx="2" fill="#d4a35a"/>
+                <rect x="30" y="36" width="5"  height="9" rx="2" fill="#d4a35a"/>
+                <rect x="15" y="43" width="4"  height="4" rx="2" fill="#d4a35a"/>
+                <rect x="20" y="44" width="3"  height="3" rx="2" fill="#d4a35a"/>
+                <rect x="28" y="43" width="4"  height="4" rx="2" fill="#d4a35a"/>
+                <rect x="33" y="44" width="3"  height="3" rx="2" fill="#d4a35a"/>
+            </svg>
         </div>
     </div>
 </header>
