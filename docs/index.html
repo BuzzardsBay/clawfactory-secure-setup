@@ -296,6 +296,33 @@ section {
     border: 1px solid var(--border);
 }
 
+/* PRIVACY STATEMENT */
+.privacy {
+    padding: 140px 0;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    text-align: center;
+}
+
+.privacy-statement {
+    font-family: var(--font-head);
+    font-weight: 700;
+    font-size: clamp(28px, 4vw, 44px);
+    line-height: 1.15;
+    letter-spacing: -0.025em;
+    color: var(--text);
+    margin: 0 auto 24px;
+    max-width: 22ch;
+}
+
+.privacy-sub {
+    font-family: var(--font-head);
+    font-size: 13px;
+    color: var(--text-dim);
+    letter-spacing: 0.01em;
+    margin: 0;
+}
+
 /* FOOTER */
 footer {
     padding: 48px 0;
@@ -347,6 +374,7 @@ footer {
         font-size: 13px;
     }
     .controls-table .control-desc { font-size: 14px; }
+    .privacy { padding: 96px 0; }
     .footer-inner {
         grid-template-columns: 1fr;
         text-align: center;
@@ -453,6 +481,13 @@ footer {
                 <div class="step-desc">Your AI agent is live at <code>127.0.0.1:8787</code>. Nothing leaves your machine without your permission.</div>
             </div>
         </div>
+    </div>
+</section>
+
+<section class="privacy">
+    <div class="container">
+        <h2 class="privacy-statement">A local AI runtime that doesn't phone home.</h2>
+        <p class="privacy-sub">No telemetry. No cloud dependency. No data collection. Ever.</p>
     </div>
 </section>
 
