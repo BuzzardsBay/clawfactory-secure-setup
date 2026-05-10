@@ -3,7 +3,7 @@
 ; Compile with: "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ClawFactory-Secure-Setup.iss
 
 #define MyAppName      "ClawFactory Secure Setup"
-#define MyAppVersion   "1.0.19"
+#define MyAppVersion   "1.0.20"
 #define MyAppPublisher "Frontier Automation Systems LLC"
 #define MyAppURL       "https://openclaw.ai"
 
@@ -55,6 +55,7 @@ Source: "resources\lobster.ico";             DestDir: "{app}\resources";  Flags:
 ; setup.ps1 finishes. setup.ps1 receives the path via -BundledRootfsDir.
 Source: "resources\ubuntu-rootfs.tar.gz";    DestDir: "{tmp}";            Flags: deleteafterinstall
 Source: "resources\ClawChat.exe";            DestDir: "{app}";            Flags: ignoreversion
+Source: "resources\openclaw-install.sh";     DestDir: "{app}\resources";  Flags: ignoreversion
 
 [Run]
 ; [R5] No API key on the command line - setup.ps1 reads from Windows Credential Manager.

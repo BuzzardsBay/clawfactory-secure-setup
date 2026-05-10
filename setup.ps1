@@ -42,9 +42,11 @@ Set-StrictMode -Version 3.0
 
 #--- Constants ----------------------------------------------------------------
 # v1.0.4 - pre-install OpenClaw build deps before install.sh runs
-$InstallerVersion      = '1.0.19'
-$OpenClawInstallUrl    = 'https://openclaw.ai/install.sh'
-# [R2] Pin me. See README.md section "Pinning the OpenClaw install.sh hash".
+$InstallerVersion      = '1.0.20'
+# [R2] OpenClaw install.sh is now BUNDLED into the installer (resources\openclaw-install.sh).
+# No network call to openclaw.ai/install.sh during install — that URL tracks "latest" and
+# changed twice in 24 hours on 2026-05-09/10. Hash-pinned at install time; mismatch throws.
+# To upgrade OpenClaw, see the comment block at the top of Step-InstallOpenClaw.
 $OpenClawInstallSha256 = '3a617b73ea35ac23cf856ce9615b69d0ace4090d236e0a57bbc638f01676a9ce'
 # Pin OpenClaw npm package to a known-validated version.
 # ClawFactory v1.0 ships with OpenClaw 2026.4.27 - the version manually
@@ -1229,40 +1231,69 @@ su - clawuser -c 'timeout 1800 ollama pull llama3.1:8b || echo "[WARN] ollama pu
 }
 
 function Step-InstallOpenClaw {
-    # [R2] Pinned fetch: refuses to run install.sh unless its SHA-256 matches.
-    Write-Log INFO 'Step 8 [R2]: Installing OpenClaw with SHA-256 pinning.'
+    # openclaw-install.sh is BUNDLED -- no network call for this step.
+    # Pinned to openclaw v2026.5.7-era install.sh validated on
+    # ClawFactory v1.0.19 / ClawAgent v1.0.2 Azure cycles.
+    #
+    # To upgrade OpenClaw:
+    #   1. Download new install.sh from openclaw.ai/install.sh
+    #   2. Review diff against current bundled version
+    #   3. Run security sub-agent review
+    #   4. Copy to resources\openclaw-install.sh in both repos
+    #   5. Update $OpenClawInstallSha256 to new hash
+    #   6. Bump version, rebuild, validate on Azure
+    #   DO NOT restore the URL-download path -- it tracks latest
+    #   and will drift without warning.
+    Write-Log INFO 'Step 8 [R2]: Installing OpenClaw from bundled, hash-pinned install.sh.'
     if (-not $AcknowledgedOpenClawUrl) {
-        throw 'OpenClaw install URL not acknowledged. Re-run via the wizard.'
+        throw 'OpenClaw install acknowledgement missing. Re-run via the wizard.'
     }
+    $bundledScript = Join-Path $PSScriptRoot 'resources\openclaw-install.sh'
+    if (-not (Test-Path -LiteralPath $bundledScript)) {
+        throw 'openclaw-install.sh not found in resources. Installer may be corrupted.'
+    }
+    $hash = (Get-FileHash -LiteralPath $bundledScript -Algorithm SHA256).Hash.ToLower()
+    if ($hash -ne $OpenClawInstallSha256) {
+        throw "openclaw-install.sh hash mismatch. Expected $OpenClawInstallSha256 got $hash. Installer may be corrupted."
+    }
+    Write-Log INFO 'Bundled openclaw-install.sh hash verified.'
+
+    # Stream the bundled script into WSL /tmp via stdin. Cannot use Invoke-WslBash
+    # for the file content because wsl.exe argv has a Windows ~32K limit and the
+    # install.sh is ~93K (base64 ~125K). Stdin pipe sidesteps argv entirely.
+    $bytes = [System.IO.File]::ReadAllBytes($bundledScript)
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName               = 'wsl.exe'
+    $psi.Arguments              = "-d $WslDistro -u root --cd / -- bash -c `"cat > /tmp/openclaw-install.sh`""
+    $psi.UseShellExecute        = $false
+    $psi.RedirectStandardInput  = $true
+    $psi.RedirectStandardError  = $true
+    $psi.CreateNoWindow         = $true
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+    $proc.StandardInput.Close()
+    $stderr = $proc.StandardError.ReadToEnd()
+    $proc.WaitForExit()
+    if ($proc.ExitCode -ne 0) {
+        throw "Failed to stream openclaw-install.sh into WSL (exit $($proc.ExitCode)). stderr: $stderr"
+    }
+
     $fetch = @"
 set -euo pipefail
-TMP=`$(mktemp)
-trap 'rm -f `"`$TMP`"' EXIT
-curl -fsSL '$OpenClawInstallUrl' -o `"`$TMP`"
-ACTUAL=`$(sha256sum `"`$TMP`" | awk '{print `$1}')
-EXPECTED='$OpenClawInstallSha256'
-echo `"OpenClaw install.sh SHA-256: `$ACTUAL`"
-if [ `"`$EXPECTED`" = 'REPLACE_ME_WITH_REAL_SHA256_OF_install.sh' ]; then
-    echo '!! SHA-256 pin not set in setup.ps1. Refusing to execute. See README.md.'
-    exit 42
-fi
-if [ `"`$ACTUAL`" != `"`$EXPECTED`" ]; then
-    echo `"!! SHA-256 mismatch. expected=`$EXPECTED got=`$ACTUAL`"
-    exit 43
-fi
-# install.sh runs `sudo` internally but falls back to direct exec when already root.
+# install.sh runs ``sudo`` internally but falls back to direct exec when already root.
 # Set HOME/USER/LOGNAME so per-user artifacts (shim at \$HOME/.local/bin, config
 # under \$HOME/.openclaw) land in clawuser's home, not /root.
 #
-# Wrap bash with `timeout` to fail fast if openclaw-onboard (invoked from
+# Wrap bash with ``timeout`` to fail fast if openclaw-onboard (invoked from
 # inside install.sh) hangs waiting on interactive input. 15 minutes is enough
 # for any non-interactive run; longer than that means we're stuck. SIGTERM
 # first (graceful), then SIGKILL after 30s (--kill-after) if the child
 # trapped SIGTERM. timeout's exit code 124 = timed out.
 set +e
-NO_ONBOARD=1 OPENCLAW_VERSION=$OpenClawNpmVersion HOME=/home/clawuser USER=clawuser LOGNAME=clawuser timeout --foreground --kill-after=30 900 bash `"`$TMP`" -- --no-onboard > >(tee /tmp/openclaw-install.log) 2>&1
+NO_ONBOARD=1 OPENCLAW_VERSION=$OpenClawNpmVersion HOME=/home/clawuser USER=clawuser LOGNAME=clawuser timeout --foreground --kill-after=30 900 bash /tmp/openclaw-install.sh -- --no-onboard > >(tee /tmp/openclaw-install.log) 2>&1
 INSTALL_RC=`$?
 set -e
+rm -f /tmp/openclaw-install.sh
 if [ `$INSTALL_RC -eq 124 ]; then
     echo `"!! OpenClaw install.sh did not complete within 15 minutes (timeout). The install hung - check the actual install.sh output above for the real cause (apt mirror outage, npm registry latency, DNS issue, or interactive prompt on closed stdin).`" >&2
     exit 44
@@ -1276,8 +1307,6 @@ chown -R clawuser:clawuser /home/clawuser/.openclaw 2>/dev/null || true
 chown -R clawuser:clawuser /home/clawuser/.npm 2>/dev/null || true
 "@
     $rc = Invoke-WslBash -Script $fetch -User 'root'
-    if ($rc -eq 42) { throw 'OpenClaw install blocked: SHA-256 pin not set. See README "Pinning the OpenClaw install.sh hash".' }
-    if ($rc -eq 43) { throw 'OpenClaw install blocked: SHA-256 mismatch. The install.sh on the server does not match the pinned hash.' }
     if ($rc -eq 44) { throw 'OpenClaw install timed out after 15 minutes. install.sh hung; check install.log for the actual stalled command (apt, npm, or interactive prompt). Re-run setup.ps1 -Resume to retry.' }
     if ($rc -ne 0)  { throw "OpenClaw install failed with exit $rc" }
     Save-Checkpoint 'OpenClaw'
@@ -1679,6 +1708,13 @@ function Step-ConfigureOpenClaw {
     # ~/.openclaw/openclaw.json piece by piece. Most subcommands (setup, onboard,
     # agents add, models auth login, paste-token) require an interactive TTY and
     # hang in non-interactive contexts even with --non-interactive flags.
+    #
+    # Note: no user-facing auto-update disable flag found in openclaw-install.sh
+    # (v1.0.20 audit). install.sh sets OPENCLAW_UPDATE_IN_PROGRESS=1 before its
+    # own internal openclaw subcommand calls -- that's a context signal to
+    # suppress runtime self-update during the install itself, not a persistent
+    # disable. Verify manually on next OpenClaw upgrade whether the runtime
+    # has introduced a user-disable mechanism worth wiring in here.
     Write-Log INFO 'Step 9: Configuring OpenClaw via `openclaw config set` (real CLI).'
 
     # Map provider id to the auth-profile shape OpenClaw expects.
