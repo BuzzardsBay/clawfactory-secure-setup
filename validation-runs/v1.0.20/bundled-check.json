@@ -1,0 +1,17 @@
+﻿{
+  "value": [
+    {
+      "code": "ComponentStatus/StdOut/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "BUNDLED_INSTALL_LINE_FOUND\nMATCH: [2026-05-10 14:58:46] [INFO] Bundled openclaw-install.sh hash verified.\nMATCH: [wsl:clawuser out] OK: SOUL.md hash verified"
+    },
+    {
+      "code": "ComponentStatus/StdErr/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": ""
+    }
+  ]
+}
+

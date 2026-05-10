@@ -1,0 +1,17 @@
+﻿{
+  "value": [
+    {
+      "code": "ComponentStatus/StdOut/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "CLAWCHAT_OUTPUT_START\n=== ClawChat probe 2026-05-10T15:08:07.6071080Z ===\npath=C:\\Program Files\\ClawFactory\\ClawChat.exe\nsize=11408384\nsha256=0bb56c62e70a5af6153db8fd9a3b8b0c4a69682f54ae703e87952c18facb6d45\nRESULT=PRESENT\nstarted=True\npid=10028\nkilled=true\n=== end ===\nCLAWCHAT_OUTPUT_END"
+    },
+    {
+      "code": "ComponentStatus/StdErr/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": ""
+    }
+  ]
+}
+

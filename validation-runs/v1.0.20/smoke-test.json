@@ -1,0 +1,17 @@
+﻿{
+  "value": [
+    {
+      "code": "ComponentStatus/StdOut/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "Running as NT AUTHORITY\\SYSTEM - WSL checks will be SKIPPED.\nRe-run as clawadmin (or any non-SYSTEM admin) for full coverage.\n\n  SKIP  WSL automount disabled (requires WSL; running as SYSTEM)\n  SKIP  Four agent.md files present (requires WSL; running as SYSTEM)\n  PASS  AgentBootstrap checkpoint recorded\n  PASS  Gateway responds 200 on loopback\n  PASS  Firewall inbound-deny rule on 8787\n  SKIP  Orchestrator SOUL hash substituted (requires WSL; running as SYSTEM)\n  SKIP  auth-profiles.json present for all 5 agents (requires WSL; running as SYSTEM)\n  SKIP  .wslconfig has vmIdleTimeout=-1 (requires WSL; running as SYSTEM)\n  PASS  WSL Host scheduled task registered and enabled\n  SKIP  Egress firewall clawfactory chain present in nft ruleset (requires WSL; running as SYSTEM)\n  SKIP  OpenClaw build deps present (make g++ cmake python3) (requires WSL; running as SYSTEM)\n\nResult: 4 pass, 0 fail, 7 skip\nSMOKE_EXIT:0"
+    },
+    {
+      "code": "ComponentStatus/StdErr/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": ""
+    }
+  ]
+}
+

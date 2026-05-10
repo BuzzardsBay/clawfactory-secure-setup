@@ -1,0 +1,17 @@
+﻿{
+  "value": [
+    {
+      "code": "ComponentStatus/StdOut/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "PROBE_OUTPUT_START\n=== probe started 2026-05-10T15:06:51.0419014Z ===\nwsl exit=0\nstdout_bytes=161 stderr_bytes=346\n--- stdout ---\n[probe] openclaw.json bytes=910\n[probe] token len=48\n--- response body ---\n{\"error\":{\"message\":\"internal error\",\"type\":\"api_error\"}}\n--- end ---\nHTTP_STATUS:500\n\n--- stderr ---\nwsl: Failed to translate 'C:\\Windows\\system32'\nwsl: Failed to translate 'C:\\Windows'\nwsl: Failed to translate 'C:\\Windows\\System32\\Wbem'\nwsl: Failed to translate 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\'\nwsl: Failed to translate 'C:\\Windows\\System32\\OpenSSH\\'\nwsl: Failed to translate 'C:\\Users\\clawadmin\\AppData\\Local\\Microsoft\\WindowsApps'\n\n=== probe ended 2026-05-10T15:07:27.2365154Z ===\nPROBE_OUTPUT_END"
+    },
+    {
+      "code": "ComponentStatus/StdErr/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": ""
+    }
+  ]
+}
+
