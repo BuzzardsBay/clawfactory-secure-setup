@@ -28,3 +28,11 @@ node_modules/
 # 2.4 MB schema dump from openclaw 2026.4.27 phase-3 investigation
 # (already covered by *.log above, listed explicitly for clarity)
 schema-investigation.log
+
+# Azure validation run artifacts -- per-run generated REPORT.md, .vmname,
+# run-meta.txt, install logs, and run-scoped .ps1 wrappers that bake in
+# SAS-signed installer URLs (expired tokens but still treated as secrets).
+validation-runs/
+
+# Claude Code local state (scheduled task lock, etc.)
+.claude/
