@@ -42,10 +42,10 @@ Set-StrictMode -Version 3.0
 
 #--- Constants ----------------------------------------------------------------
 # v1.0.4 - pre-install OpenClaw build deps before install.sh runs
-$InstallerVersion      = '1.0.18'
+$InstallerVersion      = '1.0.19'
 $OpenClawInstallUrl    = 'https://openclaw.ai/install.sh'
 # [R2] Pin me. See README.md section "Pinning the OpenClaw install.sh hash".
-$OpenClawInstallSha256 = '57f025ba0272e2da3238984360e37fad5230bc7cea81854d154a362ea989d49d'
+$OpenClawInstallSha256 = '3a617b73ea35ac23cf856ce9615b69d0ace4090d236e0a57bbc638f01676a9ce'
 # Pin OpenClaw npm package to a known-validated version.
 # ClawFactory v1.0 ships with OpenClaw 2026.4.27 - the version manually
 # validated on 2026-04-30 with the four bundled bug-workarounds intact:
