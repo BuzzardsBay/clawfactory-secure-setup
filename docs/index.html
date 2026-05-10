@@ -406,6 +406,149 @@ footer {
 .footer-center a:hover, .footer-right a:hover { color: var(--accent); }
 .footer-center .sep { color: var(--text-dim); margin: 0 8px; }
 
+/* PRODUCT COMPARISON */
+.product-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+}
+
+.product-card {
+    background: #111110;
+    border: 0.5px solid #2a2a26;
+    border-radius: 6px;
+    padding: 24px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+.product-card-recommended {
+    border: 1px solid #d4a35a;
+}
+
+.product-recommended-tag {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    font-family: var(--font-head);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #0c0c0b;
+    background: var(--accent);
+    padding: 3px 8px;
+    border-radius: 3px;
+}
+
+.product-price-badge {
+    font-family: var(--font-head);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.05em;
+    margin-bottom: 10px;
+}
+
+.product-title {
+    font-family: var(--font-head);
+    font-weight: 700;
+    font-size: 26px;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    margin-bottom: 6px;
+}
+
+.product-subtitle {
+    font-family: var(--font-head);
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 24px;
+    letter-spacing: 0.01em;
+}
+
+.feature-list {
+    list-style: none;
+    margin-bottom: 28px;
+    flex: 1;
+}
+
+.feature-list li {
+    font-family: var(--font-head);
+    font-size: 13.5px;
+    padding: 7px 0;
+    border-bottom: 1px solid #1a1a18;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text);
+}
+
+.feature-list li:last-child { border-bottom: none; }
+
+.feature-check::before {
+    content: "✓";
+    color: #d4a35a;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.feature-cross {
+    color: #444440;
+}
+
+.feature-cross::before {
+    content: "✗";
+    color: #444440;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.product-cta {
+    display: block;
+    font-family: var(--font-head);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--bg);
+    background: var(--accent);
+    padding: 13px 20px;
+    border-radius: 4px;
+    text-align: center;
+    transition: background 0.15s ease;
+    margin-bottom: 12px;
+}
+
+.product-cta:hover { background: var(--accent-hover); color: var(--bg); }
+
+.product-cta-ghost {
+    display: block;
+    font-family: var(--font-head);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+    background: transparent;
+    padding: 12px 20px;
+    border-radius: 4px;
+    border: 1px solid var(--accent);
+    text-align: center;
+    transition: background 0.15s ease, color 0.15s ease;
+    margin-bottom: 12px;
+}
+
+.product-cta-ghost:hover { background: var(--accent); color: #0c0c0b; }
+
+.product-github-link {
+    display: block;
+    font-family: var(--font-head);
+    font-size: 12px;
+    color: var(--text-dim);
+    text-align: center;
+    transition: color 0.15s ease;
+}
+
+.product-github-link:hover { color: var(--accent); }
+
 /* RESPONSIVE */
 @media (max-width: 768px) {
     .nav-inner { padding: 14px 20px; }
@@ -438,6 +581,7 @@ footer {
     }
     .controls-table .control-desc { font-size: 14px; }
     .privacy { padding: 96px 0; }
+    .product-cards { grid-template-columns: 1fr; }
     .footer-inner {
         grid-template-columns: 1fr;
         text-align: center;
@@ -475,7 +619,7 @@ footer {
             </div>
             <p class="cta-tier-note">ClawAgent: single agent, 5 min setup &middot; ClawFactory: full security substrate, 5 agents, kill switch</p>
             <div class="hero-meta">
-                <span>Windows 10/11</span> &nbsp;&middot;&nbsp; <span>Source on GitHub</span> &nbsp;&middot;&nbsp; <span>From $49</span>
+                <span>Windows 10/11</span> &nbsp;&middot;&nbsp; <span>ClawAgent $49</span> &nbsp;&middot;&nbsp; <span>ClawFactory $149</span>
             </div>
         </div>
         <div class="hero-mascot" aria-hidden="true">
@@ -578,6 +722,47 @@ footer {
     <div class="container">
         <h2 class="privacy-statement">A local AI runtime that doesn't phone home.</h2>
         <p class="privacy-sub">No telemetry. No cloud dependency. No data collection. Ever.</p>
+    </div>
+</section>
+
+<section id="products">
+    <div class="container">
+        <div class="section-label">Choose Your Product</div>
+        <div class="product-cards">
+            <div class="product-card">
+                <div class="product-price-badge">$49</div>
+                <div class="product-title">ClawAgent</div>
+                <div class="product-subtitle">Single agent runtime</div>
+                <ul class="feature-list">
+                    <li class="feature-check">WSL2 sandbox</li>
+                    <li class="feature-check">Egress firewall</li>
+                    <li class="feature-check">Loopback gateway</li>
+                    <li class="feature-check">DPAPI key storage</li>
+                    <li class="feature-check">Kill Switch</li>
+                    <li class="feature-cross">Multi-agent support</li>
+                    <li class="feature-cross">Factory orchestration</li>
+                </ul>
+                <a class="product-cta-ghost" href="https://buy.stripe.com/dRmdR95kJ1KkfEM5rB8g000">Buy ClawAgent &mdash; $49 &rarr;</a>
+                <a class="product-github-link" href="https://github.com/BuzzardsBay/clawagent-setup/releases/latest">Download from GitHub &rarr;</a>
+            </div>
+            <div class="product-card product-card-recommended">
+                <span class="product-recommended-tag">RECOMMENDED</span>
+                <div class="product-price-badge">$149</div>
+                <div class="product-title">ClawFactory</div>
+                <div class="product-subtitle">Full hardened runtime</div>
+                <ul class="feature-list">
+                    <li class="feature-check">WSL2 sandbox</li>
+                    <li class="feature-check">Egress firewall</li>
+                    <li class="feature-check">Loopback gateway</li>
+                    <li class="feature-check">DPAPI key storage</li>
+                    <li class="feature-check">Kill Switch</li>
+                    <li class="feature-check">Multi-agent support (5 agents)</li>
+                    <li class="feature-check">Factory orchestration</li>
+                </ul>
+                <a class="product-cta" href="https://buy.stripe.com/6oU4gzbJ7coYgIQbPZ8g001">Buy ClawFactory &mdash; $149 &rarr;</a>
+                <a class="product-github-link" href="https://github.com/BuzzardsBay/ClawFactory-Secure-Setup/releases/latest">Download from GitHub &rarr;</a>
+            </div>
+        </div>
     </div>
 </section>
 
