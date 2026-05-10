@@ -3,7 +3,7 @@
 ; Compile with: "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ClawFactory-Secure-Setup.iss
 
 #define MyAppName      "ClawFactory Secure Setup"
-#define MyAppVersion   "1.0.17"
+#define MyAppVersion   "1.0.18"
 #define MyAppPublisher "Frontier Automation Systems LLC"
 #define MyAppURL       "https://openclaw.ai"
 
@@ -54,6 +54,7 @@ Source: "resources\lobster.ico";             DestDir: "{app}\resources";  Flags:
 ; not duplicated into the install dir; `deleteafterinstall` purges it after
 ; setup.ps1 finishes. setup.ps1 receives the path via -BundledRootfsDir.
 Source: "resources\ubuntu-rootfs.tar.gz";    DestDir: "{tmp}";            Flags: deleteafterinstall
+Source: "resources\ClawChat.exe";            DestDir: "{app}";            Flags: ignoreversion
 
 [Run]
 ; [R5] No API key on the command line - setup.ps1 reads from Windows Credential Manager.
@@ -80,11 +81,15 @@ Filename: "powershell.exe"; \
 
 [Icons]
 Name: "{commondesktop}\ClawFactory"; \
-  Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\resources\launcher.ps1"""; \
+  Filename: "{app}\ClawChat.exe"; \
   WorkingDir: "{app}"; \
   IconFilename: "{app}\resources\lobster.ico"; \
   Comment: "Open ClawFactory"
+Name: "{group}\ClawChat"; \
+  Filename: "{app}\ClawChat.exe"; \
+  WorkingDir: "{app}"; \
+  IconFilename: "{app}\resources\lobster.ico"; \
+  Comment: "Open ClawChat desktop window"
 Name: "{group}\ClawFactory Kill Switch"; \
   Filename: "powershell.exe"; \
   Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\resources\clawfactory-stop.ps1"""; \

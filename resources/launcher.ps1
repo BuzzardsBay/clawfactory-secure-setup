@@ -190,6 +190,17 @@ if (Test-GatewayResponding) {
 # openclaw gateway run. Same logic as setup.ps1's Step-PreinstallGatewayRuntime.
 Start-Gateway
 
+#--- 2a. Start ClawChat desktop window if bundled (v1.0.18) -----------------
+# ClawChat.exe is installed at {app}\ClawChat.exe; launcher.ps1 lives at
+# {app}\resources\launcher.ps1, so we step up one directory from $PSScriptRoot.
+# Test-Path guard keeps this safe in dev-tree invocations where ClawChat isn't
+# bundled. ClawChat handles its own gateway-status polling, so it's fine to
+# start it before the polling loop below confirms the gateway is up.
+$clawChatPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'ClawChat.exe'
+if (Test-Path -LiteralPath $clawChatPath) {
+    Start-Process -FilePath $clawChatPath
+}
+
 #--- 3. Poll for up to $TimeoutSec seconds ----------------------------------
 $deadline = (Get-Date).AddSeconds($TimeoutSec)
 do {

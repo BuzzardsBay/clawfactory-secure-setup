@@ -42,7 +42,7 @@ Set-StrictMode -Version 3.0
 
 #--- Constants ----------------------------------------------------------------
 # v1.0.4 - pre-install OpenClaw build deps before install.sh runs
-$InstallerVersion      = '1.0.17'
+$InstallerVersion      = '1.0.18'
 $OpenClawInstallUrl    = 'https://openclaw.ai/install.sh'
 # [R2] Pin me. See README.md section "Pinning the OpenClaw install.sh hash".
 $OpenClawInstallSha256 = '57f025ba0272e2da3238984360e37fad5230bc7cea81854d154a362ea989d49d'
