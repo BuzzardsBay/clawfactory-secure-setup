@@ -1156,7 +1156,7 @@ TimeoutStartSec=infinity
 
 Tauri + React desktop app bundled into both installers.
 - **Source:** `C:\Users\bmcki\ClawChat\`
-- **GitHub:** not yet published (private source)
+- **GitHub:** https://github.com/BuzzardsBay/clawchat (private)
 - **Binary:** `resources\ClawChat.exe` in both installer repos (10.88 MB, SHA-256 `0bb56c62e70a5af6153db8fd9a3b8b0c4a69682f54ae703e87952c18facb6d45`)
 
 **Version:** 1.0.0
@@ -1203,8 +1203,8 @@ Output: `src-tauri\target\release\ClawChat.exe`
 
 ### 20.2 Personal site — bretmckinney.com
 
-- **Source:** `C:\Users\bmcki\BretMcKinney-Site\` (not yet present locally as of 2026-05-11; verify path before any future edits)
-- **GitHub:** `BuzzardsBay/bretmckinney-site` (verify; not listed in `gh repo list BuzzardsBay` 2026-05-11)
+- **Source:** `C:\Users\bmcki\BretMcKinney-Site\` (verify local clone path before editing)
+- **GitHub:** https://github.com/BuzzardsBay/bretmckinney-site (public)
 - **Hosted:** GitHub Pages, custom domain
 - **DNS:** Namecheap (bretmckinney.com)
 
