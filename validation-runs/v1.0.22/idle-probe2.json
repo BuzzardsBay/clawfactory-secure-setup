@@ -1,0 +1,17 @@
+﻿{
+  "value": [
+    {
+      "code": "ComponentStatus/StdOut/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "PROBE_TS=2026-05-11T23:45:31.2110417Z\nPROBE_STATUS=200\nPROBE_RETRY=no"
+    },
+    {
+      "code": "ComponentStatus/StdErr/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": ""
+    }
+  ]
+}
+

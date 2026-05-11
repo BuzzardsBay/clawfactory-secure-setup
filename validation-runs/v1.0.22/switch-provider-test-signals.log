@@ -1,0 +1,20 @@
+﻿=== switch-provider test start 2026-05-11T23:25:25.2568813Z ===
+switch-provider.ps1 path: C:\Program Files\ClawFactory\resources\switch-provider.ps1
+Exists: True
+--- 6a: switch grok -> claude ---
+EXIT_6A=0
+  Switching active provider to: claude
+--- 6b: verify openclaw.json shows anthropic:default ---
+  parse error: Exception calling "FromBase64String" with "1" argument(s): "The input is not a valid Base-64 string as it contains a non-base 64 character, more than two padding characters, or an illegal character among the padding characters. "
+--- 6c: verify allowed-ips.txt contains api.anthropic.com IP ---
+--- 6d: gateway health after switch to claude ---
+GATEWAY_AFTER_CLAUDE_STATUS=200
+--- 6e: switch claude -> grok (round-trip) ---
+EXIT_6E=0
+  Switching active provider to: grok
+--- 6e: verify openclaw.json shows grok:default after round-trip ---
+  parse error: Exception calling "FromBase64String" with "1" argument(s): "The input is not a valid Base-64 string as it contains a non-base 64 character, more than two padding characters, or an illegal character among the padding characters. "
+--- 6e: verify allowed-ips.txt contains api.x.ai IP ---
+--- 6e: gateway health after switch back to grok ---
+GATEWAY_AFTER_GROK_STATUS=200
+=== switch-provider test end 2026-05-11T23:25:36.8876767Z ===

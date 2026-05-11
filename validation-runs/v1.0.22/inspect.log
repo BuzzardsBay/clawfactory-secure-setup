@@ -1,0 +1,35 @@
+﻿INSPECT_START
+=== inspect cfv-122 2026-05-11T23:31:12.5534911Z ===
+
+--- openclaw.json ---
+wsl exit=0, b64 len=1216
+openclaw.json size=910 bytes
+PROFILE grok:default : provider=grok mode=api_key apiKeyRef=
+ORDER grok = grok:default
+DEFAULT_MODEL_PRIMARY=grok/grok-4-1-fast
+
+--- /etc/clawfactory/allowed-ips.txt ---
+wsl exit=0, b64 len=1128
+ALLOWED_IPS_COUNT=62
+RESOLVE_RAW: XAI:104.18.18.80 104.18.19.80
+ANTH:160.79.104.10
+XAI_RESOLVED=104.18.18.80,104.18.19.80
+ANTHROPIC_RESOLVED=160.79.104.10
+XAI_IPS_IN_ALLOWLIST=2/2
+ANTHROPIC_IPS_IN_ALLOWLIST=0/1
+  matching XAI ip(s): 104.18.18.80,104.18.19.80
+ALLOWLIST_SAMPLE (first 10):
+  140.82.116.6
+  140.82.116.4
+  185.199.108.133
+  185.199.109.133
+  185.199.110.133
+  185.199.111.133
+  140.82.116.9
+  216.150.1.1
+  104.18.2.204
+  104.18.3.204
+
+=== inspect end 2026-05-11T23:31:13.2212690Z ===
+
+INSPECT_END

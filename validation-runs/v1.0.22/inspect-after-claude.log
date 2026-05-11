@@ -1,0 +1,15 @@
+﻿FRESH_INSPECT_START
+=== fresh inspect 2026-05-11T23:36:14.1397140Z ===
+openclaw.json size=910 bytes
+PROFILES present:
+  grok:default : provider=grok mode=api_key displayName='Grok (xAI)' apiKeyRef=
+  anthropic:default : (not present)
+  openai:default : (not present)
+  gemini:default : (not present)
+  ollama:default : (not present)
+ORDERS present:
+  grok = grok:default
+DEFAULT_MODEL_PRIMARY=grok/grok-4-1-fast
+=== end ===
+
+FRESH_INSPECT_END
