@@ -1,6 +1,19 @@
-## SHIP STATUS: v1.0.17 — 2026-05-08 — STABLE (3 PASS + 1 harness-flake across 4 Azure validation cycles)
+## SHIP STATUS: v1.0.20 / v1.0.3 — 2026-05-11 — STABLE (Azure validated; bundled install.sh refactor live)
 
-**v1.0.15 STABLE.** Tag `v1.0.0` at commit [`93c0bf7`](https://github.com/BuzzardsBay/clawfactory-secure-setup/commit/93c0bf7); current head [`82ef187`](https://github.com/BuzzardsBay/clawfactory-secure-setup/commit/82ef187). Bundled installer is 338.2 MB (carries 2026.4.27 OpenClaw + Ubuntu 22.04 rootfs for offline `wsl --import`). Azure validation harness has run four cycles on v1.0.15: three first-try PASSes plus one cycle-3 FAIL that was a 5-second probe-timeout while the gateway was demonstrably alive (re-validated PASS under `-TimeoutSec 15` + retry).
+**Current heads:** ClawFactory v1.0.20 ([86dfd36](https://github.com/BuzzardsBay/clawfactory-secure-setup/commit/86dfd36)) + ClawAgent v1.0.3 ([65d5a10](https://github.com/BuzzardsBay/clawagent-setup/commit/65d5a10)). Both Azure-validated on cfv-120 / cfa-103 (Cycle 1+2 PASS, 2026-05-10): INSTALLER_DONE=success, smoke 4P/0F/7S, chatCompletions HTTP 500 (route registered), ClawChat present + launches, idle 200/200. Bundled installer ~324.7 MB (carries 2026.4.27 OpenClaw + Ubuntu 22.04 rootfs + ClawChat.exe + openclaw-install.sh). v1.0.20 eliminates the openclaw.ai/install.sh URL-drift class entirely — install.sh is now bundled into `resources\openclaw-install.sh` and hash-verified at install time on the Windows side via `Get-FileHash`.
+
+---
+
+## Current state (May 2026)
+
+| Product | Repo | Version | Price | Status |
+|---------|------|---------|-------|--------|
+| ClawFactory-Secure-Setup.exe | clawfactory-secure-setup | v1.0.20 | $149 | STABLE — Azure validated |
+| ClawAgent-Setup.exe | clawagent-setup | v1.0.3 | $49 | STABLE — Azure validated |
+| ClawChat.exe | ClawChat (`C:\Users\bmcki\ClawChat\`) | v1.0.0 | bundled | STABLE — bundled in both installers |
+
+**Website:** https://clawfactory.app
+**Support email:** support@clawfactory.app
 
 ---
 
@@ -32,7 +45,9 @@
 | Gateway service reported `Active=running` but never bound port 8787 — curl `/status` returned exit 7 (connection refused), then exit 28 (timeout) for ~60s, then `Step-PreinstallGatewayRuntime` threw "Gateway did not respond after 60 seconds." Root cause: OpenClaw 2026.4.23 had a known bonjour mDNS crash loop (issues #72355, #64928) that wedged the gateway event loop after the systemd unit reported active. The pinned version was four patch releases behind the version listed as "validated" in our own comments. Also: silent-mode auto-rollback was wiping the WSL distro before forensics could be collected. Also: the v1.0.11 chmod 1777 /tmp was insufficient — needed a pre-created log file with mode 0666 to defend against sudo'd tee re-creating the file as root. | Bumped `OpenClawNpmVersion` from `2026.4.23` to `2026.4.27` (install.sh hash unchanged — install.sh is version-agnostic, version is passed via `OPENCLAW_VERSION` env var). Changed silent rollback default from `'y'` to `'n'`. Pre-create `/tmp/openclaw-install.log` with `chown clawuser:clawuser` AND `chmod 0666` so any user context (root or clawuser) can append. `$InstallerVersion` bumped to `1.0.13` (was stale at `1.0.4`). | v1.0.13 — [`e3c0b3a`](https://github.com/BuzzardsBay/clawfactory-secure-setup/commit/e3c0b3a) |
 | `Test-WslFunctional` always returned false on fresh installs because `Invoke-WslExe` (added v1.0.12) used the default `Console.OutputEncoding` (CP1252) to read `wsl.exe --list --quiet` output. wsl.exe writes UTF-16-LE; decoding `Ubuntu\r\n` (16 bytes) as CP1252 produced `U\0b\0u\0n\0t\0u\0\r\0\n\0` (16 chars with embedded NULs). The `-replace "\0", ''` happened AFTER `.Trim()` — `\0` blocked Trim from reaching the trailing `\r`, leaving `'Ubuntu\r'` after replace. The `-contains 'Ubuntu'` check then failed. Step-EnsureWsl threw "WSL could not be configured." Separate latent bug: `Invoke-WithRollback`'s `$done = Get-CompletedSteps; if ($done.Count ...)` crashed under `Set-StrictMode -Version 3.0` when only one checkpoint had been saved — PS 5.1 unrolls single-element array returns to scalar strings, and StrictMode 3 forbids `.Count` on String. Hidden until v1.0.13 made the install fail this early. | Set `$psi.StandardOutputEncoding = [System.Text.Encoding]::Unicode` and same for stderr in `Invoke-WslExe`. Wrapped both `Get-CompletedSteps` call sites with `@(...)` to force array context across the function-return boundary. Routed `Step-RestartWsl`'s remaining bare `wsl --shutdown` and `wsl -d Ubuntu -- true` calls through `Invoke-WslExe` for consistency. | v1.0.14 — [`028f0c7`](https://github.com/BuzzardsBay/clawfactory-secure-setup/commit/028f0c7) |
 | `smoke-test.ps1` produced 7 false-failures when invoked via `az vm run-command` because the run-command service runs scripts as `NT AUTHORITY\SYSTEM` and WSL refuses to run as LocalSystem (`WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED`). Every `wsl ... -- bash -lc ...` returned the SYSTEM error message, breaking every regex/equality check that depended on WSL output. Also: an `[int]$result -ge 4` coercion crashed with "Cannot convert Object[] to Int32" when wsl returned multi-line error text. Also: smoke-test.ps1 wasn't bundled in `.iss` — couldn't be located at the validation harness's first lookup path. | Added `[Security.Principal.WindowsIdentity]::GetCurrent().IsSystem` detection. Tagged WSL-dependent checks with `-RequiresWsl`; under SYSTEM they SKIP cleanly instead of failing. Defensive parse `[regex]::Match($first, '\d+')` replaces the brittle `[int]$var` cast. New `Invoke-WslCapture` helper uses Process.Start with explicit UTF-8 encoding (correct for bash/cat-forwarded stdout, unlike setup.ps1's UTF-16-LE which is correct for wsl.exe-native output). Added `Source: "smoke-test.ps1"; DestDir: "{app}\resources"; Flags: ignoreversion` to `.iss` [Files]. | v1.0.15 — [`82ef187`](https://github.com/BuzzardsBay/clawfactory-secure-setup/commit/82ef187) |
-| `/v1/chat/completions` returned HTTP 404 on every install since v1.0.1 — chatCompletions route never registered. v1.0.16 attempted `--strict-json`; live VM testing showed three things: (1) the boolean-writing flag is `--json`, not `--strict-json`; (2) openclaw caches gateway config at startup so the route stays unregistered until an explicit gateway restart, even if the config write succeeds; (3) Step-EnableChatCompletions's `Start-Process -FilePath wsl.exe` direct call returned exit 1 with no openclaw stdout under the wrapper.cmd auto-logon context, while identical commands run fine via scheduled task or `Invoke-WslBash`. | Three-part fix in v1.0.17: (1) replaced `--strict-json` with `--json` at three boolean/integer sites (gateway.port x2, plugins.entries.bonjour.enabled, gateway.http.endpoints.chatCompletions.enabled); (2) refactored Step-EnableChatCompletions to use `Invoke-WslBash` (the proven base64-script transport that $script8c / $script9a use), which also lets us add the gateway restart inside the same bash atomic block; (3) added `systemctl --user restart openclaw-gateway` + `/status` health poll inside the new `$script9b` so the route is registered before the install completes. | v1.0.17 — TBD |
+| `/v1/chat/completions` returned HTTP 404 on every install since v1.0.1 — chatCompletions route never registered. v1.0.16 attempted `--strict-json`; live VM testing showed three things: (1) the boolean-writing flag is `--json`, not `--strict-json`; (2) openclaw caches gateway config at startup so the route stays unregistered until an explicit gateway restart, even if the config write succeeds; (3) Step-EnableChatCompletions's `Start-Process -FilePath wsl.exe` direct call returned exit 1 with no openclaw stdout under the wrapper.cmd auto-logon context, while identical commands run fine via scheduled task or `Invoke-WslBash`. | Three-part fix in v1.0.17: (1) replaced `--strict-json` with `--json` at three boolean/integer sites (gateway.port x2, plugins.entries.bonjour.enabled, gateway.http.endpoints.chatCompletions.enabled); (2) refactored Step-EnableChatCompletions to use `Invoke-WslBash` (the proven base64-script transport that $script8c / $script9a use), which also lets us add the gateway restart inside the same bash atomic block; (3) added `systemctl --user restart openclaw-gateway` + `/status` health poll inside the new `$script9b` so the route is registered before the install completes. | v1.0.17 — [`18516a6`](https://github.com/BuzzardsBay/clawfactory-secure-setup/commit/18516a6) |
+| ClawChat desktop app not bundled. Validation focused on backend gateway only; no end-user UX shipped. | New Tauri+React desktop app (`C:\Users\bmcki\ClawChat\`) built and bundled into both installers as `resources\ClawChat.exe` (10.88 MB). Desktop shortcut + Start Menu entry now launch ClawChat directly. setup.ps1's `launcher.ps1` still starts the gateway as a fallback path; ClawChat handles its own gateway-status polling. | v1.0.18 (ClawFactory) / v1.0.1 (ClawAgent) — [`501821a`](https://github.com/BuzzardsBay/clawfactory-secure-setup/commit/501821a) / [`af60e6d`](https://github.com/BuzzardsBay/clawagent-setup/commit/af60e6d) |
+| OpenClaw install.sh hash drift: `openclaw.ai/install.sh` tracks "latest" and changed twice in 24 hours on 2026-05-09/10 (`57f025ba…` → `85fab092…` → `3a617b73…`). Every v1.0.x cycle that fetched install.sh at install time was a coin flip against the upstream-change cadence. v1.0.18 Azure validation FAILED at [R2] hash mismatch as a direct consequence. | Bundle install.sh into the installer as `resources\openclaw-install.sh`. Hash-verified on Windows via `Get-FileHash` before any WSL invocation; mismatch throws. File streamed into WSL `/tmp/openclaw-install.sh` via stdin pipe (sidesteps the 32K Windows argv limit for Invoke-WslBash transport). `$OpenClawInstallUrl` constant removed entirely. v1.0.20 / v1.0.3 Azure cycles both PASS with `Bundled openclaw-install.sh hash verified.` confirmed in install.log. | v1.0.20 / v1.0.3 — [`86dfd36`](https://github.com/BuzzardsBay/clawfactory-secure-setup/commit/86dfd36) / [`65d5a10`](https://github.com/BuzzardsBay/clawagent-setup/commit/65d5a10) |
 
 **v1.0.1 diagnosis lineage — vmIdleTimeout / VM idle bug.** Symptom was a gateway that systemd marked Active=running while port 8787 was not listening; the WSL VM cycled boot/shutdown approximately every 60-180 seconds. Root cause was the Windows-side `.wslconfig` — either missing entirely or present without a `vmIdleTimeout` key. WSL2's default vmIdleTimeout is 60000 ms, so the VM (and the gateway running inside it) shuts down 60 seconds after the last activity. `loginctl enable-linger clawuser` does **not** prevent this: linger keeps user services alive across logout, but the WSL VM itself is governed by Windows-side `.wslconfig`. Diagnosed in a CC session on May 4, 2026. Ruled out: SIGTERM from a supervisor process, watchdog kill, hot-reload watcher, `openclaw-control-ui` issuing a restart RPC, linger not enabled, crash + restart loop. Confirmed via: missing `.wslconfig`, `journalctl --list-boots` showing 13 boots in 12 hours with several under 30 s, kernel `boot_id` changing per cycle, explicit `Reached target Shutdown` markers in journal, and a live test where continuous external WSL activity kept the gateway stable for 9+ minutes. Secondary finding (NOT fixed in v1.0.1, low priority): the systemd unit is `Type=simple` (default), so `systemctl` marks the unit "active" the instant `node` is exec'd — before the gateway binds port 8787. There is a 3-14 second window where `systemctl` says `active` but `curl` says `connection-refused`. Fixing it would require an OpenClaw code change to call `sd_notify(READY=1)` after `server.listen()` plus `Type=notify` in the unit file. Not pursued in v1.0.1 because the primary fix (vmIdleTimeout=-1) keeps the VM alive long enough that this window is invisible to users in practice.
 
@@ -70,6 +85,48 @@ The v1.0.17 fix folds all three: $script9b in Step-EnableChatCompletions writes 
 
 ---
 
+## Active known issues (v1.0.20)
+
+The Resolved bugs table above documents everything that's been fixed in the v1.0.x series. The following are NOT resolved — carry forward into v1.1 planning (see [v1.1_backlog.md](v1.1_backlog.md)).
+
+| ID | Component | Issue |
+|----|-----------|-------|
+| M4 | `resources/switch-provider.ps1:79` | Wrong JSON path (`~/skills-factory/openclaw.json`); should write via `openclaw config set` against `~/.openclaw/openclaw.json`. Uses `python3` (not guaranteed in WSL). |
+| M5 | `resources/switch-provider.ps1:60` | Auxiliary hosts not re-added to nftables allowlist after provider switch — egress firewall blocks the new provider. |
+| M6 | `resources/switch-provider.ps1` | No iptables-legacy fallback for kernels that don't expose nft hooks. |
+| C1 | ClawChat (desktop shortcut path) | Desktop shortcut launches `ClawChat.exe` directly, bypassing `launcher.ps1`. If the WSL Host scheduled task hasn't fired yet, gateway is offline and ClawChat shows offline state until the next poll cycle. |
+| C2 | ClawChat (UI scope) | No settings tab — users cannot switch providers, manage API keys, or modify security controls from the UI. FAQ on clawfactory.app currently says "coming soon." |
+
+M4/M5/M6 block honest user-facing answers about provider switching. C1/C2 block honest user-facing answers about settings management. Both are v1.1 priorities. See backlog items 5, 18, 19.
+
+### Resolved in v1.0.x (no longer blocking)
+- Gateway restart loop on first install → v1.0.1 (systemd fallback + `openclaw config set --json` fixes)
+- chatCompletions HTTP 404 → v1.0.17 (`Step-EnableChatCompletions` refactor with `--json` + gateway restart inside `$script9b`)
+- OpenClaw install.sh URL drift → v1.0.20 (bundled install.sh; no URL fetch)
+
+---
+
+## Product roadmap
+
+| Product | Price | Status |
+|---------|-------|--------|
+| ClawFactory | $149 | LIVE — clawfactory.app |
+| ClawAgent | $49 | LIVE — clawfactory.app |
+| ClawChat | bundled | LIVE — bundled in ClawFactory + ClawAgent |
+| ClawScribe | $29 | Roadmap |
+| ClawVault | $49 | Roadmap |
+| ClawCode | $49 | Roadmap |
+| ClawDesk | $29 | Roadmap |
+| ClawStudy | $19 | Roadmap |
+| ClawCanvas | $39 | Roadmap |
+| ClawMed | $29 | Roadmap |
+| ClawWatch | $49 | Roadmap |
+| ClawSight | $49 | Roadmap |
+
+**Code signing cert (Sectigo OV ~$200/yr):** pending first revenue. Required before SmartScreen "Windows protected your PC" warning is resolved — currently the FAQ on clawfactory.app instructs users to click "More info → Run anyway."
+
+---
+
 ## Smoke test history
 
 | Date | Build | Result | Notes |
@@ -94,6 +151,9 @@ The v1.0.17 fix folds all three: $script9b in Step-EnableChatCompletions writes 
 | 2026-05-07 | `82ef187` (v1.0.15) | **Azure PASS, 4 cycles (3 first-try + 1 retry)** | Smoke SYSTEM detection + bundle in .iss. Stability cycles 1, 2, 3-retry all PASS. Cycle 3-original FAIL was a 5-second probe timeout while gateway alive (harness flake). |
 | 2026-05-08 | `14b0001` (v1.0.16) | **Azure FAIL** (install/smoke pass, chatCompletions=404) | --strict-json patch attempted; Step-EnableChatCompletions returned exit 1 silently and no flag was written. Live VM RDP investigation pinpointed correct fix path (--json + Invoke-WslBash + gateway restart). Drove v1.0.17. |
 | 2026-05-08 | `18516a6` (v1.0.17) | **Azure PASS** | First green chatCompletions probe ever. --json + Invoke-WslBash + gateway restart in $script9b. Probe HTTP 400 (route registered, model-format error downstream). Smoke 4P/0F/7S, idle 200/200 first-try. Cosmetic: Invoke-WslBash returns exit=1 even when bash hits exit 0 — false WARN, no functional impact, fix in v1.0.18. |
+| 2026-05-09 | `501821a` (v1.0.18) | **Azure FAIL** | ClawChat bundle landed but upstream `openclaw.ai/install.sh` had changed hash (`57f025ba…` → `85fab092…`). [R2] correctly aborted at Step 8 — guard worked as designed. Drove v1.0.19 (pin bump) + v1.0.20 (bundled install.sh). |
+| 2026-05-10 | `bee3f12` (v1.0.19) | **Azure PASS** | Hash bumped to `3a617b73…` after security review of upstream diff. cfv-119 / cfa-102 both PASS all six criteria (install + smoke + bundled-line + completions + ClawChat + idle). |
+| 2026-05-10 | `86dfd36` (v1.0.20) | **Azure PASS** | install.sh now bundled as `resources\openclaw-install.sh`. Hash-verified on Windows via `Get-FileHash` before any WSL invocation; file streamed into WSL via stdin pipe (sidesteps argv limit). cfv-120 / cfa-103 both PASS. `Bundled openclaw-install.sh hash verified.` confirmed in install.log. Hash drift class eliminated. |
 
 The smoke test script lives at [`smoke-test.ps1`](smoke-test.ps1). Re-run it on every clean-VM rebuild before tagging.
 
@@ -1089,6 +1149,98 @@ TimeoutStartSec=infinity
 ```
 
 > **Note**: this snapshot is from a manual `openclaw gateway install --force` run, not a full setup.ps1 run. A full installer run also writes `clawfactory-tunables.conf` (TimeoutStartSec=infinity from sub-block c) and `clawfactory-disable-bonjour.conf` (Environment=OPENCLAW_DISABLE_BONJOUR=1 from post-install FIX 1). Both coexist with `insecure-loopback.conf` because systemd merges all `*.conf` drop-ins on `daemon-reload`.
+
+---
+
+## 19. CLAWCHAT
+
+Tauri + React desktop app bundled into both installers.
+- **Source:** `C:\Users\bmcki\ClawChat\`
+- **GitHub:** not yet published (private source)
+- **Binary:** `resources\ClawChat.exe` in both installer repos (10.88 MB, SHA-256 `0bb56c62e70a5af6153db8fd9a3b8b0c4a69682f54ae703e87952c18facb6d45`)
+
+**Version:** 1.0.0
+
+**Build command:**
+```powershell
+cd C:\Users\bmcki\ClawChat\
+npm run tauri build
+```
+Output: `src-tauri\target\release\ClawChat.exe`
+
+### 19.1 Features shipped
+
+- Conversation threads with persistent history (`%APPDATA%\ClawChat\conversations\{uuid}.json`)
+- Streaming SSE against `/v1/chat/completions` on the loopback gateway
+- Dark (warm charcoal) + light (warm off-white) theme toggle (bottom-left button)
+- Mascot illustration in empty / offline / connecting states
+- Gateway status indicator (green / red / grey dot) with 10-second poll
+- Token read via WSL base64-over-stdout pattern (`wsl.exe -d Ubuntu -u clawuser -- bash -lc "cat /home/clawuser/.openclaw/openclaw.json | base64 -w0"`)
+
+### 19.2 Known gaps (active)
+
+- **C1:** No gateway auto-start on launch. Desktop shortcut launches `ClawChat.exe` directly, bypassing `launcher.ps1`. If the WSL Host scheduled task hasn't fired yet, gateway is offline and ClawChat shows the offline mascot state until the user manually restarts via Kill Switch. **Fix queued as backlog item 18.**
+- **C2:** No settings tab. Provider switching, API key management, and security control toggles are all install-time only — no UI access. **Fix queued as backlog item 19.**
+
+### 19.3 Security posture
+
+- Conversation storage: `%APPDATA%\ClawChat\conversations\{uuid}.json` — Windows user profile, normal NTFS ACLs apply.
+- Token storage: read from openclaw.json via WSL at runtime only — never persisted by ClawChat to disk.
+- Network: only reaches `127.0.0.1:8787` (the loopback gateway). No outbound HTTPS from ClawChat itself.
+- CSP: intentionally null (local app loading only IBM Plex Mono from Google Fonts; no remote JS, no untrusted iframes).
+
+---
+
+## 20. INFRASTRUCTURE AND DISTRIBUTION
+
+### 20.1 Landing page — clawfactory.app
+
+- **Source:** `docs/index.html` in `clawfactory-secure-setup` repo
+- **Hosted:** GitHub Pages, custom domain
+- **DNS:** Namecheap (clawfactory.app)
+- **HTTPS:** enforced
+- **Download buttons:** point at `releases/latest` URLs for both repos (auto-resolves; no version-specific links to keep in sync)
+
+### 20.2 Personal site — bretmckinney.com
+
+- **Source:** `C:\Users\bmcki\BretMcKinney-Site\` (not yet present locally as of 2026-05-11; verify path before any future edits)
+- **GitHub:** `BuzzardsBay/bretmckinney-site` (verify; not listed in `gh repo list BuzzardsBay` 2026-05-11)
+- **Hosted:** GitHub Pages, custom domain
+- **DNS:** Namecheap (bretmckinney.com)
+
+### 20.3 Payment — Stripe (Frontier Trading LLC)
+
+- ClawFactory: $149 one-time
+- ClawAgent: $49 one-time
+- Payouts: Mercury bank account
+
+### 20.4 Email
+
+- Support: `support@clawfactory.app` (Namecheap forwarder → `hello@avitalresearch.com`)
+- Personal: `bret@bretmckinney.com` (Namecheap forwarder → `hello@avitalresearch.com`)
+
+### 20.5 GitHub releases
+
+- ClawFactory: https://github.com/BuzzardsBay/clawfactory-secure-setup/releases
+- ClawAgent: https://github.com/BuzzardsBay/clawagent-setup/releases
+- Landing page download buttons use `/releases/latest` (auto-resolves to whichever tag was published most recently)
+
+### 20.6 Azure validation
+
+- **Resource group:** `clawfactory-validation` (westus2)
+- **Baseline image:** `clawfactory-win11-baseline` — **DO NOT DELETE**
+- **Storage account:** `clawfactoryvalc467` (StorageV2, westus2)
+- **Subscription:** `43010359-5b4c-4d16-af11-10f6544b2978`
+- **Creds:** `C:\Users\bmcki\.azure-clawfactory-creds` (clawadmin / ClawFactory2026!Secure)
+- **Public IP quota:** 3 (limit), typically 0 in use between cycles
+- **VM pattern:** Standard_D2s_v5, `--security-type Standard` (mandatory; Trusted Launch breaks the baseline image)
+
+### 20.7 OpenClaw pin
+
+- Bundled as `resources\openclaw-install.sh` in both repos (93,387 bytes, SHA-256 `3a617b73ea35ac23cf856ce9615b69d0ace4090d236e0a57bbc638f01676a9ce`)
+- Hash pinned in `setup.ps1` as `$OpenClawInstallSha256`
+- Upgrade procedure documented in setup.ps1 comment block at the top of `Step-InstallOpenClaw`
+- **DO NOT restore the URL download path.** `openclaw.ai/install.sh` tracks "latest" and will drift without warning (proven twice within 24 hours on 2026-05-09/10).
 
 ### 18.6 systemctl unit-files inventory
 
