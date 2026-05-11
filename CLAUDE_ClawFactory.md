@@ -1,6 +1,6 @@
-## SHIP STATUS: v1.0.20 / v1.0.3 — 2026-05-11 — STABLE (Azure validated; bundled install.sh refactor live)
+## SHIP STATUS: v1.0.21 / v1.0.4 — 2026-05-11 — STABLE (ClawChat v1.1 bundled, Azure validated)
 
-**Current heads:** ClawFactory v1.0.20 ([86dfd36](https://github.com/BuzzardsBay/clawfactory-secure-setup/commit/86dfd36)) + ClawAgent v1.0.3 ([65d5a10](https://github.com/BuzzardsBay/clawagent-setup/commit/65d5a10)). Both Azure-validated on cfv-120 / cfa-103 (Cycle 1+2 PASS, 2026-05-10): INSTALLER_DONE=success, smoke 4P/0F/7S, chatCompletions HTTP 500 (route registered), ClawChat present + launches, idle 200/200. Bundled installer ~324.7 MB (carries 2026.4.27 OpenClaw + Ubuntu 22.04 rootfs + ClawChat.exe + openclaw-install.sh). v1.0.20 eliminates the openclaw.ai/install.sh URL-drift class entirely — install.sh is now bundled into `resources\openclaw-install.sh` and hash-verified at install time on the Windows side via `Get-FileHash`.
+**Current heads:** ClawFactory v1.0.21 ([2997bdf](https://github.com/BuzzardsBay/clawfactory-secure-setup/commit/2997bdf)) + ClawAgent v1.0.4 ([278e2e0](https://github.com/BuzzardsBay/clawagent-setup/commit/278e2e0)). Both Azure-validated on cfv-121 / cfa-104 (Cycle 1+2 PASS, 2026-05-11): INSTALLER_DONE=success, smoke 4P/0F/7S, chatCompletions HTTP 500 (route registered), ClawChat v1.1 launches under clawadmin, idle 200/200. v1.0.21 / v1.0.4 swap the bundled ClawChat.exe from v1.0.0 (10.88 MB) to v1.1 (11.16 MB, sha256 `a16006ff…1bec8`) — adds settings tab with provider switching, security tier selector, gateway auto-start on launch (C1 fix). Underlying install machinery unchanged from v1.0.20 / v1.0.3: bundled `openclaw-install.sh` hash-pinned at install time, no upstream URL drift surface.
 
 ---
 
@@ -113,6 +113,7 @@ M4/M5/M6 block honest user-facing answers about provider switching. C1/C2 block 
 | ClawFactory | $149 | LIVE — clawfactory.app |
 | ClawAgent | $49 | LIVE — clawfactory.app |
 | ClawChat | bundled | LIVE — bundled in ClawFactory + ClawAgent |
+| ClawResearch | $79 | Roadmap — next after ClawChat v1.2 |
 | ClawScribe | $29 | Roadmap |
 | ClawVault | $49 | Roadmap |
 | ClawCode | $49 | Roadmap |
@@ -124,6 +125,48 @@ M4/M5/M6 block honest user-facing answers about provider switching. C1/C2 block 
 | ClawSight | $49 | Roadmap |
 
 **Code signing cert (Sectigo OV ~$200/yr):** pending first revenue. Required before SmartScreen "Windows protected your PC" warning is resolved — currently the FAQ on clawfactory.app instructs users to click "More info → Run anyway."
+
+### ClawResearch — spec summary
+
+A local AI agent that searches the web, reads pages, and synthesizes sourced answers. All queries and results stay on the user's machine. Only outbound traffic: search API calls to Tavily + LLM provider.
+
+**Price:** $79 (one-time)
+**Target users:** researchers, analysts, lawyers, journalists, students, investors, hobbyists — anyone who wants private, sourced web research.
+
+**Technical delta from ClawAgent:**
+- Tavily API key added to installer wizard
+- `api.tavily.com` added to nftables egress allowlist
+- System prompt pre-configured for research behavior: cite sources, verify claims, summarize with links
+- ClawChat Sources panel: every answer shows retrieved URLs
+
+**Three-layer verification system:**
+
+1. **Source gating** — configurable tiers:
+   - Tier 1: primary sources only (`.gov`, `.edu`, peer-reviewed, official filings, Reuters/AP)
+   - Tier 2: Tier 1 + major publications (WSJ, NYT, FT, established trade press)
+   - Tier 3: open web (default)
+2. **Claim verification** — confidence scoring per claim:
+   - **High:** 3+ independent sources agree
+   - **Medium:** 1-2 sources, no conflicts
+   - **Low:** single source or conflicting sources
+   - Uses `[VERIFIED]` / `[INFERRED]` / `[GENERAL]` tagging (same pattern as FrontierAI CalibrationAgent)
+3. **Conflict flagging** — surfaces source disagreements explicitly rather than picking one answer.
+
+**ClawChat additions for ClawResearch:**
+- Sources panel: clickable links to every retrieved URL
+- Confidence badge per response (High / Medium / Low)
+- Claim-level tagging: ✓ (verified), ~ (inferred), ! (conflicting)
+- "Dig deeper" button: sends agent back for more sources on flagged claims
+- Source tier selector in settings
+
+**FAQ disclaimer (honest limitation):**
+> ClawResearch reduces hallucination risk significantly but cannot eliminate it. Tavily retrieves what exists on the web. If the web is wrong, the agent can be wrong. The verification layer catches conflicts and low-confidence claims — it does not manufacture ground truth.
+
+**Build order (after ClawChat v1.2):**
+1. ClawResearch installer (fork ClawAgent, add Tavily wizard step + firewall rule)
+2. ClawChat Sources panel + confidence UI
+3. Verification agent (reads Tavily results, scores claims)
+4. Azure validation + release
 
 ---
 
