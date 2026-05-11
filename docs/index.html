@@ -549,6 +549,63 @@ footer {
 
 .product-github-link:hover { color: var(--accent); }
 
+/* FAQ */
+#faq .section-label { margin-bottom: 32px; }
+.faq-list {
+    max-width: 760px;
+    margin: 0 auto;
+}
+.faq-item { border-bottom: 0.5px solid #1e1e1a; }
+.faq-item:first-child { border-top: 0.5px solid #1e1e1a; }
+.faq-question {
+    width: 100%;
+    background: none;
+    border: none;
+    text-align: left;
+    padding: 20px 0;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 24px;
+    font-family: var(--font-head);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    letter-spacing: -0.005em;
+    transition: color 0.15s ease;
+}
+.faq-question:hover { color: var(--accent); }
+.faq-question > span:first-child {
+    flex: 1;
+    line-height: 1.45;
+}
+.faq-chevron {
+    font-size: 18px;
+    color: var(--accent);
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+    line-height: 1;
+}
+.faq-question[aria-expanded="true"] .faq-chevron {
+    transform: rotate(90deg);
+}
+.faq-answer {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.25s ease;
+}
+.faq-answer.open { max-height: 800px; }
+.faq-answer-inner {
+    padding: 0 0 22px;
+    font-size: 14.5px;
+    line-height: 1.7;
+    color: var(--text-muted);
+    font-family: var(--font-body);
+    max-width: 70ch;
+}
+.faq-answer-inner strong { color: var(--text); font-weight: 500; }
+
 /* RESPONSIVE */
 @media (max-width: 768px) {
     .nav-inner { padding: 14px 20px; }
@@ -718,6 +775,143 @@ footer {
     </div>
 </section>
 
+<section id="faq">
+    <div class="container">
+        <div class="section-label">Frequently Asked Questions</div>
+        <div class="faq-list">
+            <div class="faq-item">
+                <button class="faq-question" aria-expanded="false">
+                    <span>What is ClawFactory and what does it actually do?</span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </button>
+                <div class="faq-answer">
+                    <div class="faq-answer-inner">ClawFactory is a Windows installer that packages OpenClaw &mdash; a local AI agent runtime &mdash; inside a hardened security sandbox. When you run the installer, it sets up a WSL2 Linux environment, installs the OpenClaw runtime inside it, configures a firewall that restricts what the agent can reach on the internet, and wires everything so the agent runs locally on your machine. You interact with it through ClawChat, the desktop app that's included with your install. Your conversations stay on your machine. Nothing is sent to a central server.</div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" aria-expanded="false">
+                    <span>Is my data sent anywhere?</span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </button>
+                <div class="faq-answer">
+                    <div class="faq-answer-inner">Your conversations are stored locally in <strong>%APPDATA%\ClawChat\conversations\</strong> on your Windows machine. The only outbound traffic allowed by the egress firewall is the API call to your AI provider (Grok by default) &mdash; that's the request that generates the response to your message. No telemetry, no analytics, no conversation logging to any server we control. The firewall enforces this at the network level, not just by policy.</div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" aria-expanded="false">
+                    <span>What does it have access to by default?</span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </button>
+                <div class="faq-answer">
+                    <div class="faq-answer-inner">Almost nothing outside its own sandbox. By default the agent runs inside WSL2 with automount disabled &mdash; your Windows filesystem (C: drive, Documents, Downloads, everything) is invisible to it. The egress firewall restricts outbound network calls to your AI provider only. It cannot read your files, access other applications, or make arbitrary internet requests.</div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" aria-expanded="false">
+                    <span>What exactly is restricted out of the box?</span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </button>
+                <div class="faq-answer">
+                    <div class="faq-answer-inner">The following are blocked by default at install:<br>&mdash; <strong>Windows filesystem:</strong> invisible to the agent (automount=false)<br>&mdash; <strong>Inbound network connections</strong> to port 8787 from other devices on your network (Windows Firewall rule)<br>&mdash; <strong>Outbound network traffic</strong> except to your configured AI provider (nftables egress firewall scoped to the agent's Linux user)<br>&mdash; The gateway only binds to 127.0.0.1 &mdash; not accessible from other machines on your network</div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" aria-expanded="false">
+                    <span>How do I change settings to give it more access?</span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </button>
+                <div class="faq-answer">
+                    <div class="faq-answer-inner">Settings management via the ClawChat interface is on the roadmap for an upcoming release. In the current version, security controls are configured at install time and designed to stay locked by default. If you need to modify access &mdash; for example, allowing the agent to read specific files or reach additional network endpoints &mdash; contact <a href="mailto:support@clawfactory.app">support@clawfactory.app</a> and describe your use case. Manual configuration options will be documented here when the settings interface ships.</div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" aria-expanded="false">
+                    <span>How do I use ClawFactory after installing?</span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </button>
+                <div class="faq-answer">
+                    <div class="faq-answer-inner">After install, ClawChat opens automatically. Type your message in the input bar and hit Enter &mdash; the agent responds in real time, streaming tokens as they arrive. Conversations are saved automatically and appear in the sidebar. Use the New Chat button to start a fresh conversation. The gateway status dot in the top-left of ClawChat shows green when your agent is running and ready. If it shows red, use the Kill Switch from the Start Menu to restart the gateway.</div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" aria-expanded="false">
+                    <span>What AI providers does it support?</span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </button>
+                <div class="faq-answer">
+                    <div class="faq-answer-inner">ClawFactory ships pre-configured for Grok (xAI) &mdash; you provide your Grok API key during install and it's stored securely in Windows Credential Manager. Support for switching providers (OpenAI, Anthropic, and others) is in active development and will be available in an upcoming release. If provider flexibility is important to your use case, ClawAgent ($49) is a lighter option worth considering while the full provider-switching feature is completed.</div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" aria-expanded="false">
+                    <span>What's the difference between ClawFactory and ClawAgent?</span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </button>
+                <div class="faq-answer">
+                    <div class="faq-answer-inner">Same security substrate &mdash; both include the WSL2 sandbox, egress firewall, DPAPI key storage, loopback-only gateway, and Kill Switch. The difference is scope: <strong>ClawFactory ($149)</strong> includes 5 agent profiles and factory orchestration scaffolding for multi-agent workflows. <strong>ClawAgent ($49)</strong> is a single-agent install &mdash; faster setup, same security, designed for straightforward use cases.</div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" aria-expanded="false">
+                    <span>Will my conversations be private from other people on my machine?</span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </button>
+                <div class="faq-answer">
+                    <div class="faq-answer-inner">Conversations are stored in your Windows user profile under <strong>%APPDATA%\ClawChat\conversations\</strong> &mdash; accessible only to your Windows user account under normal circumstances. ClawFactory is not currently designed for shared or multi-user machines. If multiple people use the same Windows account, they would share the same conversation history.</div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" aria-expanded="false">
+                    <span>Why does Windows warn me about the installer?</span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </button>
+                <div class="faq-answer">
+                    <div class="faq-answer-inner">The ClawFactory installer is not yet code-signed with a commercial certificate. Windows SmartScreen shows a warning for unsigned executables from unknown publishers. This is expected. To proceed: click <strong>"More info"</strong> on the SmartScreen dialog, then <strong>"Run anyway."</strong> We are working toward obtaining a code signing certificate. In the meantime, you can verify the installer's SHA-256 hash against the value published on the GitHub Releases page before running it.</div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" aria-expanded="false">
+                    <span>Does it work on Mac or Linux?</span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </button>
+                <div class="faq-answer">
+                    <div class="faq-answer-inner">Not yet. ClawFactory and ClawAgent are Windows 10/11 only. The WSL2 sandboxing approach is Windows-specific. Mac and Linux support is on the long-term roadmap but has no committed timeline.</div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" aria-expanded="false">
+                    <span>What if I want to uninstall?</span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </button>
+                <div class="faq-answer">
+                    <div class="faq-answer-inner">Use <strong>Windows Settings &rarr; Apps &rarr; ClawFactory</strong> (or ClawAgent) <strong>&rarr; Uninstall.</strong> The uninstaller removes the WSL2 environment, the OpenClaw runtime, the firewall rules, and the scheduled task. Your conversation history in <strong>%APPDATA%\ClawChat\</strong> is not deleted automatically &mdash; remove that folder manually if you want a complete clean uninstall.</div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" aria-expanded="false">
+                    <span>Is this a subscription?</span>
+                    <span class="faq-chevron">&rsaquo;</span>
+                </button>
+                <div class="faq-answer">
+                    <div class="faq-answer-inner">No. ClawFactory is a one-time purchase. You pay once and own the installer permanently. Future major versions may be separate purchases. Updates within the current version (v1.x) are free &mdash; download the latest installer from the releases page and reinstall over the existing version.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
 <section class="privacy">
     <div class="container">
         <h2 class="privacy-statement">A local AI runtime that doesn't phone home.</h2>
@@ -786,6 +980,22 @@ footer {
     window.addEventListener('scroll', onScroll, { passive: true });
     onScroll();
 })();
+
+// FAQ accordion
+document.querySelectorAll('.faq-question').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        var answer = btn.nextElementSibling;
+        var isOpen = answer.classList.contains('open');
+        document.querySelectorAll('.faq-answer.open').forEach(function (a) {
+            a.classList.remove('open');
+            a.previousElementSibling.setAttribute('aria-expanded', 'false');
+        });
+        if (!isOpen) {
+            answer.classList.add('open');
+            btn.setAttribute('aria-expanded', 'true');
+        }
+    });
+});
 </script>
 
 </body>
