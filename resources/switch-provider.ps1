@@ -217,14 +217,14 @@ openclaw config set auth.order.'$($cfg.InternalId)' --strict-json '$orderJson' >
 openclaw models set '$modelId' >/dev/null
 echo "[switch-provider] config set (profile=$($cfg.ProfileId), order=$($cfg.InternalId), model=$modelId)"
 systemctl --user restart openclaw-gateway 2>&1 || true
-for i in 1 2 3 4 5 6; do
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     if curl -fsS --max-time 5 http://127.0.0.1:8787/status >/dev/null 2>&1; then
         echo "[switch-provider] gateway healthy on attempt `$i"
         exit 0
     fi
-    sleep 2
+    sleep 3
 done
-echo "[switch-provider] WARNING: gateway did not respond within 12s after restart" >&2
+echo "[switch-provider] WARNING: gateway did not respond within 60s after restart" >&2
 exit 1
 "@
 $ocExit = Invoke-WslBashBlock -Script $ocScript -User $WslUser -Cd '/home/clawuser'
