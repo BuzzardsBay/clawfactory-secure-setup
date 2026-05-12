@@ -211,20 +211,20 @@ $orderJson   = ConvertTo-Json -Compress -InputObject @($cfg.ProfileId)
 $modelId     = "$($cfg.ModelPrefix)/$($cfg.Model)"
 
 $ocScript = @"
-set -euo pipefail
-openclaw config set auth.profiles.'$($cfg.ProfileId)' --strict-json '$profileJson' >/dev/null
-openclaw config set auth.order.'$($cfg.InternalId)' --strict-json '$orderJson' >/dev/null
-openclaw models set '$modelId' >/dev/null
+set -uo pipefail
+openclaw config set auth.profiles.'$($cfg.ProfileId)' --strict-json '$profileJson' >/dev/null || { echo "[switch-provider] config set auth.profiles failed: `$?" >&2; exit 1; }
+openclaw config set auth.order.'$($cfg.InternalId)' --strict-json '$orderJson' >/dev/null || { echo "[switch-provider] config set auth.order failed: `$?" >&2; exit 1; }
+openclaw models set '$modelId' >/dev/null || { echo "[switch-provider] models set failed: `$?" >&2; exit 1; }
 echo "[switch-provider] config set (profile=$($cfg.ProfileId), order=$($cfg.InternalId), model=$modelId)"
-systemctl --user restart openclaw-gateway 2>&1 || true
-for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+systemctl --user restart openclaw-gateway 2>&1 || echo "[switch-provider] gateway restart returned non-zero, continuing health poll" >&2
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40; do
     if curl -fsS --max-time 5 http://127.0.0.1:8787/status >/dev/null 2>&1; then
         echo "[switch-provider] gateway healthy on attempt `$i"
         exit 0
     fi
     sleep 3
 done
-echo "[switch-provider] WARNING: gateway did not respond within 60s after restart" >&2
+echo "[switch-provider] WARNING: gateway did not respond within 120s after restart" >&2
 exit 1
 "@
 $ocExit = Invoke-WslBashBlock -Script $ocScript -User $WslUser -Cd '/home/clawuser'
