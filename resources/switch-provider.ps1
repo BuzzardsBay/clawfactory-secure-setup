@@ -201,19 +201,10 @@ Write-Host "  [x] egress allowlist updated (backend auto-detected)"
 # matches setup.ps1:1755. Restarts gateway so the new config takes effect
 # (gateway caches config at startup; same restart pattern as setup.ps1
 # Step-EnableChatCompletions).
-$profileObject = if ($Provider -eq 'ollama') {
-    [ordered]@{
-        provider    = $cfg.InternalId
-        mode        = $cfg.Mode
-        displayName = $cfg.DisplayName
-    }
-} else {
-    [ordered]@{
-        provider    = $cfg.InternalId
-        mode        = $cfg.Mode
-        displayName = $cfg.DisplayName
-        apiKeyRef   = $cfg.Cred
-    }
+$profileObject = [ordered]@{
+    provider    = $cfg.InternalId
+    mode        = $cfg.Mode
+    displayName = $cfg.DisplayName
 }
 $profileJson = ConvertTo-Json -Compress -InputObject $profileObject
 $orderJson   = ConvertTo-Json -Compress -InputObject @($cfg.ProfileId)
@@ -237,7 +228,11 @@ echo "[switch-provider] WARNING: gateway did not respond within 12s after restar
 exit 1
 "@
 $ocExit = Invoke-WslBashBlock -Script $ocScript -User $WslUser -Cd '/home/clawuser'
-Write-Host "  [x] openclaw config updated (model=$modelId, profile=$($cfg.ProfileId))"
+if ($ocExit -eq 0) {
+    Write-Host "  [x] openclaw config updated (model=$modelId, profile=$($cfg.ProfileId))"
+} else {
+    Write-Warning "openclaw config update returned exit $ocExit (profile=$($cfg.ProfileId), model=$modelId)."
+}
 
 Write-Host ''
 if ($ocExit -eq 0) {
