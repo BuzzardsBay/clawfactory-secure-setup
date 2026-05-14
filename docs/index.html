@@ -669,7 +669,7 @@ footer {
     <div class="container">
         <div class="hero-text">
             <h1>OpenClaw. <span class="accent">Hardened.</span><br>One click.</h1>
-            <p class="hero-sub">A local AI runtime that doesn't phone home. ClawFactory installs OpenClaw inside a WSL2 sandbox with an egress firewall, loopback-only gateway, and one-click kill switch &mdash; for developers and operators who need their agent isolated, not connected.</p>
+            <p class="hero-sub">A local AI runtime that doesn't phone home. ClawFactory installs OpenClaw inside a WSL2 sandbox with an egress firewall, loopback-only gateway, and one-click kill switch. Security controls enforced at the OS level &mdash; not by prompting the agent to behave.</p>
             <div class="cta-group">
                 <a class="cta-button" href="https://buy.stripe.com/6oU4gzcNb74EeAI7zJ8g002">Buy ClawFactory &mdash; $149 &rarr;</a>
                 <a class="cta-button-ghost" href="https://buy.stripe.com/dRmdR95kJ1KkfEM5rB8g000">Get ClawAgent &mdash; $49 &rarr;</a>
@@ -815,7 +815,7 @@ footer {
                     <span class="faq-chevron">&rsaquo;</span>
                 </button>
                 <div class="faq-answer">
-                    <div class="faq-answer-inner">The following are blocked by default at install:<br>&mdash; <strong>Windows filesystem:</strong> invisible to the agent (automount=false)<br>&mdash; <strong>Inbound network connections</strong> to port 8787 from other devices on your network (Windows Firewall rule)<br>&mdash; <strong>Outbound network traffic</strong> except to your configured AI provider (nftables egress firewall scoped to the agent's Linux user)<br>&mdash; The gateway only binds to 127.0.0.1 &mdash; not accessible from other machines on your network</div>
+                    <div class="faq-answer-inner">The following are blocked by default at install:<br>&mdash; <strong>Windows filesystem:</strong> invisible to the agent (automount=false)<br>&mdash; <strong>Inbound network connections</strong> to port 8787 from other devices on your network (Windows Firewall rule)<br>&mdash; <strong>Outbound network traffic</strong> except to your configured AI provider (nftables egress firewall scoped to the agent's Linux user)<br>&mdash; The gateway only binds to 127.0.0.1 &mdash; not accessible from other machines on your network<br><br><strong>A note on how these controls work:</strong> every restriction listed above is enforced at the OS or network level &mdash; not by instructing the agent to behave a certain way. The egress firewall is an nftables rule in the Linux kernel scoped to the agent's user ID. The gateway binding is a network socket configuration. <code>automount=false</code> is a WSL2 kernel parameter. None of these can be overridden by the agent itself, regardless of what instructions it receives. This is the difference between a security control and a security suggestion.</div>
                 </div>
             </div>
 
