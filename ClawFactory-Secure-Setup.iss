@@ -3,7 +3,7 @@
 ; Compile with: "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ClawFactory-Secure-Setup.iss
 
 #define MyAppName      "ClawFactory Secure Setup"
-#define MyAppVersion   "1.0.25"
+#define MyAppVersion   "1.0.26"
 #define MyAppPublisher "Frontier Automation Systems LLC"
 #define MyAppURL       "https://openclaw.ai"
 
@@ -269,6 +269,26 @@ begin
   ShellExec('open', URL, '', '', SW_SHOWNORMAL, ewNoWait, ResultCode);
 end;
 
+{ v1.0.26: read a `/SWITCH=value` command-line argument for headless validation.
+  Used only inside a WizardSilent() gate, so interactive installs are unaffected. }
+function GetCmdLineValue(const SwitchName: string): string;
+var
+  i: Integer;
+  s: string;
+begin
+  Result := '';
+  for i := 1 to ParamCount do
+  begin
+    s := ParamStr(i);
+    if (Length(s) > Length(SwitchName)) and
+       (CompareText(Copy(s, 1, Length(SwitchName)), SwitchName) = 0) then
+    begin
+      Result := Copy(s, Length(SwitchName) + 1, MaxInt);
+      Exit;
+    end;
+  end;
+end;
+
 procedure InitializeWizard;
 begin
   { Detect /resume early so wizard pages know whether to skip. The
@@ -308,6 +328,22 @@ begin
   ProviderPage.Add('Ollama (local, free, offline-capable) - default model: llama3.1:8b');
   ProviderPage.Add('I''ll configure a provider later');
   ProviderPage.SelectedValueIndex := 0;
+
+  { v1.0.26: silent-mode /PROVIDER=<name> override. Lets `az vm run-command` headless
+    validation pick a non-default provider. ShouldSkipPage already hides the radio
+    page on silent runs, so SelectedValueIndex is the only state the rest of the
+    install reads. Interactive runs ignore this entirely. }
+  if WizardSilent() then
+  begin
+    case LowerCase(GetCmdLineValue('/PROVIDER=')) of
+      'grok':   ProviderPage.SelectedValueIndex := 0;
+      'openai': ProviderPage.SelectedValueIndex := 1;
+      'claude': ProviderPage.SelectedValueIndex := 2;
+      'gemini': ProviderPage.SelectedValueIndex := 3;
+      'ollama': ProviderPage.SelectedValueIndex := 4;
+      'later':  ProviderPage.SelectedValueIndex := 5;
+    end;
+  end;
 
   { --- Page 3: API key (skipped for Ollama / Later via ShouldSkipPage) [R5] --- }
   ApiKeyPage := CreateInputQueryPage(ProviderPage.ID,
