@@ -43,7 +43,7 @@ Set-StrictMode -Version 3.0
 
 #--- Constants ----------------------------------------------------------------
 # v1.0.4 - pre-install OpenClaw build deps before install.sh runs
-$InstallerVersion      = '1.0.27'
+$InstallerVersion      = '1.0.28'
 # [R2] OpenClaw install.sh is now BUNDLED into the installer (resources\openclaw-install.sh).
 # No network call to openclaw.ai/install.sh during install — that URL tracks "latest" and
 # changed twice in 24 hours on 2026-05-09/10. Hash-pinned at install time; mismatch throws.
@@ -214,6 +214,47 @@ function Invoke-WslExe {
     $stderr = $proc.StandardError.ReadToEnd()
     $proc.WaitForExit()
     return @{ ExitCode = $proc.ExitCode; StdOut = $stdout; StdErr = $stderr }
+}
+
+function Update-WslEngine {
+    # v1.0.28: Run `wsl --update` so the WSL engine/kernel is current before
+    # `wsl --install -d Ubuntu`. The baseline image's wsl.exe and kernel can
+    # lag the WSL feature engine that ships with Windows, and the mismatch
+    # surfaces as "Windows Subsystem for Linux must be updated to the latest
+    # version" - a non-fatal WARN on the pre-reboot path (Step-ConfigureWslConfig)
+    # but a HARD FATAL on the post-reboot resume path (where Install-Wsl
+    # DistroWithFallback throws). v1.0.27 cycle on cfv-128 caught this:
+    # resume branch hit wsl --install exit 1 with no recovery. Run --update
+    # first so --install has a current engine to work with.
+    #
+    # Idempotent: wsl --update returns 0 on success AND on "already current"
+    # AND on "no kernel installed yet, downloading" - all fine. A non-zero
+    # exit is logged as WARN and we proceed (best-effort: if --update can't
+    # run, --install may still succeed on a system that's already current).
+    # Uses Process.Start (not 2>&1) for the same PS-5.1 / $ErrorActionPreference
+    # = 'Stop' reason as the existing `wsl --status` calls in Step-EnsureWsl.
+    Write-Log INFO 'Running wsl --update before distro install (v1.0.28 preflight).'
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName               = 'wsl.exe'
+    $psi.Arguments              = '--update'
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError  = $true
+    $psi.UseShellExecute        = $false
+    $psi.CreateNoWindow         = $true
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $out  = $proc.StandardOutput.ReadToEnd() + $proc.StandardError.ReadToEnd()
+    $proc.WaitForExit()
+    $rc = $proc.ExitCode
+    Write-Log INFO "wsl --update exit code: $rc"
+    if ($out) {
+        # wsl.exe emits UTF-16 LE; strip the null bytes that show as  
+        # gibberish in the log if we don't.
+        $clean = ($out -replace "`0", '' -replace "`r?`n+", ' | ').Trim(' |')
+        if ($clean) { Write-Log INFO "wsl --update output: $clean" }
+    }
+    if ($rc -ne 0) {
+        Write-Log WARN "wsl --update returned $rc (continuing anyway - install may still succeed if the engine was already current)."
+    }
 }
 
 function Test-WslFunctional {
@@ -634,6 +675,13 @@ function Step-EnsureWsl {
     #      restart dialog, reboot. The $Resume branch above completes the
     #      distro install after restart.
     Write-Log INFO 'Step 2: Ensuring WSL2 + Ubuntu are available.'
+
+    # v1.0.28: refresh the WSL engine BEFORE any wsl --install path. The
+    # baseline image's bundled wsl.exe lags the latest engine and the v1.0.27
+    # cycle on cfv-128 hit a fatal "must be updated to the latest version"
+    # on the resume branch's distro install. Running --update first is
+    # idempotent and covers all three branches below.
+    Update-WslEngine
 
     if ($Resume) {
         Write-Log INFO 'Resuming after restart - completing WSL install if needed.'
@@ -2147,17 +2195,28 @@ $script:RebootPending = $false
 try {
 
 if ($Resume) {
-    # Recover provider from the resume flag (the cmdline value may be the
-    # default 'grok' if Inno didn't pass -Provider on the silent relaunch).
+    # Recover provider from the resume flag. The cmdline -Provider value on a
+    # /resume relaunch is whatever Inno's GetProviderLabel returned - which
+    # itself reads the flag, and defaults to 'grok' if the flag is missing or
+    # malformed. Falling back to that default silently has caused real
+    # provider drift in the past (v1.0.27 bisect on cfv-128: an Anthropic
+    # install resumed as Grok because the flag was wiped by a prior
+    # installer's startup). v1.0.28: treat a missing/empty/malformed flag as
+    # a hard failure with a clear message, rather than silently shipping a
+    # different provider than the user selected.
     $flag = Read-ResumeFlag
-    if ($flag -and $flag.provider) {
-        if ($flag.provider -ne $Provider) {
-            Write-Log INFO "Resume: switching provider from cmdline '$Provider' to flag value '$($flag.provider)'."
-            $Provider     = $flag.provider
-            $ThisProvider = $ProviderConfig[$Provider]
-        }
-    } else {
-        Write-Log WARN '-Resume passed but no resume flag found. Continuing with whatever -Provider was given.'
+    if (-not $flag) {
+        Write-Log ERROR "FATAL: -Resume passed but resume flag at $ResumeFlagFile is missing or unreadable. Refusing to continue with a guessed provider (would silently install Grok config on what may be a Claude install). To recover: delete $CheckpointFile and re-run the installer from scratch."
+        throw "Resume flag not found at $ResumeFlagFile. Cannot resume safely - see install log."
+    }
+    if ([string]::IsNullOrEmpty($flag.provider)) {
+        Write-Log ERROR "FATAL: Resume flag at $ResumeFlagFile is present but missing the 'provider' field. Refusing to continue with a guessed provider. To recover: delete $CheckpointFile and $ResumeFlagFile and re-run the installer."
+        throw "Resume flag at $ResumeFlagFile lacks 'provider' field. Cannot resume safely - see install log."
+    }
+    if ($flag.provider -ne $Provider) {
+        Write-Log INFO "Resume: switching provider from cmdline '$Provider' to flag value '$($flag.provider)'."
+        $Provider     = $flag.provider
+        $ThisProvider = $ProviderConfig[$Provider]
     }
     # Scheduled task self-unregisters as its first action when it fires; this
     # is belt-and-suspenders for the case where it didn't (manually triggered
