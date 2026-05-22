@@ -43,7 +43,7 @@ Set-StrictMode -Version 3.0
 
 #--- Constants ----------------------------------------------------------------
 # v1.0.4 - pre-install OpenClaw build deps before install.sh runs
-$InstallerVersion      = '1.0.28'
+$InstallerVersion      = '1.0.29'
 # [R2] OpenClaw install.sh is now BUNDLED into the installer (resources\openclaw-install.sh).
 # No network call to openclaw.ai/install.sh during install — that URL tracks "latest" and
 # changed twice in 24 hours on 2026-05-09/10. Hash-pinned at install time; mismatch throws.
@@ -911,7 +911,9 @@ function Step-ConfigureWslConfig {
             # Need a wsl --shutdown to make .wslconfig take effect immediately.
             # Only safe if Ubuntu is the only running distro - otherwise the
             # user has work in flight in another distro and we must ask first.
-            $running = & wsl.exe --list --running --quiet 2>$null
+            # v1.0.29: Invoke-WslExe (CreateNoWindow=$true) prevents a visible console flash.
+            $rRunning = Invoke-WslExe -Arguments @('--list', '--running', '--quiet')
+            $running = $rRunning.StdOut
             $runningDistros = @()
             if ($running) {
                 $runningDistros = @(($running -split "`n") |
@@ -983,8 +985,9 @@ systemd=true
 generateResolvConf=true
 "@
     $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($wslConf))
-    wsl -d $WslDistro -u root -- bash -c "echo '$encoded' | base64 -d > /etc/wsl.conf && chmod 644 /etc/wsl.conf"
-    if ($LASTEXITCODE -ne 0) { throw 'Failed to write /etc/wsl.conf' }
+    # v1.0.29: route through Invoke-WslExe (CreateNoWindow=$true) to suppress visible console flash.
+    $rWslConf = Invoke-WslExe -Arguments @('-d', $WslDistro, '-u', 'root', '--', 'bash', '-c', "echo '$encoded' | base64 -d > /etc/wsl.conf && chmod 644 /etc/wsl.conf")
+    if ($rWslConf.ExitCode -ne 0) { throw 'Failed to write /etc/wsl.conf' }
     Save-Checkpoint 'WslConf'
 }
 
@@ -1040,12 +1043,13 @@ chmod 644 /etc/wsl.conf
 '@
     $rc = Invoke-WslBash -Script $append -User 'root'
     if ($rc -ne 0) { throw "Failed to append default user to /etc/wsl.conf (exit=$rc)" }
-    wsl --shutdown | Out-Null
+    # v1.0.29: Invoke-WslExe (CreateNoWindow=$true) prevents visible console flashes on all three calls.
+    $null = Invoke-WslExe -Arguments @('--shutdown')
     Start-Sleep -Seconds 3
-    wsl -d $WslDistro -u $WslUser -- true | Out-Null
-    if ($LASTEXITCODE -ne 0) {
+    $rDefaultBoot = Invoke-WslExe -Arguments @('-d', $WslDistro, '-u', $WslUser, '--', 'true')
+    if ($rDefaultBoot.ExitCode -ne 0) {
         # Fall back to root restart if clawuser-default somehow still fails.
-        wsl -d $WslDistro -u root -- true | Out-Null
+        $null = Invoke-WslExe -Arguments @('-d', $WslDistro, '-u', 'root', '--', 'true')
         Write-Log WARN 'Default-user restart fell back to root. Check /etc/wsl.conf.'
     }
     Save-Checkpoint 'DefaultUser'
@@ -2183,6 +2187,109 @@ function Step-RegisterWslHostTask {
     }
 }
 
+function Step-RegisterPostInstallSmokeTask {
+    # v1.0.29: Write a smoke-check script to ProgramData and register a
+    # Scheduled Task that fires AtLogon (BUILTIN\Users), runs 11 checks as
+    # the interactive user (so WSL is accessible), writes results to
+    # C:\ProgramData\ClawFactory\smoke-results.json, and self-unregisters.
+    # CC reads smoke-results.json via run-command (SYSTEM can read ProgramData)
+    # without needing WSL access directly.
+    Write-Log INFO 'Step 17: Registering ClawFactory-PostInstall-Smoke scheduled task.'
+    try {
+        $smokePath = 'C:\ProgramData\ClawFactory\run-smoke.ps1'
+        $smokeScript = @'
+$ok = 0; $fail = 0; $results = @{}
+function Check { param($Name, [scriptblock]$Test)
+    try {
+        $pass = (& $Test)
+        $results[$Name] = if ($pass) { "PASS" } else { "FAIL" }
+        if ($pass) { $script:ok++ } else { $script:fail++ }
+    } catch {
+        $results[$Name] = "FAIL: $($_.Exception.Message)"
+        $script:fail++
+    }
+}
+
+Check "WSL automount disabled" {
+    (wsl -d Ubuntu -u clawuser -- cat /etc/wsl.conf) -match "enabled\s*=\s*false" }
+
+Check "Four agent.md files present" {
+    $s = "for a in orchestrator skill-scout skill-builder publisher; do f=`$HOME/.openclaw/agents/`$a/agent.md; [ -s `$f ] || exit 1; done; echo OK"
+    $e = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($s))
+    (wsl -d Ubuntu -u clawuser --cd ~ -- bash -lc "echo $e | base64 -d | bash") -eq "OK" }
+
+Check "AgentBootstrap checkpoint recorded" {
+    $cp = Join-Path $env:ProgramData "ClawFactory\checkpoint.json"
+    (Get-Content $cp -Raw | ConvertFrom-Json).completedSteps -contains "AgentBootstrap" }
+
+Check "Gateway responds 200 on loopback" {
+    try { (Invoke-WebRequest -Uri http://127.0.0.1:8787/status -UseBasicParsing -TimeoutSec 5).StatusCode -eq 200 }
+    catch { $false } }
+
+Check "Firewall inbound-deny rule on 8787" {
+    $r = Get-NetFirewallRule -DisplayName "ClawFactory-Block-Inbound-8787" -ErrorAction SilentlyContinue
+    $r -and $r.Enabled -eq "True" -and $r.Action -eq "Block" }
+
+Check "Orchestrator SOUL hash substituted" {
+    $s = 'grep -q "{{SOUL_SHA256}}" $HOME/.openclaw/agents/orchestrator/agent.md && echo BAD || echo OK'
+    $e = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($s))
+    (wsl -d Ubuntu -u clawuser --cd ~ -- bash -lc "echo $e | base64 -d | bash") -eq "OK" }
+
+Check ".wslconfig vmIdleTimeout present" {
+    $w = Get-Content "$env:USERPROFILE\.wslconfig" -Raw -ErrorAction SilentlyContinue
+    $w -match "vmIdleTimeout\s*=\s*-1" }
+
+Check "WSL host task registered" {
+    $t = Get-ScheduledTask -TaskName "ClawFactory WSL Host" -ErrorAction SilentlyContinue
+    $t -and $t.State -ne "Disabled" }
+
+Check "nft clawfactory chain present" {
+    $r = wsl -d Ubuntu -u clawuser -- bash -lc "/usr/sbin/nft list ruleset 2>&1"
+    $r -match "clawfactory" }
+
+Check "OpenClaw build deps present" {
+    $s = "which make g++ cmake python3 > /dev/null 2>&1 && echo OK || echo MISSING"
+    $e = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($s))
+    (wsl -d Ubuntu -u clawuser --cd ~ -- bash -lc "echo $e | base64 -d | bash") -eq "OK" }
+
+Check "No ft-mangling in install log" {
+    $m = Select-String -Path "$env:ProgramData\ClawFactory\install.log" `
+        -Pattern "ft: command not found" -ErrorAction SilentlyContinue
+    -not $m }
+
+# Unregister self before writing results
+Unregister-ScheduledTask -TaskName "ClawFactory-PostInstall-Smoke" -Confirm:$false -ErrorAction SilentlyContinue
+
+# Write results JSON
+$output = @{
+    timestamp = (Get-Date -Format "o")
+    pass      = $ok
+    fail      = $fail
+    total     = ($ok + $fail)
+    results   = $results
+} | ConvertTo-Json -Depth 3
+Set-Content -Path "C:\ProgramData\ClawFactory\smoke-results.json" -Value $output -Encoding UTF8
+'@
+
+        New-Item -ItemType Directory -Force -Path 'C:\ProgramData\ClawFactory' | Out-Null
+        Set-Content -Path $smokePath -Value $smokeScript -Encoding UTF8
+        Write-Log INFO "PostInstall smoke script written to $smokePath"
+
+        $action    = New-ScheduledTaskAction -Execute 'powershell.exe' `
+                       -Argument "-NonInteractive -ExecutionPolicy Bypass -File `"$smokePath`""
+        $trigger   = New-ScheduledTaskTrigger -AtLogOn
+        $principal = New-ScheduledTaskPrincipal -GroupId 'BUILTIN\Users' -RunLevel Highest
+        $settings  = New-ScheduledTaskSettingsSet -Hidden
+        Register-ScheduledTask -TaskName 'ClawFactory-PostInstall-Smoke' `
+            -Action $action -Trigger $trigger -Principal $principal `
+            -Settings $settings -Force | Out-Null
+        Write-Log INFO 'PostInstall smoke task registered (fires at next user logon)'
+        Save-Checkpoint 'PostInstallSmokeTask'
+    } catch {
+        Write-Log WARN "Step-RegisterPostInstallSmokeTask hit an error and is continuing: $($_.Exception.Message)"
+    }
+}
+
 #--- Main ---------------------------------------------------------------------
 # v1.0.12: every exit path - success, install failure, final-health-gate
 # failure, or pre-Invoke-WithRollback failure - must write INSTALLER_DONE
@@ -2320,6 +2427,7 @@ if (-not $healthy) {
 # we don't leave a dangling task pointing at a broken install. Outside the
 # Invoke-WithRollback block on purpose - failure here is non-fatal.
 Step-RegisterWslHostTask
+Step-RegisterPostInstallSmokeTask
 
 Write-Log INFO '==== ClawFactory Secure Setup - completed successfully ===='
 Remove-ResumeFlag
