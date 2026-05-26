@@ -3,7 +3,7 @@
 ; Compile with: "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ClawFactory-Secure-Setup.iss
 
 #define MyAppName      "ClawFactory Secure Setup"
-#define MyAppVersion   "1.0.30"
+#define MyAppVersion   "1.0.32"
 #define MyAppPublisher "Frontier Automation Systems LLC"
 #define MyAppURL       "https://openclaw.ai"
 
@@ -320,7 +320,7 @@ begin
     Result := Guid;
 end;
 
-{ v1.0.30: POST {key, machine_id, product} to the license API and return
+{ v1.0.30: POST (key, machine_id, product) to the license API and return
   True iff the response indicates a valid activation.
 
   The key is sanitized to [A-Z0-9-] before being inlined into JSON. The

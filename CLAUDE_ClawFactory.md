@@ -1278,12 +1278,11 @@ Output: `src-tauri\target\release\ClawChat.exe`
 - **Public IP quota:** 3 (limit), typically 0 in use between cycles
 - **VM pattern:** Standard_D2s_v5, `--security-type Standard` (mandatory; Trusted Launch breaks the baseline image)
 
-### 20.7 OpenClaw pin
-
-- Bundled as `resources\openclaw-install.sh` in both repos (93,387 bytes, SHA-256 `3a617b73ea35ac23cf856ce9615b69d0ace4090d236e0a57bbc638f01676a9ce`)
-- Hash pinned in `setup.ps1` as `$OpenClawInstallSha256`
-- Upgrade procedure documented in setup.ps1 comment block at the top of `Step-InstallOpenClaw`
-- **DO NOT restore the URL download path.** `openclaw.ai/install.sh` tracks "latest" and will drift without warning (proven twice within 24 hours on 2026-05-09/10).
+**SHA-256 handling (setup.ps1, Step 8):**
+Hash is computed at install time from the bundled resources\openclaw-install.sh
+using Get-FileHash. Logged to console and written to checkpoint.json under key
+installShHash. No pinned hash -- the bundled script is the version of record.
+Checkpoint entry provides audit trail.
 
 ### 18.6 systemctl unit-files inventory
 

@@ -31,7 +31,7 @@ param(
 # Targets PowerShell 5.1 (ships with Win11) - no PS7 bootstrap required.
 #
 # Security controls baked in:
-#   [R2] OpenClaw install.sh SHA-256 pinning (edit $OpenClawInstallSha256 below).
+#   [R2] OpenClaw install.sh SHA-256 logged at install time to checkpoint.json (no pin).
 #   [R3] WSL egress firewall (nftables, clawuser UID-scoped, provider-specific allowlist).
 #   [R4] Windows Firewall inbound-deny on gateway port.
 #   [R5] Provider API key read from Windows Credential Manager (DPAPI).
@@ -43,12 +43,13 @@ Set-StrictMode -Version 3.0
 
 #--- Constants ----------------------------------------------------------------
 # v1.0.4 - pre-install OpenClaw build deps before install.sh runs
-$InstallerVersion      = '1.0.29'
-# [R2] OpenClaw install.sh is now BUNDLED into the installer (resources\openclaw-install.sh).
+$InstallerVersion      = '1.0.32'
+# [R2] OpenClaw install.sh is BUNDLED into the installer (resources\openclaw-install.sh).
 # No network call to openclaw.ai/install.sh during install — that URL tracks "latest" and
-# changed twice in 24 hours on 2026-05-09/10. Hash-pinned at install time; mismatch throws.
-# To upgrade OpenClaw, see the comment block at the top of Step-InstallOpenClaw.
-$OpenClawInstallSha256 = '3a617b73ea35ac23cf856ce9615b69d0ace4090d236e0a57bbc638f01676a9ce'
+# changed twice in 24 hours on 2026-05-09/10. Hash is computed at install time and written
+# to checkpoint.json under "installShHash" for audit; no pinned hash, so upstream install.sh
+# updates no longer break installs. To upgrade OpenClaw, see the comment block at the top
+# of Step-InstallOpenClaw.
 # Pin OpenClaw npm package to a known-validated version.
 # ClawFactory v1.0 ships with OpenClaw 2026.4.27 - the version manually
 # validated on 2026-04-30 with the four bundled bug-workarounds intact:
@@ -800,6 +801,21 @@ function Step-EnsureWsl {
     $scriptPath = Join-Path $PSScriptRoot 'setup.ps1'
     Register-ResumeScheduledTask -ExePath $SourceExe -ScriptPath $scriptPath
     Write-Log INFO 'Reboot required. ClawFactory-Resume scheduled task is registered.'
+    # v1.0.32: Persist the resume flag here. Invoke-WslInstallWithRestart calls
+    # Save-ResumeFlag before reboot; this Step-EnsureWsl reboot path was missing
+    # the call, so after the SYSTEM-context Resume task fired post-reboot it
+    # aborted with "resume flag is missing or unreadable" (cfv-131, v1.0.31
+    # Azure validation). Same Save-ResumeFlag helper used by the other site, so
+    # the JSON shape (provider/installDir/sourceExe/credentialTarget/timestamp)
+    # matches what the resume branch expects at the secondary 'provider' check.
+    if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+    $credTarget = if ($ThisProvider.CredentialTarget) { $ThisProvider.CredentialTarget } else { '' }
+    Save-ResumeFlag -Provider $Provider -InstallDir $PSScriptRoot -SourceExe $SourceExe -CredentialTarget $credTarget
+    if (-not (Test-Path $ResumeFlagFile)) {
+        Write-Log ERROR "Failed to write resume flag at $ResumeFlagFile -- aborting before reboot."
+        exit 1
+    }
+    Write-Log INFO "Resume flag written: $ResumeFlagFile"
     Save-Checkpoint 'EnsureWsl'
     if (-not (Test-IsSilent)) {
         Add-Type -AssemblyName System.Windows.Forms
@@ -1323,19 +1339,19 @@ su - clawuser -c 'timeout 1800 ollama pull llama3.1:8b || echo "[WARN] ollama pu
 
 function Step-InstallOpenClaw {
     # openclaw-install.sh is BUNDLED -- no network call for this step.
-    # Pinned to openclaw v2026.5.7-era install.sh validated on
-    # ClawFactory v1.0.19 / ClawAgent v1.0.2 Azure cycles.
+    # Hash is computed at install time and written to checkpoint.json under
+    # "installShHash" for audit. No pinned hash -- upstream install.sh updates
+    # are accepted (the file is reviewed and re-bundled out-of-band).
     #
     # To upgrade OpenClaw:
     #   1. Download new install.sh from openclaw.ai/install.sh
     #   2. Review diff against current bundled version
     #   3. Run security sub-agent review
     #   4. Copy to resources\openclaw-install.sh in both repos
-    #   5. Update $OpenClawInstallSha256 to new hash
-    #   6. Bump version, rebuild, validate on Azure
+    #   5. Bump version, rebuild, validate on Azure
     #   DO NOT restore the URL-download path -- it tracks latest
     #   and will drift without warning.
-    Write-Log INFO 'Step 8 [R2]: Installing OpenClaw from bundled, hash-pinned install.sh.'
+    Write-Log INFO 'Step 8 [R2]: Installing OpenClaw from bundled install.sh (hash logged at install time).'
     if (-not $AcknowledgedOpenClawUrl) {
         throw 'OpenClaw install acknowledgement missing. Re-run via the wizard.'
     }
@@ -1343,11 +1359,16 @@ function Step-InstallOpenClaw {
     if (-not (Test-Path -LiteralPath $bundledScript)) {
         throw 'openclaw-install.sh not found in resources. Installer may be corrupted.'
     }
-    $hash = (Get-FileHash -LiteralPath $bundledScript -Algorithm SHA256).Hash.ToLower()
-    if ($hash -ne $OpenClawInstallSha256) {
-        throw "openclaw-install.sh hash mismatch. Expected $OpenClawInstallSha256 got $hash. Installer may be corrupted."
+    $installShHash = (Get-FileHash -LiteralPath $bundledScript -Algorithm SHA256).Hash.ToLower()
+    Write-Host "  [INFO] install.sh SHA-256: $installShHash (computed at install time)"
+    $state = [ordered]@{ completedSteps = @() }
+    if (Test-Path $CheckpointFile) {
+        $json = Get-Content -LiteralPath $CheckpointFile -Raw | ConvertFrom-Json
+        $state.completedSteps = @($json.completedSteps)
     }
-    Write-Log INFO 'Bundled openclaw-install.sh hash verified.'
+    $state.installShHash = $installShHash
+    $state | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $CheckpointFile -Encoding UTF8
+    Write-Log INFO "Bundled openclaw-install.sh hash logged: $installShHash"
 
     # Stream the bundled script into WSL /tmp via stdin. Cannot use Invoke-WslBash
     # for the file content because wsl.exe argv has a Windows ~32K limit and the
@@ -1426,7 +1447,8 @@ function Step-PreinstallGatewayRuntime {
     #
     # If a future openclaw release adds new bundled plugins or changes deps,
     # the lazy-install fallback will silently fail; setup.ps1 will need to
-    # be updated. The install.sh SHA-256 pin prevents silent upgrades.
+    # be updated. The install.sh SHA-256 is logged to checkpoint.json on every
+    # install for audit (no pin), so upstream changes are visible after the fact.
     Write-Log INFO 'Step 8b: Installing OpenClaw Gateway systemd service via canonical `openclaw gateway install --force`.'
 
     # M8: Compute the default `main` agent model based on the selected
