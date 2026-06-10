@@ -43,7 +43,7 @@ Set-StrictMode -Version 3.0
 
 #--- Constants ----------------------------------------------------------------
 # v1.0.4 - pre-install OpenClaw build deps before install.sh runs
-$InstallerVersion      = '1.0.32'
+$InstallerVersion      = '1.0.33'
 # [R2] OpenClaw install.sh is BUNDLED into the installer (resources\openclaw-install.sh).
 # No network call to openclaw.ai/install.sh during install — that URL tracks "latest" and
 # changed twice in 24 hours on 2026-05-09/10. Hash is computed at install time and written
@@ -677,6 +677,32 @@ function Step-EnsureWsl {
     #      distro install after restart.
     Write-Log INFO 'Step 2: Ensuring WSL2 + Ubuntu are available.'
 
+    # v1.0.33: record whether the target distro existed BEFORE we touched WSL.
+    # Used by the uninstaller to decide whether `wsl --unregister` is destroying
+    # something we created (safe to default-yes) or something the user owned
+    # (default-no, require explicit -RemoveAll). The checkbox in the uninstall
+    # UI remains the authority; this is defense-in-depth messaging only.
+    # Only captured on the FIRST entry, not on /resume re-entry where Ubuntu
+    # may have been imported pre-reboot.
+    if (-not $Resume) {
+        try {
+            $rList = Invoke-WslExe -Arguments @('--list', '--quiet')
+            $distroExisted = $false
+            if ($rList.ExitCode -eq 0 -and $rList.StdOut) {
+                $distros = @(($rList.StdOut -split "`n") |
+                    ForEach-Object { ($_ -replace "`0", '').Trim() } |
+                    Where-Object { $_ -ne '' })
+                $distroExisted = ($distros -contains $WslDistro)
+            }
+            if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Force -Path $LogDir | Out-Null }
+            Set-Content -LiteralPath (Join-Path $LogDir 'wsl-state.txt') `
+                -Value ([string]$distroExisted).ToLower() -Encoding UTF8 -NoNewline
+            Write-Log INFO "Recorded distroExistedPreInstall=$distroExisted to wsl-state.txt"
+        } catch {
+            Write-Log WARN "Could not record wsl-state.txt: $($_.Exception.Message)"
+        }
+    }
+
     # v1.0.28: refresh the WSL engine BEFORE any wsl --install path. The
     # baseline image's bundled wsl.exe lags the latest engine and the v1.0.27
     # cycle on cfv-128 hit a fatal "must be updated to the latest version"
@@ -846,6 +872,10 @@ function Step-ConfigureWslConfig {
         $needsShutdown = $false
         $banner    = '# Added by ClawFactory v1.0.1 - keeps WSL VM alive so the gateway stays running.'
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        # v1.0.33: record which branch fired so the uninstaller can surgically
+        # reverse our edit. Written to ProgramData\ClawFactory\wslconfig-state.txt
+        # at the bottom of this try block.
+        $wslConfigAction = 'unknown'
 
         if (-not (Test-Path -LiteralPath $WslConfigPath)) {
             # Branch 1: file missing - create it.
@@ -853,6 +883,7 @@ function Step-ConfigureWslConfig {
             [System.IO.File]::WriteAllText($WslConfigPath, $content, $utf8NoBom)
             Write-Log INFO "Created .wslconfig at $WslConfigPath"
             $needsShutdown = $true
+            $wslConfigAction = 'created'
         } else {
             $existing = [System.IO.File]::ReadAllText($WslConfigPath)
             if ($null -eq $existing) { $existing = '' }
@@ -874,6 +905,7 @@ function Step-ConfigureWslConfig {
                 [System.IO.File]::WriteAllText($WslConfigPath, $newContent, $utf8NoBom)
                 Write-Log INFO 'Added [wsl2] section to existing .wslconfig'
                 $needsShutdown = $true
+                $wslConfigAction = 'appended-section'
             } elseif (-not $vmIdleMatch.Success) {
                 # Branch 3: [wsl2] exists, no vmIdleTimeout key - inject it
                 # immediately after the [wsl2] header (only first match).
@@ -881,12 +913,14 @@ function Step-ConfigureWslConfig {
                 [System.IO.File]::WriteAllText($WslConfigPath, $patched, $utf8NoBom)
                 Write-Log INFO 'Added vmIdleTimeout=-1 to existing [wsl2] section'
                 $needsShutdown = $true
+                $wslConfigAction = 'added-key'
             } else {
                 $currentValue = $vmIdleMatch.Groups[1].Value.Trim()
                 if ($currentValue -eq '-1') {
                     # Branch 4: already correct - no-op.
                     Write-Log INFO '.wslconfig already has vmIdleTimeout=-1; no change needed'
                     $needsShutdown = $false
+                    $wslConfigAction = 'unchanged'
                 } else {
                     # Branch 5: different value already set. Visible install:
                     # WARN + MessageBox + proceed (user has an opinion; respect
@@ -919,8 +953,19 @@ function Step-ConfigureWslConfig {
                         throw 'ClawFactory: .wslconfig conflict detected during silent install. See log for fix instructions.'
                     }
                     $needsShutdown = $false
+                    $wslConfigAction = 'conflict'
                 }
             }
+        }
+
+        # v1.0.33: persist the action so the uninstaller knows what to reverse.
+        # Lives in ProgramData (uninstaller reads before nuking the dir).
+        try {
+            if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Force -Path $LogDir | Out-Null }
+            Set-Content -LiteralPath (Join-Path $LogDir 'wslconfig-state.txt') `
+                -Value $wslConfigAction -Encoding UTF8 -NoNewline
+        } catch {
+            Write-Log WARN "Could not write wslconfig-state.txt: $($_.Exception.Message)"
         }
 
         if ($needsShutdown) {
@@ -1143,7 +1188,11 @@ function Step-EgressFirewall {
         # v1.0.3: Ubuntu apt repos. apt-as-root currently bypasses the firewall
         # (clawuser-scoped), but listed here as defense-in-depth in case install.sh
         # or a future skill drops privileges before running apt.
-        'archive.ubuntu.com','security.ubuntu.com','ports.ubuntu.com','esm.ubuntu.com','ppa.launchpad.net'
+        'archive.ubuntu.com','security.ubuntu.com','ports.ubuntu.com','esm.ubuntu.com','ppa.launchpad.net',
+        # v1.0.33: Google APIs (Gmail watcher + OAuth flow). v1.0.32 diagnostic
+        # showed gmail.googleapis.com / accounts.google.com timing out at the
+        # nft drop rule because they were never in $baseHosts.
+        'gmail.googleapis.com','oauth2.googleapis.com','accounts.google.com','www.googleapis.com','people.googleapis.com'
     )
     $providerHosts = @($ThisProvider.AllowlistHosts)
     $allHosts      = ($baseHosts + $providerHosts) | Where-Object { $_ } | Sort-Object -Unique
@@ -2129,6 +2178,14 @@ function Step-RegisterWslHostTask {
     Write-Log INFO 'Step 16: Registering ClawFactory WSL Host task (keeps gateway alive during idle).'
     $TaskName = 'ClawFactory WSL Host'
     $TaskDesc = 'Keeps a WSL session alive so the OpenClaw gateway stays running. Do not disable.'
+    # v1.0.33: action wraps wsl.exe in wscript+VBS (vbHide=0) instead of
+    # invoking wsl.exe directly. Interactive LogonTrigger tasks that exec
+    # wsl.exe on Win11 with Windows Terminal as default open a wt.exe window
+    # at every logon; on Win10 (or wt absent) they flash a console. wscript
+    # under vbHide=0 is zero-flash on both. wsl.exe is reparented from
+    # wscript and persists after wscript exits, so the keep-alive guarantee
+    # is unchanged. The VBS file is bundled at {app}\resources\wsl-keepalive.vbs.
+    $KeepAliveVbs = Join-Path $PSScriptRoot 'resources\wsl-keepalive.vbs'
     try {
         $currentUser = "$env:USERDOMAIN\$env:USERNAME"
         $taskXml = @"
@@ -2142,7 +2199,18 @@ function Step-RegisterWslHostTask {
     <LogonTrigger>
       <Enabled>true</Enabled>
       <UserId>$currentUser</UserId>
+      <Repetition>
+        <Interval>PT1H</Interval>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
     </LogonTrigger>
+    <BootTrigger>
+      <Enabled>true</Enabled>
+      <Repetition>
+        <Interval>PT1H</Interval>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+    </BootTrigger>
   </Triggers>
   <Principals>
     <Principal id="Author">
@@ -2176,8 +2244,8 @@ function Step-RegisterWslHostTask {
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>wsl.exe</Command>
-      <Arguments>-d $WslDistro -u $WslUser -- sleep infinity</Arguments>
+      <Command>wscript.exe</Command>
+      <Arguments>"$KeepAliveVbs" $WslDistro $WslUser</Arguments>
     </Exec>
   </Actions>
 </Task>
@@ -2297,8 +2365,12 @@ Set-Content -Path "C:\ProgramData\ClawFactory\smoke-results.json" -Value $output
         Set-Content -Path $smokePath -Value $smokeScript -Encoding UTF8
         Write-Log INFO "PostInstall smoke script written to $smokePath"
 
+        # v1.0.33: -WindowStyle Hidden suppresses the PowerShell console
+        # window that otherwise flashes at logon (the -Hidden task setting
+        # only hides the task entry in Task Scheduler MMC, not the action's
+        # console window).
         $action    = New-ScheduledTaskAction -Execute 'powershell.exe' `
-                       -Argument "-NonInteractive -ExecutionPolicy Bypass -File `"$smokePath`""
+                       -Argument "-NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$smokePath`""
         $trigger   = New-ScheduledTaskTrigger -AtLogOn
         $principal = New-ScheduledTaskPrincipal -GroupId 'BUILTIN\Users' -RunLevel Highest
         $settings  = New-ScheduledTaskSettingsSet -Hidden

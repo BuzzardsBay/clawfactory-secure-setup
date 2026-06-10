@@ -3,7 +3,7 @@
 ; Compile with: "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ClawFactory-Secure-Setup.iss
 
 #define MyAppName      "ClawFactory Secure Setup"
-#define MyAppVersion   "1.0.32"
+#define MyAppVersion   "1.0.33"
 #define MyAppPublisher "Frontier Automation Systems LLC"
 #define MyAppURL       "https://openclaw.ai"
 
@@ -45,6 +45,8 @@ Source: "resources\rename-agent.ps1";        DestDir: "{app}\resources";  Flags:
 Source: "resources\launcher.ps1";            DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\clawfactory-stop.ps1";    DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\switch-provider.ps1";     DestDir: "{app}\resources";  Flags: ignoreversion
+Source: "resources\uninstall.ps1";           DestDir: "{app}\resources";  Flags: ignoreversion
+Source: "resources\wsl-keepalive.vbs";       DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "smoke-test.ps1";                    DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\logo.png";                DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\logo.README.txt";         DestDir: "{app}\resources";  Flags: ignoreversion
@@ -69,15 +71,14 @@ Filename: "powershell.exe"; \
   Flags: waituntilterminated
 
 [UninstallRun]
-; v1.0.2: delete the WSL Host keep-alive scheduled task. Runs first so the
-; task is gone before the powershell cleanup block (which may unregister WSL).
-Filename: "schtasks.exe"; \
-  Parameters: "/Delete /TN ""ClawFactory WSL Host"" /F"; \
-  RunOnceId: "DeleteWslHostTask"; \
-  Flags: runhidden
+; v1.0.33: single entry that hands off to resources\uninstall.ps1. The PS
+; script handles task unregister, firewall, DPAPI creds, surgical .wslconfig
+; edit, distro teardown (optional via -KeepLinuxEnvironment), license
+; deactivation, HKLM cleanup, and ProgramData removal. Flags are appended
+; via GetUninstallFlags so /SILENT and /REMOVEALL=0|1 both propagate.
 Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""if ((Read-Host 'Remove Ubuntu WSL distro, skills-factory workspace, and all provider credentials? [y/N]') -eq 'y') {{ wsl --unregister Ubuntu; cmdkey /delete:ClawFactory/GrokApiKey 2>$null; cmdkey /delete:ClawFactory/OpenAIApiKey 2>$null; cmdkey /delete:ClawFactory/AnthropicApiKey 2>$null; cmdkey /delete:ClawFactory/GeminiApiKey 2>$null; Remove-NetFirewallRule -DisplayName 'ClawFactory-Block-Inbound-8787' -ErrorAction SilentlyContinue }}"""; \
-  RunOnceId: "ClawFactoryCleanup"; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\resources\uninstall.ps1""{code:GetUninstallFlags}"; \
+  RunOnceId: "ClawFactoryUninstall"; \
   Flags: runhidden
 
 [Icons]
@@ -223,6 +224,35 @@ begin
     Result := 'Resuming installation after restart...'
   else
     Result := 'Building your hardened OpenClaw Skills Factory (10-20 minutes)...';
+end;
+
+{ v1.0.33: Build the flag string [UninstallRun] passes to uninstall.ps1.
+  - UninstallSilent (provided by Inno only during uninstall) -> -Silent
+  - /REMOVEALL=1 cmdline arg                                 -> -RemoveAll
+  - /REMOVEALL=0 cmdline arg                                 -> -KeepLinuxEnvironment
+
+  Default behaviour when neither /REMOVEALL flag is set:
+    - Silent uninstall: PS script defaults to RemoveAll=true.
+    - Interactive uninstall: PS script asks via MessageBox (default Yes).
+  The Pascal side here only forwards the cmdline; the script owns policy. }
+function GetUninstallFlags(Param: string): string;
+var
+  Flags: string;
+  i: Integer;
+  s: string;
+begin
+  Flags := '';
+  if UninstallSilent then
+    Flags := ' -Silent';
+  for i := 1 to ParamCount do
+  begin
+    s := ParamStr(i);
+    if CompareText(s, '/REMOVEALL=1') = 0 then
+      Flags := Flags + ' -RemoveAll'
+    else if CompareText(s, '/REMOVEALL=0') = 0 then
+      Flags := Flags + ' -KeepLinuxEnvironment';
+  end;
+  Result := Flags;
 end;
 
 function ProviderNeedsApiKey: Boolean;

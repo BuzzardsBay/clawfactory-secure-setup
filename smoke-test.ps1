@@ -116,7 +116,18 @@ exit 0
 '@
     $encStart = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($startScript))
     $null = Invoke-WslCapture -Arguments @('-d','Ubuntu','-u','clawuser','--cd','~','--','bash','-lc',"echo $encStart | base64 -d | bash")
-    Start-Sleep -Seconds 8
+    $maxAttempts = 15
+    $attempt = 0
+    $gatewayUp = $false
+    while ($attempt -lt $maxAttempts -and -not $gatewayUp) {
+        Start-Sleep -Seconds 2
+        try {
+            $r = Invoke-WebRequest -Uri http://127.0.0.1:8787/status `
+                -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
+            if ($r.StatusCode -eq 200) { $gatewayUp = $true }
+        } catch {}
+        $attempt++
+    }
 }
 
 Check 'Gateway responds 200 on loopback' {
@@ -170,7 +181,7 @@ Check 'WSL Host scheduled task registered and enabled' {
 # meant the firewall script exited 127 but was checkpointed as completed,
 # so this check would have silently failed there.
 Check 'Egress firewall clawfactory chain present in nft ruleset' -RequiresWsl {
-    $r = Invoke-WslCapture -Arguments @('-d','Ubuntu','-u','clawuser','--','bash','-lc',"/usr/sbin/nft list ruleset 2>/dev/null | grep -c 'clawfactory'")
+    $r = Invoke-WslCapture -Arguments @('-d','Ubuntu','-u','root','--','bash','-lc',"/usr/sbin/nft list ruleset 2>/dev/null | grep -c 'clawfactory'")
     # v1.0.15: defensive parse - extract first integer from output. Avoids
     # "Cannot convert Object[] to Int32" when wsl returns multi-line output
     # (e.g. SYSTEM-not-supported error, login-shell warnings).
