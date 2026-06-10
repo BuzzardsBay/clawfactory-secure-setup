@@ -1,126 +1,139 @@
-# ClawFactory v1.0.9 Azure Validation Report
+# ClawFactory — Azure baseline rebake report (clawfactory-win11-baseline-v2)
 
-- **Timestamp (UTC):** 2026-05-07 18:12 - 19:05 UTC
-- **Commit:** bc14fd5 -- v1.0.9: fix Step-EnsureWsl exit code routing to reboot-and-resume path
-- **VM:** cfv-122326, Standard_D2s_v5, from clawfactory-win11-baseline (westus2)
-- **Run duration (wall clock):** ~53 min total (~30 min quota/cleanup overhead; active install attempt ~23 min: 18:40 reboot -> 18:43 crash)
+**Date (UTC):** 2026-06-10
+**Bake VM:** cfv-133 — westus2 — public IP `20.230.130.107` (deleted after capture)
+**Source image:** `clawfactory-win11-baseline` (managed image, Gen V2) — **KEPT, untouched**
+**New image:** `clawfactory-win11-baseline-v2` (managed image, Gen V2, Generalized)
+**Purpose:** unblock v1.0.33 validation — the prior baseline's WSL engine was too old to
+complete a headless install (see `REPORT_v1.0.32.md`, cfv-132).
 
----
+## Overall: PASS
 
-## Verdict: FAIL
+The WSL engine is now current (2.7.8.0) and baked into `clawfactory-win11-baseline-v2`.
+Sysprep generalized cleanly on the first attempt with no appx remediation. The new image
+is captured and ready for v1.0.33 validation — **subject to one downstream prerequisite
+(DSv5 vCPU quota) called out below.**
 
-setup.ps1 failed at **parse time**. PowerShell 5.1 misread UTF-8 em-dash characters
-as Windows-1252, decoding byte `0x94` as `"` (RIGHT DOUBLE QUOTATION MARK, U+201D),
-which PS treats as a string terminator. Line 597's double-quoted string broke, cascaded
-to an unclosed `if {}` on line 596, and left `function Step-EnsureWsl` (line 506)
-without its closing `}`. The parser threw before a single line of setup.ps1 executed --
-no log file was created, no WSL install was attempted, no reboot occurred.
+## Results by task
 
----
+| Task | Result | Notes |
+|---|---|---|
+| T0 RG cleanup | PASS (no-op) | RG already clean from cfv-132 teardown. Nothing to delete. |
+| T1 Provision cfv-133 | PASS | From baseline image, Security `Standard`, non-zonal, subnet `bake-vmSubnet`, `--nsg-rule NONE` + Standard public IP. **Sized `Standard_D2s_v4`, not `D2s_v5`** — see "Deviations". |
+| T2 WSL update | PASS | Fallback (a): MSI `wsl.2.7.8.0.x64.msi` via `msiexec /quiet /norestart` under run-command SYSTEM. |
+| T3 Sysprep + capture | PASS | Original May pre-sysprep cleanup recipe; sysprep `/generalize /shutdown /oobe /quiet /mode:vm` succeeded first try. No appx remediation needed. |
+| T4 Cleanup + report | PASS | cfv-133 + OS disk + NIC + public IP deleted. RG clean (2 images remain). This file. |
 
-## Install
+## WSL versions — before / after
 
-- **Duration:** ~2 seconds (18:43:41 launch -> 18:43:43 exit; InnoSetup extraction was ~60s prior)
-- **Exit code:** 1 (setup.ps1 ParseError propagated through InnoSetup Run entry)
-- **Did VM reboot mid-install (Step-EnsureWsl)?** No -- parse failure prevented any code from running
-- **Did installer resume after reboot?** N/A
+**Before (baseline `clawfactory-win11-baseline`, on cfv-133, SYSTEM context):**
+- `wsl --version` → error: *"Windows Subsystem for Linux must be updated to the latest version to proceed."* (inbox System32 stub only)
+- `wsl --status` → *"The Windows Subsystem for Linux is not installed."*
+- No `Microsoft.WSL` / WSL MSI product installed; no WSL/Linux appx package present.
+- Optional features `Microsoft-Windows-Subsystem-Linux` and `VirtualMachinePlatform` = **Enabled**.
 
-### First (and only) failure point
+**After (on cfv-133, post-MSI):**
+```
+WSL version: 2.7.8.0
+Kernel version: 6.18.33.1-1
+WSLg version: 1.0.73.2
+MSRDC version: 1.2.6676
+Direct3D version: 1.611.1-81528511
+DXCore version: 10.0.26100.1-240331-1435.ge-release
+Windows version: 10.0.26100.8246
+```
+- `wsl --update` → *"The most recent version of Windows Subsystem for Linux is already installed."* (exit 0) — **acceptance test met.**
+
+## Which TASK 2 path was used
+
+**Fallback (a) — MSI install, run-command direct (SYSTEM context).** Per instruction, plain
+`wsl --update` under SYSTEM was **not** re-attempted (REPORT_v1.0.32.md already proved it
+fails with `The requested operation requires elevation. | The handle is invalid.`).
+
+Exact path:
+1. Downloaded `https://github.com/microsoft/WSL/releases/download/2.7.8/wsl.2.7.8.0.x64.msi`
+   (258,678,784 bytes) to `C:\Windows\Temp` via `Invoke-WebRequest` (outbound over the VM's
+   Standard public IP).
+2. `msiexec /i wsl.2.7.8.0.x64.msi /quiet /norestart` → **exit code 0** (no reboot required).
+3. Verified: product "Windows Subsystem for Linux 2.7.8.0" registered; `C:\Program Files\WSL\wsl.exe`
+   present; `wsl --version` = 2.7.8.0; `wsl --update` reports up to date.
+
+The MSI path works under SYSTEM exactly where `wsl --update` does not, because it installs
+the engine machine-wide via Windows Installer rather than routing through the interactive
+Store/elevation path that `wsl --update` requires.
+
+## Sysprep remediation performed
+
+**None required.** The original May bake recipe was used verbatim
+(`validation-runs/phase1-bake-20260506-144034/pre-sysprep-cleanup.ps1` + `sysprep.ps1`):
+remove `C:\Windows\Panther`, disable `wuauserv`, then
+`Get-AppxPackage -AllUsers | where NonRemovable=$false | Remove-AppxPackage -AllUsers`.
+
+**Key finding (new vs. the original bake):** the WSL 2.7.8 MSI *does* register a Store-style
+appx, `MicrosoftCorporationII.WindowsSubsystemForLinux_2.7.8.0_x64__8wekyb3d8bbwe` — present
+both as an installed package **and** a provisioned package. This is exactly the class of
+package the task warned could break sysprep. However:
+- The pre-sysprep cleanup's `Remove-AppxPackage -AllUsers` removed **both** the installed and
+  the provisioned WSL appx (post-cleanup: zero WSL appx, installed or provisioned).
+- The **WSL engine survived** as an MSI product in `C:\Program Files\WSL`; `wsl --version`
+  still returned 2.7.8.0 after the appx was gone. The engine does not depend on the appx.
+- Sysprep `/generalize` then ran with **no WSL appx to conflict on** and completed first try:
+  `SYSPRP FCreateTagFile:Successfully created tag file ...\Sysprep_succeeded.tag`,
+  `Provisioning packages are removed successfully`, shutdown initiated. VM reached
+  `PowerState/stopped`.
+
+So the Task 3 dilemma resolved in the **good** direction: sysprep succeeded **and** the WSL
+update is preserved in the image (engine is MSI-backed in Program Files, independent of the
+removed appx). No deprovision-vs-fallback-(b) decision was needed.
+
+## Deviations from the prompt (both immaterial to the image)
+
+1. **Bake VM sized `Standard_D2s_v4`, not `Standard_D2s_v5`.** After the Free Trial → PAYG
+   upgrade, the `standardDSv5Family` vCPU quota in westus2 is **0** (`az vm create` on D2s_v5
+   fails `QuotaExceeded`, Current Limit: 0). `standardDSv4Family` has limit 10. The bake VM's
+   size does **not** affect the captured image — a generalized Gen V2 managed image is
+   identical regardless of the family it was generalized on, and deploys on D2s_v5 later. The
+   v2 image is fully valid for D2s_v5 validation.
+2. **TASK 0 was a no-op** — RG was already clean (cfv-132 teardown was complete). No FAIL VMs
+   or disks existed to delete.
+
+## ⚠️ Downstream prerequisite for v1.0.33 validation (Prompt 3)
+
+**DSv5 vCPU quota in westus2 is 0.** Prompt 3 provisions a cfv VM on `Standard_D2s_v5` from
+this v2 image and will hit the same `QuotaExceeded` wall the bake did. I submitted a
+programmatic quota increase (standardDSv5Family → 10) via the Microsoft.Quota API
+(request `25b9dadf-49b4-4ec9-85f7-d62487d1f931`); it **Failed** auto-approval (`Request failed.`),
+so a manual request is required. Two options for Prompt 3, either is fine:
+- **(A)** Request the DSv5 quota increase in the portal (Subscriptions → Usage + quotas →
+  `Standard DSv5 Family vCPUs`, westus2, ≥ 2) and run validation on `D2s_v5` as specified, **or**
+- **(B)** Run validation on `Standard_D2s_v4` (quota available now, limit 10). The image and
+  installer behavior are identical; only the validation-VM family differs from the historical spec.
+
+This quota item does **not** affect this rebake's PASS — the v2 image is captured and correct.
+
+## Exact image reference for Prompt 3
+
+Use this as the validation VM source image:
 
 ```
-At C:\Program Files\ClawFactory\setup.ps1:506 char:25
-+ function Step-EnsureWsl {
-+                         ~
-Missing closing '}' in statement block or type definition.
-    + FullyQualifiedErrorId : MissingEndCurlyBrace
+/subscriptions/43010359-5b4c-4d16-af11-10f6544b2978/resourceGroups/clawfactory-validation/providers/Microsoft.Compute/images/clawfactory-win11-baseline-v2
 ```
 
-No `C:\ProgramData\ClawFactory\install.log` was created (log dir never initialized).
+- Name: `clawfactory-win11-baseline-v2`
+- HyperVGeneration: **V2**
+- osState: Generalized
+- Location: westus2
+- Provision with `--security-type Standard`, **non-zonal** (no `--zone`; `standardDSv5Family`
+  carries a Zone restriction in westus2), subnet `bake-vmSubnet`.
 
-### InnoSetup stdout (`C:\install-stdout.log`)
+## Cleanup
 
-InnoSetup completed successfully -- all files extracted to `C:\Program Files\ClawFactory\`,
-shortcuts created, uninstall key written. The Run entry launched setup.ps1 as current user
-(clawadmin), which exited 1 after ~2 seconds.
+cfv-133 + OS disk (`cfv-133-osdisk`) + NIC + public IP (`cfv-133PublicIP`) deleted. Final RG
+state: VMs none, disks none, NICs none, public IPs none. Images: `clawfactory-win11-baseline`
+(original, **kept**) and `clawfactory-win11-baseline-v2` (new) — both Gen V2. Storage account
+`clawfactoryvalc467` and `bake-vmVNET/bake-vmSubnet` unchanged.
 
-```
-2026-05-07 18:43:41.912   Installation process succeeded.
-2026-05-07 18:43:41.917   -- Run entry --
-2026-05-07 18:43:41.917   Run as: Current user
-2026-05-07 18:43:41.917   Filename: powershell.exe
-2026-05-07 18:43:41.917   Parameters: -NoProfile -ExecutionPolicy Bypass
-                           -File "C:\Program Files\ClawFactory\setup.ps1"
-                           -AcknowledgedOpenClawUrl -Provider grok
-                           -SourceExe "C:\install\ClawFactory.exe"
-                           -BundledRootfsDir "C:\Users\CLAWAD~1\AppData\Local\Temp\is-9AHQ3KV8QT.tmp"
-2026-05-07 18:43:43.335   Process exit code: 1
-2026-05-07 18:43:43.341   Need to restart Windows? No
-2026-05-07 18:43:43.466   Log closed.
-```
+## Verdict
 
-### Root cause analysis
-
-`setup.ps1` contains em-dash characters (U+2014) encoded as UTF-8 (`0xE2 0x80 0x94`)
-but the file ships **with no UTF-8 BOM**. PowerShell 5.1, when invoked with `-File`,
-reads scripts with no BOM using the system default ANSI code page (Windows-1252 on
-en-US VMs). In Windows-1252, byte `0x94` maps to **U+201D (RIGHT DOUBLE QUOTATION
-MARK)**, which PowerShell's parser accepts as a string terminator.
-
-Affected line (example -- at least 5 similar lines in the function):
-
-```
-# setup.ps1 line 597 (inside Step-EnsureWsl)
-Write-Log INFO "wsl --install returned $wslRc (elevation required or reboot pending)
-               [em-dash] proceeding to reboot-and-resume path."
-```
-
-When read as Windows-1252 the em-dash bytes `0xE2 0x80 0x94` become `a[euro]"`.
-The `0x94` byte (`"`) terminates the double-quoted string at `...pending) a[euro]`,
-leaving ` proceeding to reboot-and-resume path."` as unparsed tokens. The trailing
-`"` opens a new unclosed string. This causes:
-
-1. The `if ($wslRc -notin @(0, 3010)) {` block (line 596) to lose its closing `}`
-2. `function Step-EnsureWsl` (line 506) to lose its closing `}`
-3. PS reports parse error at line 506 char 25
-
-**Verification:** `[System.Management.Automation.Language.Parser]::ParseInput()` with
-explicit UTF-8 decoding returns **0 errors**. `powershell.exe -File setup.ps1` (ANSI
-default) returns **3 errors** including MissingEndCurlyBrace at line 506.
-
-**Fix required:** Add UTF-8 BOM to setup.ps1 so PS 5.1 reads it as UTF-8, OR replace
-all em-dash characters with ASCII alternatives (` - ` or ` -- `). The em-dash appears
-in double-quoted Write-Log strings in Step-EnsureWsl and likely elsewhere.
-
----
-
-## Smoke Test
-
-Skipped -- installer did not complete.
-
----
-
-## Idle Test
-
-Skipped -- installer did not complete.
-
----
-
-## Notes
-
-**Quota blocker (pre-run):** Two VMs from prior FAIL runs (test-vm-185144 from v1.0.7;
-test-vm-20260507095304 from v1.0.8) were deallocated but still held the 4-core regional
-vCPU quota. Both VMs and disks were deleted with explicit user authorization before this
-run could proceed.
-
-**VM name constraint:** Prior names (e.g. `test-vm-20260507122150`, 22 chars) exceeded
-Windows' 15-character hostname limit, causing DeploymentFailed/InvalidParameter. New
-naming scheme uses `cfv-HHMMSS` (10 chars).
-
-**Preserved disk for forensics:**
-- OS Disk: `cfv-122326_disk1_319a774c2aa84bb885bed93e3abfc506`
-- Resource group: `clawfactory-validation`
-- VM: `cfv-122326` -- deallocated (not deleted) per FAIL cleanup policy
-
-**Logs saved:**
-- `validation-runs/v1.0.9-20260507-122326/install.log` -- stdout log + error analysis
-- `validation-runs/v1.0.9-20260507-122326/run-meta.txt` -- run metadata
+**PASS.** `clawfactory-win11-baseline-v2` carries a current WSL engine (2.7.8.0) and is ready
+for v1.0.33 validation. Resolve the DSv5 quota (or run validation on D2s_v4) before Prompt 3.
