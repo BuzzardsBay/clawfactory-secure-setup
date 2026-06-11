@@ -12,9 +12,10 @@ param(
     [switch]$KeepLinuxEnvironment
 )
 
-# ClawFactory uninstaller (v1.0.33)
+# ClawFactory uninstaller (v1.0.34)
 # ---------------------------------
-# Invoked by [UninstallRun] from the Inno-generated uninstall.exe.
+# Invoked from CurUninstallStepChanged(usUninstall) in the .iss [Code] (v1.0.34;
+# previously [UninstallRun], which crashed Setup -- see ClawFactory_Install_Lessons_Learned.md L1).
 # Reverses every persistent artifact the installer created -- see TASK 1
 # inventory in the v1.0.33 work package for the authoritative list.
 #

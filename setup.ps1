@@ -43,7 +43,7 @@ Set-StrictMode -Version 3.0
 
 #--- Constants ----------------------------------------------------------------
 # v1.0.4 - pre-install OpenClaw build deps before install.sh runs
-$InstallerVersion      = '1.0.33'
+$InstallerVersion      = '1.0.34'
 # [R2] OpenClaw install.sh is BUNDLED into the installer (resources\openclaw-install.sh).
 # No network call to openclaw.ai/install.sh during install — that URL tracks "latest" and
 # changed twice in 24 hours on 2026-05-09/10. Hash is computed at install time and written
@@ -2334,7 +2334,11 @@ Check "WSL host task registered" {
     $t -and $t.State -ne "Disabled" }
 
 Check "nft clawfactory chain present" {
-    $r = wsl -d Ubuntu -u clawuser -- bash -lc "/usr/sbin/nft list ruleset 2>&1"
+    # v1.0.34: list as root. clawuser has no CAP_NET_ADMIN (its temp NOPASSWD
+    # sudoers is stripped post-create), so `nft list ruleset` as clawuser fails
+    # with a permission error and the chain never shows -- a privilege false
+    # positive that FAILed this check in v1.0.23/.24. Root reads the real ruleset.
+    $r = wsl -d Ubuntu -u root -- bash -lc "/usr/sbin/nft list ruleset 2>&1"
     $r -match "clawfactory" }
 
 Check "OpenClaw build deps present" {

@@ -3,7 +3,7 @@
 ; Compile with: "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ClawFactory-Secure-Setup.iss
 
 #define MyAppName      "ClawFactory Secure Setup"
-#define MyAppVersion   "1.0.33"
+#define MyAppVersion   "1.0.34"
 #define MyAppPublisher "Frontier Automation Systems LLC"
 #define MyAppURL       "https://openclaw.ai"
 
@@ -70,16 +70,12 @@ Filename: "powershell.exe"; \
   StatusMsg: "{code:GetStatusMsg}"; \
   Flags: waituntilterminated
 
-[UninstallRun]
-; v1.0.33: single entry that hands off to resources\uninstall.ps1. The PS
-; script handles task unregister, firewall, DPAPI creds, surgical .wslconfig
-; edit, distro teardown (optional via -KeepLinuxEnvironment), license
-; deactivation, HKLM cleanup, and ProgramData removal. Flags are appended
-; via GetUninstallFlags so /SILENT and /REMOVEALL=0|1 both propagate.
-Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\resources\uninstall.ps1""{code:GetUninstallFlags}"; \
-  RunOnceId: "ClawFactoryUninstall"; \
-  Flags: runhidden
+; v1.0.34: the uninstaller is invoked from CurUninstallStepChanged(usUninstall)
+; in [Code], NOT from [UninstallRun]. Inno expands [UninstallRun] Parameters
+; constants at INSTALL time (when writing the uninstall log), so the prior
+; {code:GetUninstallFlags} ran during Setup and its UninstallSilent call aborted
+; the install ("Cannot call UninstallSilent function during Setup"). See the
+; CurUninstallStepChanged procedure at the bottom of [Code].
 
 [Icons]
 Name: "{commondesktop}\ClawFactory"; \
@@ -224,35 +220,6 @@ begin
     Result := 'Resuming installation after restart...'
   else
     Result := 'Building your hardened OpenClaw Skills Factory (10-20 minutes)...';
-end;
-
-{ v1.0.33: Build the flag string [UninstallRun] passes to uninstall.ps1.
-  - UninstallSilent (provided by Inno only during uninstall) -> -Silent
-  - /REMOVEALL=1 cmdline arg                                 -> -RemoveAll
-  - /REMOVEALL=0 cmdline arg                                 -> -KeepLinuxEnvironment
-
-  Default behaviour when neither /REMOVEALL flag is set:
-    - Silent uninstall: PS script defaults to RemoveAll=true.
-    - Interactive uninstall: PS script asks via MessageBox (default Yes).
-  The Pascal side here only forwards the cmdline; the script owns policy. }
-function GetUninstallFlags(Param: string): string;
-var
-  Flags: string;
-  i: Integer;
-  s: string;
-begin
-  Flags := '';
-  if UninstallSilent then
-    Flags := ' -Silent';
-  for i := 1 to ParamCount do
-  begin
-    s := ParamStr(i);
-    if CompareText(s, '/REMOVEALL=1') = 0 then
-      Flags := Flags + ' -RemoveAll'
-    else if CompareText(s, '/REMOVEALL=0') = 0 then
-      Flags := Flags + ' -KeepLinuxEnvironment';
-  end;
-  Result := Flags;
 end;
 
 function ProviderNeedsApiKey: Boolean;
@@ -680,5 +647,38 @@ begin
              mbError, MB_OK);
       Result := False;
     end;
+  end;
+end;
+
+// v1.0.34: invoke uninstall.ps1 at UNINSTALL time. The v1.0.33 approach used an
+// UninstallRun entry whose Parameters constant Inno expands at INSTALL time (when
+// it records the uninstall log) - so the flag-builder ran during Setup and its
+// UninstallSilent call raised "Internal error: Cannot call UninstallSilent function
+// during Setup", aborting the install with a rollback. usUninstall is the only place
+// where BOTH UninstallSilent AND the uninstaller's own REMOVEALL ParamStr are valid,
+// and it fires BEFORE Inno removes files, so the app's uninstall.ps1 still exists.
+// (Comment uses // lines on purpose: Inno brace-comments do not nest, and code/brace
+//  tokens in the prose would otherwise close the comment early.)
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Flags, AppDir: string;
+  i, ResultCode: Integer;
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    Flags := '';
+    if UninstallSilent then
+      Flags := Flags + ' -Silent';
+    for i := 1 to ParamCount do
+    begin
+      if CompareText(ParamStr(i), '/REMOVEALL=1') = 0 then
+        Flags := Flags + ' -RemoveAll'
+      else if CompareText(ParamStr(i), '/REMOVEALL=0') = 0 then
+        Flags := Flags + ' -KeepLinuxEnvironment';
+    end;
+    AppDir := ExpandConstant('{app}');
+    Exec('powershell.exe',
+      '-NoProfile -ExecutionPolicy Bypass -File "' + AppDir + '\resources\uninstall.ps1"' + Flags,
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 end;
