@@ -1829,19 +1829,26 @@ exit 0
         Write-Log WARN "openclaw gateway install --force returned $rcGateway; the install command's exit code is no longer treated as fatal. Health is determined by the /status poll below."
     }
 
-    # Poll gateway health via curl /status for up to 60s (6 attempts, 10s
+    # Poll gateway health via curl /status for up to ~120s (13 attempts, 10s
     # apart). The install command can return non-zero for transient reasons
     # (e.g., racing with a prior unit shutdown) while still leaving the
     # gateway healthy after restart. Trust the HTTP probe, not the exit code.
+    #
+    # v1.0.35: widened from 6 attempts (~60s) to 13 attempts. cfv-135 proved
+    # the install runs clean end to end but the gateway's cold start on a
+    # 2-vCPU VM (~67s: bound :8787 at 35.5s, fully ready ~67s after a ~5s
+    # model-warmup network stall) overran the old 60s gate by ~7s. 13 attempts
+    # sleep on iterations 1..12 = 12 x 10s = 120s of guaranteed wait, clearing
+    # the observed 67s cold start with >= 50s of headroom.
     $healthy = $false
-    for ($i = 1; $i -le 6; $i++) {
+    for ($i = 1; $i -le 13; $i++) {
         $rcCurl = Invoke-WslBash -Script 'curl -fsS --max-time 5 http://127.0.0.1:8787/status >/dev/null 2>&1' -User $WslUser
         if ($rcCurl -eq 0) {
             Write-Log INFO "Gateway confirmed healthy via poll (attempt $i)."
             $healthy = $true
             break
         }
-        if ($i -lt 6) { Start-Sleep -Seconds 10 }
+        if ($i -lt 13) { Start-Sleep -Seconds 10 }
     }
     if (-not $healthy) {
         # v1.0.12: capture diagnostics before throwing so the validation
@@ -1859,7 +1866,7 @@ exit 0
         Write-Log INFO "GW-STATUS:  $gwStatus"
         Write-Log INFO "GW-PORT:    $gwPort"
         Write-Log INFO "GW-TMPLOG:  $gwTmpLog"
-        throw 'Gateway did not respond after 60 seconds'
+        throw 'Gateway did not respond after 120 seconds'
     }
     Save-Checkpoint 'GatewayRuntime'
 }
