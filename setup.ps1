@@ -2503,10 +2503,19 @@ Invoke-WithRollback {
 # SIGTERM on disconnect, restart cycle). HTTP /status uses no WS and never
 # triggers #47133. Polled from the Windows side (Invoke-WebRequest), which
 # reaches WSL2's loopback via the kernel's localhost forwarding.
-# 15 attempts x 2-second intervals = 30 seconds total.
-Write-Log INFO 'Final gateway health gate: polling http://127.0.0.1:8787/status for up to 30s.'
+#
+# v1.0.36: widened from 15 attempts (~30s) to 60 attempts (~120s) to match the
+# pre-install gate (Step-PreinstallGatewayRuntime, widened in v1.0.35). This is
+# the SAME cold-start dependency: Step-EnableChatCompletions runs immediately
+# before this gate and does `systemctl --user restart openclaw-gateway`, then
+# waits only ~12s (non-fatal). A gateway restart reloads all 6 plugins + does a
+# model warmup (~67s budget observed on a 2-vCPU VM in cfv-135), so the old 30s
+# window expired before the restarted gateway finished coming back up. 60
+# attempts x 2-second intervals = 120 seconds, clearing the ~67s bring-up with
+# >= 50s of headroom.
+Write-Log INFO 'Final gateway health gate: polling http://127.0.0.1:8787/status for up to 120s.'
 $healthy = $false
-for ($i = 1; $i -le 15; $i++) {
+for ($i = 1; $i -le 60; $i++) {
     try {
         $resp = Invoke-WebRequest -Uri 'http://127.0.0.1:8787/status' -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
         if ($resp.StatusCode -eq 200) {
@@ -2524,7 +2533,7 @@ for ($i = 1; $i -le 15; $i++) {
     Start-Sleep -Seconds 2
 }
 if (-not $healthy) {
-    throw 'Final gateway health gate failed: http://127.0.0.1:8787/status did not return 200 within 30 seconds. Diagnose with: wsl -d Ubuntu -u clawuser -- journalctl --user -u openclaw-gateway -n 100, then `cat ~/.openclaw/logs/gateway.log`. After the underlying issue is fixed, re-run setup.ps1 (the 15 install steps will skip via checkpoints; only the final gate re-runs).'
+    throw 'Final gateway health gate failed: http://127.0.0.1:8787/status did not return 200 within 120 seconds. Diagnose with: wsl -d Ubuntu -u clawuser -- journalctl --user -u openclaw-gateway -n 100, then `cat ~/.openclaw/logs/gateway.log`. After the underlying issue is fixed, re-run setup.ps1 (the 15 install steps will skip via checkpoints; only the final gate re-runs).'
 }
 
 # v1.0.2: register the WSL Host keep-alive task only after the gateway has
