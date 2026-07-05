@@ -6,6 +6,98 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). This project a
 
 ---
 
+## [1.0.37] - 2026-06-30
+
+### Fixed
+
+- Final gateway health gate now polls in-WSL via `Invoke-WslBash` (mirroring the pre-install gate) instead of a Windows-side `Invoke-WebRequest`. The old poll held no WSL session open, so the distro shut down mid-gate (WSL's last-session-exit teardown) and the gateway was killed before it could respond. First build to pass a full install -> smoke -> 5-minute idle -> chatCompletions -> uninstall cycle in a single Azure validation run (cfv-137).
+
+## [1.0.36] - 2026-06-29
+
+### Changed
+
+- Widened the final gateway health gate to ~120 s. Necessary but not sufficient; 1.0.37 identified the real cause as WSL session teardown, not timing.
+
+## [1.0.35] - 2026-06-23
+
+### Changed
+
+- Widened the pre-install gateway health gate to >= 120 s to cover the gateway's cold-start time on 2-vCPU machines. Proved the pre-install gate passes end-to-end for the first time.
+
+## [1.0.34] - 2026-06-11
+
+### Fixed
+
+- Install-time crash "Cannot call UninstallSilent function during Setup." The uninstaller is now invoked from `CurUninstallStepChanged(usUninstall)` instead of an `[UninstallRun]` `{code:}` constant, which Inno evaluates at install time. See `ClawFactory_Install_Lessons_Learned.md` L1.
+- Smoke check for the nftables `clawfactory` chain now runs as root.
+
+## [1.0.33] - 2026-06-10
+
+### Added
+
+- Complete uninstaller: 9-step reversal (stop gateway + terminate WSL, unregister scheduled tasks, remove firewall rule, remove DPAPI credentials, revert `.wslconfig`, unregister the Ubuntu distro, license deactivation, remove `HKLM\SOFTWARE\ClawFactory`, remove `ProgramData\ClawFactory`).
+- Hidden `ClawFactory WSL Host` keep-alive scheduled task so the gateway survives idle.
+
+## [1.0.32] - 2026-06-10
+
+### Fixed
+
+- Resume flag missing at the second reboot path.
+
+## [1.0.30] - 2026-05-23
+
+### Added
+
+- License-key wizard page and activation gate.
+
+## [1.0.29] - 2026-05-22
+
+### Added
+
+- Post-install smoke scheduled task and WSL console-window suppression during install.
+
+## [1.0.28] - 2026-05-21
+
+### Added
+
+- `wsl --update` preflight and resume-flag hardening. First Azure-validated install of the reboot-and-resume path.
+
+## [1.0.26 - 1.0.27] - 2026-05-21
+
+### Added
+
+- `/PROVIDER` silent flag for headless validation.
+
+### Changed
+
+- Replaced the RunOnce mechanism with a scheduled task for headless reboot-resume.
+
+## [1.0.22 - 1.0.24] - 2026-05
+
+### Changed
+
+- Iterated the gateway health-poll window (12 s -> 60 s) while diagnosing cold-start timing on loaded 2-vCPU VMs. Fully resolved in 1.0.35 - 1.0.37.
+
+## [1.0.21] - 2026-05-11
+
+### Changed
+
+- Bundled ClawChat upgraded to v1.1: settings tab, provider switching, gateway auto-start on launch.
+
+## [1.0.20] - 2026-05-10
+
+### Security
+
+- Bundle `openclaw-install.sh` into the installer, SHA-256-verified on Windows before use. Removes the upstream-URL hash-drift attack surface entirely (previously `openclaw.ai/install.sh` tracked "latest" and changed under us).
+
+## [1.0.18] - 2026-05-09
+
+### Added
+
+- Bundled ClawChat desktop app (Tauri + React) into both installers as `resources\ClawChat.exe`; desktop and Start Menu shortcuts launch it directly.
+
+---
+
 ## [1.0.17] — 2026-05-08
 
 ### Fixed

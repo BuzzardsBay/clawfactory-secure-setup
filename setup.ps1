@@ -1345,7 +1345,7 @@ systemctl enable clawfactory-fw.service 2>/dev/null || true
         # which silently masked the firewall never coming up (exit 127 from
         # the nft mangling looked like a successful step). Logging ERROR and
         # skipping Save-Checkpoint means a -Resume run will retry this step.
-        Write-Log ERROR "Egress firewall setup returned exit $rc. Firewall is NOT active. Check install.log; re-run setup.ps1 -Resume after diagnosing."
+        Write-Log ERROR "Egress firewall setup returned exit $rc. Firewall is NOT active. Check the install log at C:\ProgramData\ClawFactory\install.log; re-run setup.ps1 -Resume after diagnosing."
         return
     }
 
@@ -2419,11 +2419,11 @@ if ($Resume) {
     $flag = Read-ResumeFlag
     if (-not $flag) {
         Write-Log ERROR "FATAL: -Resume passed but resume flag at $ResumeFlagFile is missing or unreadable. Refusing to continue with a guessed provider (would silently install Grok config on what may be a Claude install). To recover: delete $CheckpointFile and re-run the installer from scratch."
-        throw "Resume flag not found at $ResumeFlagFile. Cannot resume safely - see install log."
+        throw "Resume flag not found at $ResumeFlagFile. Cannot resume safely - see the install log at C:\ProgramData\ClawFactory\install.log."
     }
     if ([string]::IsNullOrEmpty($flag.provider)) {
         Write-Log ERROR "FATAL: Resume flag at $ResumeFlagFile is present but missing the 'provider' field. Refusing to continue with a guessed provider. To recover: delete $CheckpointFile and $ResumeFlagFile and re-run the installer."
-        throw "Resume flag at $ResumeFlagFile lacks 'provider' field. Cannot resume safely - see install log."
+        throw "Resume flag at $ResumeFlagFile lacks 'provider' field. Cannot resume safely - see the install log at C:\ProgramData\ClawFactory\install.log."
     }
     if ($flag.provider -ne $Provider) {
         Write-Log INFO "Resume: switching provider from cmdline '$Provider' to flag value '$($flag.provider)'."

@@ -1,12 +1,12 @@
 # ClawFactory Secure Setup
 
-[![v1.0.0](https://img.shields.io/badge/release-v1.0.0-green)](../../releases/tag/v1.0.0) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Windows 11](https://img.shields.io/badge/Windows-10%202004%2B%20%2F%2011-0078D6?logo=windows)](#system-requirements)
+[![v1.0.37](https://img.shields.io/badge/release-v1.0.37-green)](../../releases/tag/v1.0.37) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Windows 11](https://img.shields.io/badge/Windows-10%202004%2B%20%2F%2011-0078D6?logo=windows)](#system-requirements)
 
-A signed Windows installer that drops a hardened OpenClaw runtime onto a fresh Windows machine in 10–20 minutes, with every default flipped to the secure side. WSL2 with Windows automount disabled, a non-sudo `clawuser`, rootless Docker, an nftables egress firewall scoped to that user's UID, the OpenClaw gateway bound only to `127.0.0.1`, a Windows Firewall inbound-deny on port 8787, the API key stored in DPAPI Credential Manager, and a `SOUL.md` safety policy hash-pinned at file mode 444. One installer, fifteen steps, no telemetry, fully auditable PowerShell.
+A Windows installer that drops a hardened OpenClaw runtime onto a fresh Windows machine in 10–20 minutes, with every default flipped to the secure side. WSL2 with Windows automount disabled, a non-sudo `clawuser`, rootless Docker, an nftables egress firewall scoped to that user's UID, the OpenClaw gateway bound only to `127.0.0.1`, a Windows Firewall inbound-deny on port 8787, the API key stored in DPAPI Credential Manager, and a `SOUL.md` safety policy hash-pinned at file mode 444. One installer, fifteen steps, no telemetry, fully auditable PowerShell.
 
 ## What's inside
 
-- **WSL2 + Ubuntu 24.04** — bundled rootfs imported offline via `wsl --import` (no Microsoft Store dependency).
+- **WSL2 + Ubuntu** — bundled rootfs imported offline via `wsl --import` (no Microsoft Store dependency).
 - **`clawuser`** — non-root, no sudo group membership, locked password.
 - **Docker** in rootless mode under `clawuser`.
 - **Egress firewall (nftables)** — drops everything from `clawuser`'s UID except DNS, loopback, and the IPv4 addresses of your chosen LLM provider host plus a small base allowlist (GitHub, npm, Docker Hub, OpenClaw, ClawHub). 6 h refresh timer for IP rotation.
@@ -27,7 +27,7 @@ A signed Windows installer that drops a hardened OpenClaw runtime onto a fresh W
 
 ## Installation
 
-1. Download `ClawFactory-Secure-Setup.exe` from the [Releases](../../releases) page (322 MB — carries the bundled Ubuntu rootfs).
+1. Download `ClawFactory-Secure-Setup.exe` from the [Releases](../../releases) page (~325 MB — carries the bundled Ubuntu rootfs).
 2. Right-click → **Run as administrator**.
 3. Walk the wizard: provider → API key → security acknowledgement → Install.
 4. Wait 10–20 minutes. The installer reboots once if WSL2 features need DISM enable, then auto-resumes.
@@ -55,21 +55,37 @@ After install, on the same machine, in an admin PowerShell:
 powershell -ExecutionPolicy Bypass -File "C:\Program Files\ClawFactory\smoke-test.ps1"
 ```
 
-The script runs 7 checks and exits 0 only if all pass:
+The script runs 11 checks and exits 0 only if all pass:
 
 1. WSL automount disabled
-2. Four agent.md files present (orchestrator, skill-scout, skill-builder, publisher)
+2. Four `agent.md` files present (orchestrator, skill-scout, skill-builder, publisher)
 3. `AgentBootstrap` recorded in `%ProgramData%\ClawFactory\checkpoint.json`
 4. Gateway returns HTTP 200 on `http://127.0.0.1:8787/status`
 5. Windows Firewall inbound-deny rule active on TCP/8787
 6. Orchestrator's `agent.md` has the live SOUL.md SHA-256 substituted (no `{{SOUL_SHA256}}` placeholder)
-7. Per-agent `auth-profiles.json` (mode 600) present in all 5 agent directories
+7. Per-agent `auth-profiles.json` (mode 600) present for all 5 agents
+8. `.wslconfig` has `vmIdleTimeout=-1` (keeps the WSL VM alive while Windows is up)
+9. `ClawFactory WSL Host` scheduled task registered and enabled (gateway keep-alive)
+10. Egress firewall `clawfactory` chain present in the nftables ruleset
+11. OpenClaw build dependencies present (make, g++, cmake, python3)
 
 ## Known limitations
 
-- **SmartScreen "Unknown publisher" warning.** No code-signing certificate yet. Click "More info → Run anyway" to proceed. EV cert in v1.1 backlog.
+- **SmartScreen "Unknown publisher" warning.** Not code-signed yet. Click "More info -> Run anyway" to proceed. Code signing (Azure Trusted Signing, individual identity) is in progress and will clear this warning in a future release.
 - **WSL1 fallback on hardware without nested virtualization.** If `HCS_E_HYPERV_NOT_INSTALLED` fires (common in nested VMs and some older laptops), the installer falls back to WSL1 automatically. Some features (systemd, networking) behave differently — egress firewall uses iptables-legacy instead of nftables.
 - **Provider model IDs are forward-looking** (`grok-4-1-fast`, `gpt-5`, `claude-sonnet-4-6`, `gemini-2.5-pro`). If your provider's catalog uses a different name when you install, change it via `Switch AI Provider` from the Start Menu.
+
+## Pricing
+
+One-time purchase, free updates forever. No subscription, no telemetry.
+
+| Product | Price | What it is |
+|---|---|---|
+| **ClawFactory** | **$149** | The full hardened OpenClaw Skills Factory installer (this repo). |
+| **ClawAgent** | **$49** | The lighter single-agent variant. |
+| **ClawChat** | bundled | Desktop chat app, included with both. |
+
+Buy at [clawfactory.app](https://clawfactory.app).
 
 ## Building from source
 
@@ -85,4 +101,4 @@ Output: `Output\ClawFactory-Secure-Setup.exe`. Requires the bundled rootfs at `r
 
 ## Security disclosure
 
-Email **hello@avitalresearch.com** with details. Please **do not** open a public issue for security vulnerabilities. We respond within 72 hours.
+Email **support@clawfactory.app** with details. Please **do not** open a public issue for security vulnerabilities. We respond within 72 hours. See [SECURITY.md](SECURITY.md) for the full policy.
