@@ -71,7 +71,7 @@ The script runs 11 checks and exits 0 only if all pass:
 
 ## Known limitations
 
-- **SmartScreen "Unknown publisher" warning.** Not code-signed yet. Click "More info -> Run anyway" to proceed. Code signing (Azure Trusted Signing, individual identity) is in progress and will clear this warning in a future release.
+- **SmartScreen "Unknown publisher" warning on unsigned builds.** Releases built via `scripts\build_release.ps1` are Authenticode-signed (Azure Artifact Signing, individual identity, Bret Mckinney) and timestamped. A build compiled directly with `ISCC.exe` (skipping the signing step) is still unsigned — click "More info -> Run anyway" for those.
 - **WSL1 fallback on hardware without nested virtualization.** If `HCS_E_HYPERV_NOT_INSTALLED` fires (common in nested VMs and some older laptops), the installer falls back to WSL1 automatically. Some features (systemd, networking) behave differently — egress firewall uses iptables-legacy instead of nftables.
 - **Provider model IDs are forward-looking** (`grok-4-1-fast`, `gpt-5`, `claude-sonnet-4-6`, `gemini-2.5-pro`). If your provider's catalog uses a different name when you install, change it via `Switch AI Provider` from the Start Menu.
 
@@ -94,6 +94,22 @@ Buy at [clawfactory.app](https://clawfactory.app).
 ```
 
 Output: `Output\ClawFactory-Secure-Setup.exe`. Requires the bundled rootfs at `resources\ubuntu-rootfs.tar.gz` (gitignored — sourced separately at build time). The `.iss` and `setup.ps1` are the only sources of truth — every line is auditable before you trust a build.
+
+### Producing a signed release build
+
+Any installer uploaded to a GitHub Release must be Authenticode-signed via Azure
+Artifact Signing. Use `scripts\build_release.ps1` instead of calling `ISCC.exe`
+directly — it compiles with Inno Setup and then signs the resulting `.exe`
+(`scripts\sign_installer.ps1`) before it's ready to upload:
+
+```powershell
+.\scripts\build_release.ps1
+```
+
+Requires `AZURE_SIGNING_*` values in a repo-root `.env` (see `signing\metadata.json.template`
+for the fields) and the service principal to hold the **Artifact Signing Certificate
+Profile Signer** role on the `clawfactory-signing` account. Signing fails loudly
+(non-zero exit) on any error — never proceed with an unsigned `.exe`.
 
 ## License
 

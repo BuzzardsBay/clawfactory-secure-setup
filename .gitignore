@@ -22,6 +22,10 @@ logs/
 *.p12
 secrets/
 
+# Generated at build time from .env -- real account/profile values, not the template
+signing/metadata.json
+signing/tools/
+
 # Node (if any tooling is added)
 node_modules/
 
