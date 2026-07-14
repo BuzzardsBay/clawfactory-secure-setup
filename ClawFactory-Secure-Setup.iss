@@ -44,6 +44,7 @@ Source: "resources\bootstrap.ps1";           DestDir: "{app}\resources";  Flags:
 Source: "resources\rename-agent.ps1";        DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\launcher.ps1";            DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\clawfactory-stop.ps1";    DestDir: "{app}\resources";  Flags: ignoreversion
+Source: "resources\clawfactory-grants.ps1";  DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\switch-provider.ps1";     DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\uninstall.ps1";           DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\wsl-keepalive.vbs";       DestDir: "{app}\resources";  Flags: ignoreversion

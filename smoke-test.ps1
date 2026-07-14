@@ -72,9 +72,21 @@ function Check {
     }
 }
 
-Check 'WSL automount disabled' -RequiresWsl {
+Check 'WSL automount disabled (file-isolation guarantee)' -RequiresWsl {
+    # v1.1 (Phase 1 Task 1.5 #8): surface the TRUE automount state loudly, not
+    # buried in a bare PASS/FAIL. This is the product's core security claim
+    # (Windows filesystem invisible to the agent); if it drifts to true, the
+    # agent can read all of C:\ via /mnt/c and the whole Grants model is moot.
     $r = Invoke-WslCapture -Arguments @('-d','Ubuntu','-u','clawuser','--','cat','/etc/wsl.conf')
-    $r.StdOut -match 'enabled\s*=\s*false'
+    $amLine = ($r.StdOut -split "`n" | Where-Object { $_ -match 'enabled\s*=' } | Select-Object -First 1)
+    if ($amLine) { $amLine = $amLine.Trim() } else { $amLine = '(no [automount] enabled line found)' }
+    $disabled = [bool]($r.StdOut -match 'enabled\s*=\s*false')
+    $color = if ($disabled) { 'Cyan' } else { 'Red' }
+    Write-Host "        /etc/wsl.conf automount -> '$amLine'  (required: enabled=false)" -ForegroundColor $color
+    if (-not $disabled) {
+        Write-Host "        WARNING: automount is NOT disabled -- the agent can reach all of C:\ via /mnt/c." -ForegroundColor Red
+    }
+    $disabled
 }
 
 Check 'Four agent.md files present' -RequiresWsl {
@@ -200,6 +212,91 @@ Check 'OpenClaw build deps present (make g++ cmake python3)' -RequiresWsl {
     $first = ($r.StdOut -split "`n" | Select-Object -First 1).Trim()
     $m = [regex]::Match($first, '\d+')
     if ($m.Success) { [int]$m.Value -ge 4 } else { $false }
+}
+
+# ==========================================================================
+# v1.1 (Phase 1) -- Grants substrate + spend governor checks.
+# All are -RequiresWsl (they mount/unmount inside WSL) so they SKIP under SYSTEM.
+# The grants ledger + governor config are isolated to a temp dir so the smoke
+# test never pollutes the real ProgramData\ClawFactory\grants.json / governor.json.
+# The actual drvfs mount into /workspaces IS real and is cleaned up.
+# ==========================================================================
+$grantsLib = $null
+foreach ($cand in @((Join-Path $PSScriptRoot 'clawfactory-grants.ps1'),
+                    (Join-Path $PSScriptRoot 'resources\clawfactory-grants.ps1'))) {
+    if (Test-Path -LiteralPath $cand) { $grantsLib = $cand; break }
+}
+$sg = $null; $smokeWf = $null; $smokeTmp = $null
+
+Check 'Grants library present' { [bool]$grantsLib }
+
+if ($grantsLib -and -not $isSystem) {
+    . $grantsLib
+    $smokeTmp = Join-Path ([System.IO.Path]::GetTempPath()) "clawsmoke-grants-$PID"
+    New-Item -ItemType Directory -Path $smokeTmp -Force | Out-Null
+    $script:CF_Dir            = $smokeTmp
+    $script:CF_GrantsFile     = Join-Path $smokeTmp 'grants.json'
+    $script:CF_GrantsAuditLog = Join-Path $smokeTmp 'grants-audit.log'
+    $script:CF_GovernorFile   = Join-Path $smokeTmp 'governor.json'
+    # A non-denied local folder directly under the profile (NOT the profile root,
+    # NOT under AppData) so Grant-Workspace accepts it.
+    $smokeWf = Join-Path $env:USERPROFILE 'ClawSmokeGrantTest'
+    if (Test-Path $smokeWf) { Remove-Item $smokeWf -Recurse -Force }
+    New-Item -ItemType Directory -Path $smokeWf -Force | Out-Null
+    try { $sg = Grant-Workspace -Path $smokeWf -Mode rw } catch { $sg = $null }
+}
+
+# 1. Workspace mount present after grant.
+Check 'Grant: workspace mount present after grant' -RequiresWsl {
+    if (-not $grantsLib -or -not $sg) { return $false }
+    Test-WslMountLive -Slug $sg.id
+}
+# 5. Deny-list rejection: granting C:\ fails.
+Check 'Grant: deny-list rejects drive root C:\' -RequiresWsl {
+    if (-not $grantsLib) { return $false }
+    try { Grant-Workspace -Path 'C:\' | Out-Null; return $false } catch { return $true }
+}
+# 3. Mount gone after Kill Switch, grant still in ledger + active.
+Check 'Grant: Kill Switch unmounts but keeps grant active' -RequiresWsl {
+    if (-not $grantsLib -or -not $sg) { return $false }
+    Invoke-GrantKillUnmount | Out-Null
+    $gone   = -not (Test-WslMountLive -Slug $sg.id)
+    $active = (@(Get-ActiveGrants -Type workspace | Where-Object { $_.id -eq $sg.id }).Count -eq 1)
+    $gone -and $active
+}
+# 4. Mount replayed after loss (simulated restart; the real wsl --shutdown
+#    variant is verified in the PHASE1_GRANTS report, not baked into the routine
+#    smoke test so a diagnostic run never restarts the user's gateway).
+Check 'Grant: replay remounts after loss (post-restart path)' -RequiresWsl {
+    if (-not $grantsLib -or -not $sg) { return $false }
+    Invoke-GrantReplay | Out-Null
+    Test-WslMountLive -Slug $sg.id
+}
+# 2. Mount gone after revoke.
+Check 'Grant: mount gone after revoke' -RequiresWsl {
+    if (-not $grantsLib -or -not $sg) { return $false }
+    Revoke-Workspace -Id $sg.id | Out-Null
+    -not (Test-WslMountLive -Slug $sg.id)
+}
+# 6. Governor meter returns a numeric spend and a state that is not 'unknown'.
+Check 'Governor: meter returns numeric spend, state != unknown' -RequiresWsl {
+    if (-not $grantsLib) { return $false }
+    $s = Get-SpendStatus
+    ($s.state -ne 'unknown') -and ($null -ne $s.today)
+}
+# 7. Turn-gate blocks a turn when the cap is set to zero.
+Check 'Governor: turn-gate blocks when cap = 0' -RequiresWsl {
+    if (-not $grantsLib) { return $false }
+    '{"daily_cap_usd":0,"monthly_cap_usd":0,"warn_pct":80}' | Set-Content -LiteralPath $script:CF_GovernorFile -Encoding UTF8
+    $gate = Test-TurnAllowed
+    (-not $gate.allowed) -and ($gate.state -eq 'blocked')
+}
+
+# Teardown: revoke any lingering grant, remove the real test folder + temp ledger.
+if ($grantsLib -and -not $isSystem) {
+    try { if ($sg) { Revoke-Workspace -Id $sg.id | Out-Null } } catch {}
+    if ($smokeWf  -and (Test-Path $smokeWf))  { Remove-Item $smokeWf  -Recurse -Force -ErrorAction SilentlyContinue }
+    if ($smokeTmp -and (Test-Path $smokeTmp)) { Remove-Item $smokeTmp -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 Write-Host ""

@@ -1029,6 +1029,35 @@ function Step-ConfigureWslConfig {
     }
 }
 
+function Assert-WslAutomountDisabled {
+    # v1.1 (Phase 1 Task 1.0): fail-loud readback verification for automount.
+    # The product's core security claim -- "the Windows filesystem is invisible
+    # to the agent" -- depends entirely on `[automount] enabled=false` in
+    # /etc/wsl.conf. Before this, the installer WROTE the setting and checkpointed
+    # but never READ IT BACK, so post-install drift (or a botched write) flipping
+    # automount to true would go completely undetected. That is exactly the
+    # silent-fake-success failure this project keeps producing. This helper reads
+    # the file back and THROWS -- non-zero exit, clear error, no checkpoint -- if
+    # automount is not verifiably disabled.
+    param([string]$Context = 'readback')
+    $check = @'
+set -e
+if [ ! -f /etc/wsl.conf ]; then echo "MISSING /etc/wsl.conf"; exit 3; fi
+if grep -Eq '^[[:space:]]*enabled[[:space:]]*=[[:space:]]*false' /etc/wsl.conf; then
+    echo "OK: automount disabled"; exit 0
+fi
+echo "BAD: /etc/wsl.conf does not show automount disabled. Current [automount]/enabled lines:"
+grep -nEi 'automount|enabled' /etc/wsl.conf || echo "(no automount/enabled lines at all)"
+exit 1
+'@
+    $rc = Invoke-WslBash -Script $check -User 'root'
+    if ($rc -ne 0) {
+        Write-Log ERROR "AUTOMOUNT VERIFICATION FAILED ($Context): /etc/wsl.conf does not verifiably show 'enabled=false' (rc=$rc). The agent runtime may be able to read the Windows filesystem via /mnt/c. This is a P0 file-isolation failure. Refusing to continue; no checkpoint written."
+        throw "wsl.conf automount verification failed ($Context): expected '[automount] enabled=false' in /etc/wsl.conf (rc=$rc)."
+    }
+    Write-Log INFO "Verified: /etc/wsl.conf shows automount disabled ($Context)."
+}
+
 function Step-ConfigureWslConf {
     # Phase 1: write wsl.conf WITHOUT [user] default=clawuser. The user does not
     # exist yet; setting it here causes getpwnam(clawuser) failures on every WSL
@@ -1049,6 +1078,8 @@ generateResolvConf=true
     # v1.0.29: route through Invoke-WslExe (CreateNoWindow=$true) to suppress visible console flash.
     $rWslConf = Invoke-WslExe -Arguments @('-d', $WslDistro, '-u', 'root', '--', 'bash', '-c', "echo '$encoded' | base64 -d > /etc/wsl.conf && chmod 644 /etc/wsl.conf")
     if ($rWslConf.ExitCode -ne 0) { throw 'Failed to write /etc/wsl.conf' }
+    # v1.1 (Phase 1 Task 1.0): verify the write actually landed before checkpointing.
+    Assert-WslAutomountDisabled -Context 'ConfigureWslConf-write'
     Save-Checkpoint 'WslConf'
 }
 
@@ -1113,6 +1144,11 @@ chmod 644 /etc/wsl.conf
         $null = Invoke-WslExe -Arguments @('-d', $WslDistro, '-u', 'root', '--', 'true')
         Write-Log WARN 'Default-user restart fell back to root. Check /etc/wsl.conf.'
     }
+    # v1.1 (Phase 1 Task 1.0): after the FINAL WSL restart, confirm automount is
+    # still disabled. This is the authoritative post-restart readback: it catches
+    # both a botched initial write and any later step clobbering [automount].
+    # Fails loud (throws, no checkpoint) if the isolation guarantee is not intact.
+    Assert-WslAutomountDisabled -Context 'post-restart'
     Save-Checkpoint 'DefaultUser'
 }
 

@@ -418,7 +418,7 @@ Each PowerShell script in the installer flow + post-install + ongoing-operations
 
 **User context**: Windows admin. WSL operations as `clawuser`.
 
-**Outputs / side effects**: 7 checks (WSL automount disabled, four agent.md files present, AgentBootstrap checkpoint, gateway 200, firewall inbound-deny, SOUL hash substituted, all-5-agents auth-profiles). Exits with `$fail` count.
+**Outputs / side effects**: 19 checks. Original 11: WSL automount disabled, four agent.md files present, AgentBootstrap checkpoint, gateway 200, firewall inbound-deny, SOUL hash substituted, all-5-agents auth-profiles, `.wslconfig` vmIdleTimeout=-1, WSL Host scheduled task, egress-firewall nft chain, OpenClaw build deps. Plus 8 added in v1.1 (Phase 1 Grants): grants library present, workspace mount-after-grant, deny-list rejects `C:\`, Kill Switch unmounts but keeps grant active, replay remounts after loss, mount gone after revoke, governor meter numeric+state≠unknown, governor turn-gate blocks at cap=0. (Count history: 7 at v1.0.x → 11 by v1.0.15 → 19 at v1.1.) Exits with `$fail` count; `-RequiresWsl` checks SKIP (not FAIL) under SYSTEM.
 
 **State files**: read-only verification; layered gateway-start helper may start the gateway as a side effect.
 

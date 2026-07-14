@@ -190,6 +190,22 @@ if (Test-GatewayResponding) {
 # openclaw gateway run. Same logic as setup.ps1's Step-PreinstallGatewayRuntime.
 Start-Gateway
 
+#--- 2r. Replay active workspace grants (Phase 1 Task 1.3) -------------------
+# Reaching this branch means the gateway was not responding, which after a WSL
+# restart also means every drvfs workspace mount is gone. The grants ledger is
+# the source of truth: remount every active workspace grant. This must NEVER be
+# fatal to gateway start, so it is fully wrapped -- a broken/absent grants lib or
+# a vanished folder logs and is skipped, it never blocks the launch.
+try {
+    $grantsLib = Join-Path $PSScriptRoot 'clawfactory-grants.ps1'
+    if (Test-Path -LiteralPath $grantsLib) {
+        . $grantsLib
+        $null = Invoke-GrantReplay   # audit-logs to grants-audit.log; skips live/broken grants
+    }
+} catch {
+    # Swallow: replay is best-effort and must not stop the gateway from starting.
+}
+
 #--- 2a. Start ClawChat desktop window if bundled (v1.0.18) -----------------
 # ClawChat.exe is installed at {app}\ClawChat.exe; launcher.ps1 lives at
 # {app}\resources\launcher.ps1, so we step up one directory from $PSScriptRoot.

@@ -55,7 +55,7 @@ After install, on the same machine, in an admin PowerShell:
 powershell -ExecutionPolicy Bypass -File "C:\Program Files\ClawFactory\smoke-test.ps1"
 ```
 
-The script runs 11 checks and exits 0 only if all pass:
+The script runs 19 checks and exits 0 only if all pass:
 
 1. WSL automount disabled
 2. Four `agent.md` files present (orchestrator, skill-scout, skill-builder, publisher)
@@ -68,6 +68,18 @@ The script runs 11 checks and exits 0 only if all pass:
 9. `ClawFactory WSL Host` scheduled task registered and enabled (gateway keep-alive)
 10. Egress firewall `clawfactory` chain present in the nftables ruleset
 11. OpenClaw build dependencies present (make, g++, cmake, python3)
+12. Grants library (`resources\clawfactory-grants.ps1`) present
+13. Workspace grant mounts a folder into `/workspaces/<slug>` (drvfs)
+14. Grant deny-list rejects a drive root (`C:\`)
+15. Kill Switch unmounts a granted folder but keeps the grant active in the ledger
+16. Replay remounts an active grant after mount loss (post-restart path)
+17. Revoke unmounts a granted folder
+18. Spend governor meter returns a numeric spend with a state that is not `unknown`
+19. Spend governor turn-gate blocks a turn when the cap is set to 0
+
+> Checks 12–19 are the v1.1 Grants + spend-governor substrate. Like the other
+> WSL-dependent checks they SKIP (not FAIL) when the smoke test runs as
+> `NT AUTHORITY\SYSTEM`.
 
 ## Known limitations
 
