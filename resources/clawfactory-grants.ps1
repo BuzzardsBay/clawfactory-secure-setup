@@ -32,6 +32,7 @@ $script:CF_GovernorFile   = Join-Path $script:CF_Dir 'governor.json'
 $script:CF_WslDistro      = 'Ubuntu'
 $script:CF_WslUser        = 'clawuser'
 $script:CF_MountRoot      = '/workspaces'
+$script:CF_LastMirroredCaps = $null   # Defect 3: last caps pushed to the WSL gate mirror
 
 # Install dir = parent of the resources dir this script lives in. Used by the
 # deny list so a workspace grant can never expose the ClawFactory install tree.
@@ -558,6 +559,35 @@ if gwns mountpoint -q '$mp'; then gwns umount '$mp' && echo UNMOUNTED; fi
 # TASK 1.4 -- Spend governor: metering + turn-gate
 #===========================================================================
 
+function Sync-GovernorMirror {
+    # Defect 3: mirror the spend caps into a root-owned WSL file
+    # (/etc/clawfactory/governor.json) that the openclaw turn-gate SHIM reads.
+    # The canonical governor stays in Windows ProgramData; this keeps the WSL
+    # gate's cap values current so a turn launched by ANY caller (Studio, CLI,
+    # the agent) is spend-gated, not just those going through this module.
+    #
+    # Guards:
+    #  - Only mirrors the CANONICAL ProgramData governor. A test that points
+    #    $script:CF_GovernorFile at a temp file (e.g. cap=0) must NOT clobber the
+    #    real WSL gate -- that would block the user's real turns after the test.
+    #  - Writes only when the values change (tracked in a module var) so the
+    #    frequent cost-meter poll does not spawn a wsl process every call.
+    # Best-effort: a mirror failure is swallowed; the shim fails SAFE (blocks)
+    # if the mirror is missing.
+    param([Parameter(Mandatory)]$Caps)
+    $canonical = Join-Path $env:ProgramData 'ClawFactory\governor.json'
+    if ($script:CF_GovernorFile -ne $canonical) { return }   # test override -> do not mirror
+    $payload = '{{"daily_cap_usd":{0},"monthly_cap_usd":{1},"warn_pct":{2}}}' -f `
+        ([double]$Caps.daily_cap_usd), ([double]$Caps.monthly_cap_usd), ([int]$Caps.warn_pct)
+    if ($script:CF_LastMirroredCaps -eq $payload) { return }
+    $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload))
+    $bash = "mkdir -p /etc/clawfactory; echo '$b64' | base64 -d > /etc/clawfactory/governor.json; chown root:root /etc/clawfactory/governor.json 2>/dev/null || true; chmod 644 /etc/clawfactory/governor.json"
+    try {
+        $r = Invoke-ClawWslBash -User 'root' -Script $bash
+        if ($r.ExitCode -eq 0) { $script:CF_LastMirroredCaps = $payload }
+    } catch { }
+}
+
 function Get-GovernorConfig {
     # Caps config in ProgramData\ClawFactory\governor.json. Created with defaults
     # if absent. Editable: daily_cap_usd, monthly_cap_usd, warn_pct.
@@ -565,6 +595,7 @@ function Get-GovernorConfig {
     if (-not (Test-Path -LiteralPath $script:CF_GovernorFile)) {
         if (-not (Test-Path -LiteralPath $script:CF_Dir)) { New-Item -ItemType Directory -Path $script:CF_Dir -Force | Out-Null }
         ($defaults | ConvertTo-Json) | Set-Content -LiteralPath $script:CF_GovernorFile -Encoding UTF8
+        Sync-GovernorMirror -Caps ([pscustomobject]$defaults)
         return [pscustomobject]$defaults
     }
     try {
@@ -572,6 +603,7 @@ function Get-GovernorConfig {
     } catch {
         throw "governor.json unparseable ($($_.Exception.Message)); fix or remove $script:CF_GovernorFile."
     }
+    Sync-GovernorMirror -Caps $cfg
     return $cfg
 }
 
@@ -665,36 +697,41 @@ function Test-SoulIntegrity {
     # the launch path, on every turn. A markdown "compute the hash and refuse"
     # rule is a suggestion a hostile model ignores; this is code.
     #
-    # The live SHA-256 of SOUL.md is computed AS ROOT (so the agent's UID cannot
-    # influence the computation) and compared to the ROOT-OWNED pin at
-    # /etc/clawfactory/soul.sha256 (which clawuser cannot write). Both the file
-    # and the pin are outside clawuser's control (SOUL.md is root:root 444 +
-    # chattr +i; the pin lives in root-owned /etc/clawfactory) -- see
-    # Step-ApplySafetyRules.
+    # Covers TWO files, both computed AS ROOT (the agent's UID cannot influence
+    # the computation) against ROOT-OWNED pins in /etc/clawfactory:
+    #   1. FACTORY  ~/.openclaw/SOUL.md            vs soul.sha256           (Defect 2)
+    #   2. INJECTED ~/.openclaw/workspace/SOUL.md  vs workspace-soul.sha256 (Defect 4)
+    # The injected workspace SOUL is the file OpenClaw actually puts in the
+    # agent's prompt, so it now carries the factory safety rules and is frozen
+    # (root:root 444 + chattr +i) -- see Step-ApplySafetyRules / Step-FreezeInjectedSoul.
+    # It is enforced ONLY once its pin exists, so installs that predate Defect 4
+    # (no workspace-soul pin yet) are not spuriously blocked.
     #
-    # Fail-SAFE: any error (SOUL missing, pin missing, unreadable, mismatch)
-    # returns ok=$false so the caller REFUSES the turn. We never fail open.
+    # Fail-SAFE: any error (file missing, pin present but file unreadable,
+    # mismatch) returns ok=$false so the caller REFUSES the turn. Never fail open.
     $script = @'
-set -euo pipefail
-SOUL=/home/clawuser/.openclaw/SOUL.md
-PIN=/etc/clawfactory/soul.sha256
-[ -r "$SOUL" ] || { echo "SOUL_UNREADABLE"; exit 3; }
-[ -r "$PIN" ]  || { echo "PIN_MISSING"; exit 4; }
-HAVE=$(sha256sum "$SOUL" | awk '{print $1}')
-EXPECT=$(tr -d '[:space:]' < "$PIN")
-if [ "$HAVE" = "$EXPECT" ]; then
-    echo "OK"
-else
-    echo "MISMATCH have=$HAVE expect=$EXPECT"
-    exit 5
+set -uo pipefail
+fail() { echo "$1"; exit "$2"; }
+F=/home/clawuser/.openclaw/SOUL.md
+FP=/etc/clawfactory/soul.sha256
+[ -r "$F" ]  || fail "FACTORY_SOUL_UNREADABLE" 3
+[ -r "$FP" ] || fail "FACTORY_PIN_MISSING" 4
+[ "$(sha256sum "$F" | awk '{print $1}')" = "$(tr -d '[:space:]' < "$FP")" ] || fail "FACTORY_SOUL_MISMATCH" 5
+W=/home/clawuser/.openclaw/workspace/SOUL.md
+WP=/etc/clawfactory/workspace-soul.sha256
+if [ -r "$WP" ]; then
+    [ -r "$W" ] || fail "INJECTED_SOUL_UNREADABLE" 6
+    [ "$(sha256sum "$W" | awk '{print $1}')" = "$(tr -d '[:space:]' < "$WP")" ] || fail "INJECTED_SOUL_MISMATCH" 7
 fi
+echo "OK"
 '@
     $r = Invoke-ClawWslBash -User 'root' -Script $script
     $out = (($r.StdOut + "`n" + $r.StdErr).Trim())
     if ($r.ExitCode -eq 0 -and $out -match 'OK') {
-        return @{ ok = $true; message = 'SOUL.md integrity verified'; detail = $out }
+        return @{ ok = $true; message = 'SOUL.md integrity verified (factory + injected)'; detail = $out }
     }
-    $msg = "SOUL.md integrity check FAILED -- refusing to run this turn. The factory-wide safety rules (SOUL.md) do not match the value pinned at install time, which means they may have been tampered with. No turn will run until SOUL.md is restored (reinstall, or copy resources/safety-rules.md back and re-pin). Detail: $out"
+    $which = if ($out -match 'INJECTED') { 'the safety rules injected into the agent (workspace/SOUL.md)' } else { 'the factory safety rules (~/.openclaw/SOUL.md)' }
+    $msg = "SOUL.md integrity check FAILED -- refusing to run this turn. $which do not match the value pinned at install time, which means they may have been tampered with. No turn will run until they are restored (reinstall, or restore from resources/ and re-pin). Detail: $out"
     return @{ ok = $false; message = $msg; detail = $out }
 }
 

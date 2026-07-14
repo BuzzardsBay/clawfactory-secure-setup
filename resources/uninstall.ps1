@@ -278,9 +278,16 @@ set +e
 sudo -u clawuser bash -c 'systemctl --user stop openclaw-gateway 2>/dev/null; systemctl --user disable openclaw-gateway 2>/dev/null' 2>/dev/null
 # Flush the clawfactory nft chain (uses iptables on WSL1)
 /usr/sbin/nft delete table inet clawfactory 2>/dev/null
+# Clear immutable flags so the frozen safety files can be removed (Defect 2/4:
+# SOUL.md + workspace SOUL are root:root chattr +i; rm/deluser fail otherwise).
+chattr -i /home/clawuser/.openclaw/SOUL.md /home/clawuser/.openclaw/SOUL.md.sha256 /home/clawuser/.openclaw/workspace/SOUL.md 2>/dev/null
+# Remove the ClawFactory turn-gate shim + helper scripts (Defect 3). Removing
+# /usr/bin/openclaw below drops the shim; the real .mjs is removed too.
+rm -f /usr/local/sbin/clawfactory-turn-gate.sh /usr/local/sbin/clawfactory-spend-check.js /usr/local/sbin/clawfactory-dns-resolvers.sh /usr/local/sbin/clawfactory-fw-apply.sh 2>/dev/null
+rm -rf /etc/clawfactory 2>/dev/null
 # Remove the openclaw global install
 rm -rf /usr/lib/node_modules/openclaw 2>/dev/null
-rm -f /usr/bin/openclaw /usr/local/bin/openclaw 2>/dev/null
+rm -f /usr/bin/openclaw /usr/local/bin/openclaw /bin/openclaw 2>/dev/null
 # Remove clawuser home + the user itself
 deluser --remove-home clawuser 2>/dev/null
 # Drop the WSL default-user line we added

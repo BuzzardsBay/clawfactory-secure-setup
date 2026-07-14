@@ -1,0 +1,6 @@
+# Scripts transported into WSL and executed by bash/node MUST stay LF.
+# A CR in the shebang or `set -e` line breaks them ("bad interpreter: /bin/bash^M").
+# core.autocrlf=true would otherwise give CRLF working copies on Windows.
+*.sh   text eol=lf
+*.mjs  text eol=lf
+resources/clawfactory-spend-check.js text eol=lf

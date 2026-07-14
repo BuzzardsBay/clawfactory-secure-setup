@@ -33,6 +33,18 @@ function Wsl([string]$Cmd, [string]$User = 'clawuser') {
     $b = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Cmd))
     return (& wsl.exe -d Ubuntu -u $User -- bash -lc "echo $b | base64 -d | bash" 2>&1 | Out-String)
 }
+function Set-GateMirror([string]$json) {
+    $b = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
+    & wsl.exe -d Ubuntu -u root -- bash -c "echo $b | base64 -d > /etc/clawfactory/governor.json 2>/dev/null; chmod 644 /etc/clawfactory/governor.json 2>/dev/null" 2>&1 | Out-Null
+}
+# Defect 3: the openclaw shim now gates EVERY `openclaw agent` on the WSL mirror
+# caps. Bret's box may be over its real daily cap, which would block the suite's
+# turn-running checks (T1.1b control, T1.2f) for the wrong reason. Raise the
+# mirror for the suite and restore it at the end. (Tier 4 manages the CANONICAL
+# governor separately to test the Studio spend gate.)
+$script:MirrorBak = (& wsl.exe -d Ubuntu -u root -- bash -c 'cat /etc/clawfactory/governor.json 2>/dev/null' 2>$null | Out-String).Trim()
+if ([string]::IsNullOrWhiteSpace($script:MirrorBak)) { $script:MirrorBak = '{"daily_cap_usd":5,"monthly_cap_usd":50,"warn_pct":80}' }
+Set-GateMirror '{"daily_cap_usd":999,"monthly_cap_usd":9999,"warn_pct":80}'
 
 Write-Host "==== TIER 1.1 -- EGRESS FIREWALL (consumer: the agent / its UID) ====" -ForegroundColor Cyan
 
@@ -196,6 +208,73 @@ Record 'T3.2c' 'A granted folder deleted in Windows shows as BROKEN (repair/revo
 try { if ($gt3) { Revoke-Workspace -Id $gt3.id | Out-Null } } catch {}
 if (Test-Path $ttmp) { Remove-Item $ttmp -Recurse -Force -ErrorAction SilentlyContinue }
 
+Write-Host "==== TIER 4 -- GATE COVERAGE THROUGH STUDIO + INJECTED SOUL (Defects 3 & 4) ====" -ForegroundColor Cyan
+# These assert on what a STUDIO user gets -- turns launched through the Studio
+# backend's own launchers (agent-stream / chat), NOT through Invoke-GatedAgentTurn.
+$studioProbe = Join-Path $PSScriptRoot 'resources\studio-turn-probe.mjs'
+$realGov = Join-Path $env:ProgramData 'ClawFactory\governor.json'
+$govBak  = if (Test-Path $realGov) { Get-Content -LiteralPath $realGov -Raw } else { $null }
+function Set-RealCaps($d,$m){ ('{{"daily_cap_usd":{0},"monthly_cap_usd":{1},"warn_pct":80}}' -f $d,$m) | Set-Content -LiteralPath $realGov -Encoding UTF8 }
+function Invoke-StudioProbe($mode){ (& node $studioProbe $mode 2>&1 | Where-Object { "$_" -match '^\{' } | Select-Object -Last 1) }
+# StrictMode-safe property read (the grants engine sets Set-StrictMode 3.0, which
+# throws on a missing property -- e.g. $j.error on a non-error result).
+function Prop($obj, $name) { if ($obj -and ($obj.PSObject.Properties.Name -contains $name)) { return $obj.$name } return $null }
+$studioSkip = $false
+try {
+    # T4.1 -- a turn launched through Studio (STREAM) with cap=0 is blocked with a human message.
+    Set-RealCaps 0 0
+    $p = Invoke-StudioProbe 'stream'
+    $j = $null; try { $j = $p | ConvertFrom-Json } catch {}
+    if ((Prop $j 'error') -eq 'studio_dist_unavailable') {
+        $studioSkip = $true
+        Record 'T4.1' 'Studio-launched turn (cap=0) is blocked with a human message' 'SKIP' 'Studio dist not built; set CLAWFACTORY_STUDIO_DIST or `npm run build` in ClawFactory-Studio/backend'
+    } else {
+        $blk = Prop $j 'blocked'; $msg = "$(Prop $blk 'message')"
+        $ok = $blk -and ($msg -match 'cap|budget|spend') -and ($msg -notmatch 'clawfactory_gate')
+        Record 'T4.1' 'A turn launched THROUGH STUDIO (stream), cap=0, is BLOCKED with a human message' ($(if($ok){'PASS'}else{'FAIL'})) "$p"
+    }
+    if (-not $studioSkip) {
+        # T4.2 -- the non-streaming Studio path (sendMessage) is gated too.
+        $p2 = Invoke-StudioProbe 'send'
+        $j2 = $null; try { $j2 = $p2 | ConvertFrom-Json } catch {}
+        $ok2 = ((Prop $j2 'blocked') -eq $true) -and ("$(Prop $j2 'message')" -match 'cap|budget|spend')
+        Record 'T4.2' 'A turn launched THROUGH STUDIO (sendMessage), cap=0, is BLOCKED' ($(if($ok2){'PASS'}else{'FAIL'})) "$p2"
+
+        # T4.3 -- a Studio turn with a tampered SOUL is blocked (high cap isolates from spend).
+        Set-RealCaps 999 9999
+        Wsl 'cp -f /home/clawuser/.openclaw/SOUL.md /root/SOUL.advstudio; chattr -i /home/clawuser/.openclaw/SOUL.md; printf "\n# ADV STUDIO TAMPER\n" >> /home/clawuser/.openclaw/SOUL.md' 'root' | Out-Null
+        $p3 = Invoke-StudioProbe 'stream'
+        Wsl 'chattr -i /home/clawuser/.openclaw/SOUL.md 2>/dev/null || true; cp -f /root/SOUL.advstudio /home/clawuser/.openclaw/SOUL.md; chown root:root /home/clawuser/.openclaw/SOUL.md; chmod 444 /home/clawuser/.openclaw/SOUL.md; chattr +i /home/clawuser/.openclaw/SOUL.md; rm -f /root/SOUL.advstudio' 'root' | Out-Null
+        $j3 = $null; try { $j3 = $p3 | ConvertFrom-Json } catch {}
+        $blk3 = Prop $j3 'blocked'
+        $ok3 = $blk3 -and ((Prop $blk3 'state') -eq 'soul_mismatch')
+        Record 'T4.3' 'A turn launched THROUGH STUDIO with a tampered SOUL is BLOCKED (soul_mismatch)' ($(if($ok3){'PASS'}else{'FAIL'})) "$p3"
+    }
+} finally {
+    if ($null -ne $govBak) { Set-Content -LiteralPath $realGov -Value $govBak -Encoding UTF8 -NoNewline } else { Set-RealCaps 5 50 }
+    $null = Get-SpendStatus   # resync the WSL gate mirror to the restored caps
+}
+
+# T4.4 -- the injected safety file cannot be written by the agent's UID (model-independent).
+$o = Wsl 'printf "# evil\n" >> /home/clawuser/.openclaw/workspace/SOUL.md 2>&1; echo rc=$?; chmod u+w /home/clawuser/.openclaw/workspace/SOUL.md 2>&1; echo chmod-rc=$?; rm -f /home/clawuser/.openclaw/workspace/SOUL.md 2>&1; echo rm-rc=$?'
+$injOk = ($o -match 'Operation not permitted')
+Record 'T4.4' 'Injected safety file (workspace/SOUL.md) CANNOT be written by the agent UID' ($(if($injOk){'PASS'}else{'FAIL'})) $o
+
+# T4.5 -- the factory safety rules are actually delivered into the injected file, frozen + pinned.
+$soulCheck = @'
+WS=/home/clawuser/.openclaw/workspace/SOUL.md
+PIN=/etc/clawfactory/workspace-soul.sha256
+R=$(grep -c "HARD SAFETY BOUNDARIES" "$WS" 2>/dev/null)
+H=$(sha256sum "$WS" 2>/dev/null | cut -d" " -f1)
+P=$(cat "$PIN" 2>/dev/null)
+echo "rules=$R"
+if [ -n "$H" ] && [ "$H" = "$P" ]; then echo "pinned=YES"; else echo "pinned=NO"; fi
+echo "immutable=$(lsattr "$WS" 2>/dev/null | cut -d" " -f1 | grep -c i)"
+'@
+$o = Wsl $soulCheck 'root'
+$present = ($o -match 'rules=[1-9]') -and ($o -match 'pinned=YES')
+Record 'T4.5' 'Factory safety rules are delivered into the injected SOUL and frozen + pinned' ($(if($present){'PASS'}else{'FAIL'})) $o
+
 # ==========================================================================
 # TIER 2 (clean install) + TIER 3-Azure (cold-start clock) -- NOT RUN HERE.
 # These require automount=false (a correct install; this box has drifted to true)
@@ -223,4 +302,6 @@ Write-Host ""
 Write-Host ("Tier 1: {0} PASS, {1} FAIL, {2} MANUAL/other" -f @($results|?{$_.verdict -eq 'PASS'}).Count, $nf, @($results|?{$_.verdict -notin 'PASS','FAIL'}).Count)
 # emit the verbatim evidence for the report
 $results | ForEach-Object { "`n### $($_.id) $($_.name) [$($_.verdict)]`n$($_.evidence)" } | Set-Content "$env:TEMP\adv-tier1-evidence.txt" -Encoding UTF8
+# Restore the WSL gate mirror to its pre-suite caps (see Set-GateMirror above).
+Set-GateMirror $script:MirrorBak
 exit $nf

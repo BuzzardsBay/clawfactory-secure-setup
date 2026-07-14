@@ -2153,6 +2153,59 @@ if [ `"`$HAVE`" = `"`$EXPECT`" ]; then echo 'OK: SOUL.md hash verified'; else ec
     Save-Checkpoint 'SafetyRules'
 }
 
+function Step-InstallTurnGate {
+    # Defect 3 (gate coverage): install the gated openclaw shim so NO caller
+    # (Studio, the CLI, this engine, or the agent) can launch an UNGATED turn.
+    # The shim replaces /usr/bin/openclaw and runs the universal turn gate (SOUL
+    # integrity + spend cap, in WSL) before `openclaw agent`; every other
+    # subcommand passes straight through. The bash logic lives in reviewable
+    # resource scripts (base64-dropped) to avoid PS->bash quoting hazards.
+    Write-Log INFO 'Step 15b [Defect 3]: Installing gated openclaw shim (SOUL + spend gate on every turn).'
+    $resourceDir = Join-Path $PSScriptRoot 'resources'
+    # Normalize CRLF->LF before transport: these are bash/node scripts and a \r
+    # in the shebang/`set -e` line breaks them (git autocrlf can introduce CRLF).
+    $lfB64 = { param($p) [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(([IO.File]::ReadAllText($p)).Replace("`r`n","`n").Replace("`r","`n"))) }
+    $shimB64  = & $lfB64 (Join-Path $resourceDir 'openclaw-shim.sh')
+    $gateB64  = & $lfB64 (Join-Path $resourceDir 'clawfactory-turn-gate.sh')
+    $spendB64 = & $lfB64 (Join-Path $resourceDir 'clawfactory-spend-check.js')
+    $instB64  = & $lfB64 (Join-Path $resourceDir 'install-turn-gate.sh')
+    $drop = @"
+set -e
+mkdir -p /usr/local/sbin /etc/clawfactory
+echo '$gateB64'  | base64 -d > /usr/local/sbin/clawfactory-turn-gate.sh
+echo '$spendB64' | base64 -d > /usr/local/sbin/clawfactory-spend-check.js
+echo '$shimB64'  | base64 -d > /tmp/oc-shim
+echo '$instB64'  | base64 -d > /tmp/install-turn-gate.sh
+bash /tmp/install-turn-gate.sh
+rm -f /tmp/install-turn-gate.sh
+"@
+    $rc = Invoke-WslBash -Script $drop -User 'root'
+    if ($rc -ne 0) { throw 'Failed to install the openclaw turn-gate shim (Defect 3).' }
+    Save-Checkpoint 'InstallTurnGate'
+}
+
+function Step-FreezeInjectedSoul {
+    # Defect 4 (SOUL delivery): the factory safety rules must reach the agent's
+    # runtime prompt. OpenClaw injects only the fixed workspace-file set (SOUL.md
+    # first) and has no config-level system-prompt channel, so we prepend the
+    # factory rules to ~/.openclaw/workspace/SOUL.md, freeze it (root:root 444 +
+    # chattr +i), and pin its hash for the launch gate (Test-SoulIntegrity /
+    # the shim). Runs late so the workspace is likely already created.
+    Write-Log INFO 'Step 15c [Defect 4]: Delivering + freezing the injected workspace SOUL.'
+    $resourceDir = Join-Path $PSScriptRoot 'resources'
+    # Normalize CRLF->LF (bash script; git autocrlf can introduce CRLF).
+    $frzB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(([IO.File]::ReadAllText((Join-Path $resourceDir 'freeze-injected-soul.sh'))).Replace("`r`n","`n").Replace("`r","`n")))
+    $drop = @"
+set -e
+echo '$frzB64' | base64 -d > /tmp/freeze-injected-soul.sh
+bash /tmp/freeze-injected-soul.sh
+rm -f /tmp/freeze-injected-soul.sh
+"@
+    $rc = Invoke-WslBash -Script $drop -User 'root'
+    if ($rc -ne 0) { Write-Log WARN "Step-FreezeInjectedSoul returned $rc; the injected safety rules may not be frozen. Verify ~/.openclaw/workspace/SOUL.md and re-run setup.ps1 -Resume." }
+    Save-Checkpoint 'FreezeInjectedSoul'
+}
+
 function Step-WindowsFirewallDeny {
     # [R4] Belt-and-suspenders inbound-deny on gateway port.
     Write-Log INFO "Step 13 [R4]: Creating Windows Firewall inbound-deny rule on TCP/$GatewayPort."
@@ -2608,6 +2661,8 @@ Invoke-WithRollback {
     Step-WindowsFirewallDeny
     Step-PostInstall
     Step-ConfigureAgents         # step 15: stage agent.md prompts via bootstrap.ps1
+    Step-InstallTurnGate         # Defect 3: gated openclaw shim (SOUL + spend on every turn, all callers)
+    Step-FreezeInjectedSoul      # Defect 4: deliver + freeze the factory safety rules into the injected SOUL
 }
 
 #--- Final gateway health gate ------------------------------------------------
