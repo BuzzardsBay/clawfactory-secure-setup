@@ -93,7 +93,10 @@ function Write-GrantAudit {
             $existing = Get-Content -LiteralPath $script:CF_GrantsAuditLog -Raw -Encoding UTF8
         }
         $tmp = "$script:CF_GrantsAuditLog.tmp.$PID"
-        Set-Content -LiteralPath $tmp -Value ($existing + $line + "`r`n") -Encoding UTF8 -NoNewline
+        # WriteAllText + UTF8Encoding($false): PS 5.1's Set-Content -Encoding UTF8
+        # prepends a BOM, which breaks non-PowerShell JSON parsers reading the
+        # first line (e.g. Studio's Node backend). No BOM here.
+        [System.IO.File]::WriteAllText($tmp, ($existing + $line + "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
         Move-Item -LiteralPath $tmp -Destination $script:CF_GrantsAuditLog -Force
     } catch {
         # Best-effort: an audit write failure must not abort a grant operation,
@@ -134,7 +137,8 @@ function Save-GrantsRaw {
     }
     $state = [ordered]@{ grants = @($Grants) }
     $tmp = "$script:CF_GrantsFile.tmp.$PID"
-    $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $tmp -Encoding UTF8
+    # No BOM (PS 5.1 Set-Content -Encoding UTF8 would add one).
+    [System.IO.File]::WriteAllText($tmp, ($state | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
     Move-Item -LiteralPath $tmp -Destination $script:CF_GrantsFile -Force
 }
 
@@ -370,6 +374,17 @@ mountpoint -q '$script:CF_MountRoot/$slug' && echo MOUNTED
     if ($existing) {
         Write-GrantAudit -Event 'workspace.remounted' -Data @{ id = $slug; path = $resolved; mode = $Mode }
         return $existing
+    }
+    # Re-granting a previously-REVOKED path: the slug is deterministic, so a prior
+    # (inactive) ledger record already owns this id. Reactivate it in place rather
+    # than colliding with Add-Grant's unique-id guard.
+    $prior = Get-GrantsRaw | Where-Object { $_.id -eq $slug } | Select-Object -First 1
+    if ($prior) {
+        $all = @(Get-GrantsRaw)
+        foreach ($g in $all) { if ($g.id -eq $slug) { $g.active = $true; $g.mode = $Mode; $g.target = $resolved } }
+        Save-GrantsRaw -Grants $all
+        Write-GrantAudit -Event 'workspace.reactivated' -Data @{ id = $slug; path = $resolved; mode = $Mode }
+        return ($all | Where-Object { $_.id -eq $slug } | Select-Object -First 1)
     }
     $label = Split-Path -Leaf $resolved
     $grant = Add-Grant -Type workspace -Id $slug -Label $label -Target $resolved -Mode $Mode
