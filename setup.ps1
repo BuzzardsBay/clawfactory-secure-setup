@@ -1235,8 +1235,39 @@ function Step-EgressFirewall {
     $hostList      = ($allHosts -join ' ')
     Write-Log INFO "Allowlist hosts: $hostList"
 
+    # Defect 1 (DNS exfiltration): the resolver-allowlist helper is shipped as a
+    # base64 blob so its regex/awk survive the PowerShell->wsl->bash transport
+    # without backtick-escaping. It prints the IPv4 resolver(s) clawuser may
+    # reach on port 53 (the WSL NAT forwarder from /etc/resolv.conf), with a
+    # persisted fallback for the boot race. See in-file header for rationale.
+    $dnsHelper = @'
+#!/bin/bash
+# ClawFactory Defect-1 DNS restriction: print the IPv4 resolver(s) clawuser is
+# permitted to reach on port 53, one per line.
+#   Primary source : /etc/resolv.conf nameservers (WSL writes the NAT DNS
+#                     forwarder here via [network] generateResolvConf=true).
+#   Fallback       : last-known-good /etc/clawfactory/dns-resolvers.txt, used
+#                     only if resolv.conf has no nameserver yet (boot race).
+# IPv6 nameservers are intentionally excluded: the DNS allow rules are IPv4
+# (ip daddr), so any port-53 packet to an IPv6 resolver hits the drop rule.
+ns="$(awk '/^[[:space:]]*nameserver/ { print $2 }' /etc/resolv.conf 2>/dev/null | grep -Eo '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' | sort -u)"
+if [ -z "$ns" ] && [ -f /etc/clawfactory/dns-resolvers.txt ]; then
+    ns="$(grep -Eo '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' /etc/clawfactory/dns-resolvers.txt 2>/dev/null | sort -u)"
+fi
+printf '%s\n' $ns | sed '/^$/d'
+'@
+    $dnsHelperB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($dnsHelper.Replace("`r`n", "`n")))
+
     $script = @"
 set -euo pipefail
+
+# --- Install the DNS-resolver allowlist helper (Defect 1) ------------------
+mkdir -p /etc/clawfactory
+echo '$dnsHelperB64' | base64 -d > /usr/local/sbin/clawfactory-dns-resolvers.sh
+chmod 755 /usr/local/sbin/clawfactory-dns-resolvers.sh
+CF_RESOLVERS=`$(/usr/local/sbin/clawfactory-dns-resolvers.sh)
+printf '%s\n' `$CF_RESOLVERS | sed '/^`$/d' > /etc/clawfactory/dns-resolvers.txt
+echo `"[clawfactory-fw] DNS resolvers restricted to: `$(printf '%s ' `$CF_RESOLVERS)`"
 
 # --- Write nftables config (used if nf_tables is available) ----------------
 cat > /etc/nftables.conf <<'NFT'
@@ -1248,12 +1279,19 @@ table inet clawfactory {
         flags dynamic, timeout
         timeout 6h
     }
+    set dns_resolvers {
+        type ipv4_addr
+    }
     chain output {
         type filter hook output priority 0; policy accept;
         meta skuid != clawuser return
         oifname `"lo`" accept
-        udp dport 53 accept
-        tcp dport 53 accept
+        # Defect 1: port 53 is restricted to the WSL resolver(s) only (populated
+        # into @dns_resolvers from /etc/resolv.conf by the apply step). An agent
+        # can no longer pick an arbitrary resolver (dig @1.1.1.1) to smuggle data
+        # out inside a DNS lookup.
+        ip daddr @dns_resolvers udp dport 53 accept
+        ip daddr @dns_resolvers tcp dport 53 accept
         ct state established,related accept
         ip daddr @allowed_ipv4 tcp dport 443 accept
         # Allow Ollama local API on port 11434 (localhost only is enforced by bind)
@@ -1288,6 +1326,10 @@ if /usr/sbin/nft -f /etc/nftables.conf 2>`"`$NFT_ERR`"; then
     for ip in `$ALLOWED_IPS; do
         /usr/sbin/nft add element inet clawfactory allowed_ipv4 `"{ `$ip }`" 2>/dev/null || true
     done
+    # Defect 1: populate the DNS resolver allowlist (port 53 -> WSL resolver only).
+    for ip in `$CF_RESOLVERS; do
+        /usr/sbin/nft add element inet clawfactory dns_resolvers `"{ `$ip }`" 2>/dev/null || true
+    done
 elif grep -qE 'Unable to initialize Netlink|netlink|nf_tables' `"`$NFT_ERR`"; then
     echo `"[clawfactory-fw] nftables not supported on this WSL kernel - falling back to iptables-legacy`"
     cat `"`$NFT_ERR`" >&2 || true
@@ -1299,8 +1341,11 @@ elif grep -qE 'Unable to initialize Netlink|netlink|nf_tables' `"`$NFT_ERR`"; th
     FW_BACKEND=`"iptables-legacy`"
     `"`$IPT`" -F OUTPUT
     `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -o lo -j ACCEPT
-    `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -p udp --dport 53 -j ACCEPT
-    `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -p tcp --dport 53 -j ACCEPT
+    # Defect 1: port 53 restricted to the WSL resolver(s) only.
+    for ip in `$CF_RESOLVERS; do
+        `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -d `"`$ip`" -p udp --dport 53 -j ACCEPT
+        `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -d `"`$ip`" -p tcp --dport 53 -j ACCEPT
+    done
     `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     for ip in `$ALLOWED_IPS; do
         `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -d `"`$ip`" -p tcp --dport 443 -j ACCEPT
@@ -1325,13 +1370,20 @@ cat > /usr/local/sbin/clawfactory-fw-apply.sh <<'APPLY'
 #!/bin/bash
 set -euo pipefail
 BACKEND=`"`$(cat /etc/clawfactory/fw-backend 2>/dev/null || echo nftables)`"
+# Defect 1: refresh the DNS resolver allowlist from the (boot-regenerated)
+# /etc/resolv.conf, falling back to the last-known-good persisted list. Port 53
+# is only ever opened to these resolver(s), never to an arbitrary one.
+CF_RESOLVERS=`"`$(/usr/local/sbin/clawfactory-dns-resolvers.sh 2>/dev/null)`"
+printf '%s\n' `$CF_RESOLVERS | sed '/^`$/d' > /etc/clawfactory/dns-resolvers.txt
 if [ `"`$BACKEND`" = `"iptables-legacy`" ]; then
     IPT=`"`$(command -v iptables-legacy || true)`"
     [ -n `"`$IPT`" ] || { echo `"[clawfactory-fw] iptables-legacy missing`" >&2; exit 1; }
     `"`$IPT`" -F OUTPUT
     `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -o lo -j ACCEPT
-    `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -p udp --dport 53 -j ACCEPT
-    `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -p tcp --dport 53 -j ACCEPT
+    for ip in `$CF_RESOLVERS; do
+        `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -d `"`$ip`" -p udp --dport 53 -j ACCEPT
+        `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -d `"`$ip`" -p tcp --dport 53 -j ACCEPT
+    done
     `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     while IFS= read -r ip; do
         [ -n `"`$ip`" ] || continue
@@ -1345,6 +1397,9 @@ else
         [ -n `"`$ip`" ] || continue
         /usr/sbin/nft add element inet clawfactory allowed_ipv4 `"{ `$ip }`" 2>/dev/null || true
     done < /etc/clawfactory/allowed-ips.txt
+    for ip in `$CF_RESOLVERS; do
+        /usr/sbin/nft add element inet clawfactory dns_resolvers `"{ `$ip }`" 2>/dev/null || true
+    done
 fi
 APPLY
 chmod +x /usr/local/sbin/clawfactory-fw-apply.sh
@@ -2059,17 +2114,41 @@ function Step-ApplySafetyRules {
     Write-Log INFO "SOUL.md SHA-256 = $soulHash"
 
     $soulB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($soulSrc))
+    # Defect 2 / Layer 1: SOUL.md must be tamper-proof against the agent's own
+    # UID. It is written AS ROOT, owned root:root, mode 444, and made immutable
+    # with `chattr +i`. The immutable attribute is enforced by the kernel on the
+    # inode, so clawuser cannot write it, chmod it, OR delete-and-recreate it --
+    # even though clawuser owns ~/.openclaw (delete would otherwise be allowed by
+    # the directory's write bit). A root-owned copy of the pin is also written to
+    # /etc/clawfactory/soul.sha256 (outside clawuser's control) for the Layer 2
+    # launch-time gate (Test-SoulIntegrity in clawfactory-grants.ps1).
+    # Runs as ROOT, so ~ would be /root -- absolute paths are used throughout.
     $apply = @"
 set -e
-mkdir -p ~/.openclaw
-echo '$soulB64' | base64 -d > ~/.openclaw/SOUL.md
-printf '%s' '$soulHash' > ~/.openclaw/SOUL.md.sha256
-chmod 444 ~/.openclaw/SOUL.md ~/.openclaw/SOUL.md.sha256
-HAVE=`$(sha256sum ~/.openclaw/SOUL.md | awk '{print `$1}')
-EXPECT=`$(cat ~/.openclaw/SOUL.md.sha256)
+CLAW_HOME=/home/clawuser
+install -d -o clawuser -g clawuser -m 700 `"`$CLAW_HOME/.openclaw`"
+mkdir -p /etc/clawfactory
+# Clear any prior immutable flag so a re-run / upgrade can overwrite.
+chattr -i `"`$CLAW_HOME/.openclaw/SOUL.md`" 2>/dev/null || true
+chattr -i `"`$CLAW_HOME/.openclaw/SOUL.md.sha256`" 2>/dev/null || true
+echo '$soulB64' | base64 -d > `"`$CLAW_HOME/.openclaw/SOUL.md`"
+printf '%s' '$soulHash' > `"`$CLAW_HOME/.openclaw/SOUL.md.sha256`"
+printf '%s' '$soulHash' > /etc/clawfactory/soul.sha256
+chown root:root `"`$CLAW_HOME/.openclaw/SOUL.md`" `"`$CLAW_HOME/.openclaw/SOUL.md.sha256`" /etc/clawfactory/soul.sha256
+chmod 444 `"`$CLAW_HOME/.openclaw/SOUL.md`" `"`$CLAW_HOME/.openclaw/SOUL.md.sha256`" /etc/clawfactory/soul.sha256
+# Immutability is the control that defeats delete-and-recreate. Verify + WARN
+# loudly if the filesystem cannot hold it (do not silently ship degraded).
+chattr +i `"`$CLAW_HOME/.openclaw/SOUL.md`" `"`$CLAW_HOME/.openclaw/SOUL.md.sha256`" 2>/dev/null || true
+if lsattr `"`$CLAW_HOME/.openclaw/SOUL.md`" 2>/dev/null | awk '{print `$1}' | grep -q i; then
+    echo 'OK: SOUL.md is immutable (chattr +i)'
+else
+    echo 'WARN: could not set immutable flag on SOUL.md -- delete-and-recreate protection is DEGRADED on this filesystem'
+fi
+HAVE=`$(sha256sum `"`$CLAW_HOME/.openclaw/SOUL.md`" | awk '{print `$1}')
+EXPECT=`$(cat /etc/clawfactory/soul.sha256)
 if [ `"`$HAVE`" = `"`$EXPECT`" ]; then echo 'OK: SOUL.md hash verified'; else echo 'MISMATCH'; exit 1; fi
 "@
-    $rc = Invoke-WslBash -Script $apply -User $WslUser
+    $rc = Invoke-WslBash -Script $apply -User 'root'
     if ($rc -ne 0) { throw 'Failed to apply SOUL.md.' }
     Save-Checkpoint 'SafetyRules'
 }

@@ -660,15 +660,65 @@ function Test-TurnAllowed {
     return @{ allowed = $true; state = $s.state; message = 'within budget' }
 }
 
+function Test-SoulIntegrity {
+    # HARD integrity gate (Defect 2, Layer 2). Runs OUTSIDE the agent prompt, in
+    # the launch path, on every turn. A markdown "compute the hash and refuse"
+    # rule is a suggestion a hostile model ignores; this is code.
+    #
+    # The live SHA-256 of SOUL.md is computed AS ROOT (so the agent's UID cannot
+    # influence the computation) and compared to the ROOT-OWNED pin at
+    # /etc/clawfactory/soul.sha256 (which clawuser cannot write). Both the file
+    # and the pin are outside clawuser's control (SOUL.md is root:root 444 +
+    # chattr +i; the pin lives in root-owned /etc/clawfactory) -- see
+    # Step-ApplySafetyRules.
+    #
+    # Fail-SAFE: any error (SOUL missing, pin missing, unreadable, mismatch)
+    # returns ok=$false so the caller REFUSES the turn. We never fail open.
+    $script = @'
+set -euo pipefail
+SOUL=/home/clawuser/.openclaw/SOUL.md
+PIN=/etc/clawfactory/soul.sha256
+[ -r "$SOUL" ] || { echo "SOUL_UNREADABLE"; exit 3; }
+[ -r "$PIN" ]  || { echo "PIN_MISSING"; exit 4; }
+HAVE=$(sha256sum "$SOUL" | awk '{print $1}')
+EXPECT=$(tr -d '[:space:]' < "$PIN")
+if [ "$HAVE" = "$EXPECT" ]; then
+    echo "OK"
+else
+    echo "MISMATCH have=$HAVE expect=$EXPECT"
+    exit 5
+fi
+'@
+    $r = Invoke-ClawWslBash -User 'root' -Script $script
+    $out = (($r.StdOut + "`n" + $r.StdErr).Trim())
+    if ($r.ExitCode -eq 0 -and $out -match 'OK') {
+        return @{ ok = $true; message = 'SOUL.md integrity verified'; detail = $out }
+    }
+    $msg = "SOUL.md integrity check FAILED -- refusing to run this turn. The factory-wide safety rules (SOUL.md) do not match the value pinned at install time, which means they may have been tampered with. No turn will run until SOUL.md is restored (reinstall, or copy resources/safety-rules.md back and re-pin). Detail: $out"
+    return @{ ok = $false; message = $msg; detail = $out }
+}
+
 function Invoke-GatedAgentTurn {
     # The turn-gate wrap. Phase 2's Studio (chat.ts) should route its CLI turn
     # (currently `openclaw agent --json --message ...` in
     # runOpenClawAgentTurn) THROUGH this function instead of spawning openclaw
     # directly. If blocked, it refuses WITHOUT launching the turn.
+    #
+    # Two hard gates run before a turn is ever spawned, in code, on every turn:
+    #   1. SOUL.md integrity (Test-SoulIntegrity) -- a tampered safety file
+    #      stops ALL turns, no matter what the model would do.
+    #   2. Spend cap (Test-TurnAllowed).
+    # SOUL is checked first: an integrity failure is a hard stop independent of
+    # budget.
     param(
         [Parameter(Mandatory)][string]$Agent,
         [Parameter(Mandatory)][string]$Message
     )
+    $soul = Test-SoulIntegrity
+    if (-not $soul.ok) {
+        Write-GrantAudit -Event 'soul.integrity_blocked' -Data @{ agent = $Agent; detail = $soul.detail }
+        return [pscustomobject]@{ blocked = $true; state = 'soul_mismatch'; message = $soul.message; output = $null }
+    }
     $gate = Test-TurnAllowed
     if (-not $gate.allowed) {
         Write-GrantAudit -Event 'governor.turn_blocked' -Data @{ agent = $Agent; state = $gate.state }

@@ -181,13 +181,25 @@ done
 # Detect active backend (set by setup.ps1 Step-EgressFirewall at install).
 BACKEND="`$(cat /etc/clawfactory/fw-backend 2>/dev/null || echo nftables)"
 
+# Defect 1: restrict port 53 to the WSL resolver(s). The allowlist helper is
+# installed by setup.ps1 Step-EgressFirewall; fall back to the persisted list.
+# Must stay in sync with setup.ps1 Step-EgressFirewall's DNS restriction.
+if [ -x /usr/local/sbin/clawfactory-dns-resolvers.sh ]; then
+    CF_RESOLVERS="`$(/usr/local/sbin/clawfactory-dns-resolvers.sh)"
+else
+    CF_RESOLVERS="`$(cat /etc/clawfactory/dns-resolvers.txt 2>/dev/null)"
+fi
+printf '%s\n' `$CF_RESOLVERS | sed '/^`$/d' > /etc/clawfactory/dns-resolvers.txt
+
 if [ "`$BACKEND" = "iptables-legacy" ]; then
     IPT="`$(command -v iptables-legacy || true)"
     [ -n "`$IPT" ] || { echo "[switch-provider] iptables-legacy missing" >&2; exit 1; }
     "`$IPT" -F OUTPUT
     "`$IPT" -A OUTPUT -m owner --uid-owner clawuser -o lo -j ACCEPT
-    "`$IPT" -A OUTPUT -m owner --uid-owner clawuser -p udp --dport 53 -j ACCEPT
-    "`$IPT" -A OUTPUT -m owner --uid-owner clawuser -p tcp --dport 53 -j ACCEPT
+    for ip in `$CF_RESOLVERS; do
+        "`$IPT" -A OUTPUT -m owner --uid-owner clawuser -d "`$ip" -p udp --dport 53 -j ACCEPT
+        "`$IPT" -A OUTPUT -m owner --uid-owner clawuser -d "`$ip" -p tcp --dport 53 -j ACCEPT
+    done
     "`$IPT" -A OUTPUT -m owner --uid-owner clawuser -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     for ip in `$ALLOWED_IPS; do
         "`$IPT" -A OUTPUT -m owner --uid-owner clawuser -d "`$ip" -p tcp --dport 443 -j ACCEPT
@@ -198,6 +210,11 @@ else
     /usr/sbin/nft flush set inet clawfactory allowed_ipv4 2>/dev/null || true
     for ip in `$ALLOWED_IPS; do
         /usr/sbin/nft add element inet clawfactory allowed_ipv4 "{ `$ip }" 2>/dev/null || true
+    done
+    # Defect 1: refresh the DNS resolver set too (in case resolv.conf changed).
+    /usr/sbin/nft flush set inet clawfactory dns_resolvers 2>/dev/null || true
+    for ip in `$CF_RESOLVERS; do
+        /usr/sbin/nft add element inet clawfactory dns_resolvers "{ `$ip }" 2>/dev/null || true
     done
 fi
 
