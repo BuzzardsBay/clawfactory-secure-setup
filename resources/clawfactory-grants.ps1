@@ -311,10 +311,30 @@ function New-WorkspaceSlug {
     return "$clean-$hash"
 }
 
+# v1.1 (Phase 2.5): agents run under the OpenClaw gateway (a systemd --user
+# service) in a DIFFERENT mount namespace than a fresh `wsl` invocation. A drvfs
+# mount created the ordinary way lands in the fresh-wsl namespace and is INVISIBLE
+# to the agent (VERIFIED: the agent saw a granted folder as empty). So every mount
+# / umount / mountpoint operation must target the gateway's namespace via
+# `nsenter -t <gateway-pid> -m`. This gives the agent the granted folder ONLY --
+# it does not add /mnt/c or anything ungranted. This preamble resolves the gateway
+# pid and defines `gwns` = run-in-gateway-namespace.
+$script:CF_GwPreamble = @'
+GWPID=$(ps -eo pid,cmd | grep 'index.js gateway' | grep -v grep | awk '{print $1}' | head -1)
+gwns() { nsenter -t "$GWPID" -m -- "$@"; }
+'@
+
 function Test-WslMountLive {
-    # Is /workspaces/<slug> currently a live mountpoint?
+    # Is /workspaces/<slug> a live mountpoint INSIDE THE GATEWAY NAMESPACE (i.e.
+    # visible to the agent)? Checking the fresh-wsl mount table would be exactly
+    # the producer-side mistake this defect hid behind.
     param([Parameter(Mandatory)][string]$Slug)
-    $r = Invoke-ClawWslBash -User 'root' -Script "mountpoint -q '$script:CF_MountRoot/$Slug' && echo LIVE || echo DEAD"
+    $script = $script:CF_GwPreamble + @"
+
+if [ -z "`$GWPID" ]; then echo DEAD; exit 0; fi
+gwns mountpoint -q '$script:CF_MountRoot/$Slug' && echo LIVE || echo DEAD
+"@
+    $r = Invoke-ClawWslBash -User 'root' -Script $script
     return ($r.StdOut.Trim() -eq 'LIVE')
 }
 
@@ -358,17 +378,27 @@ function Grant-Workspace {
     $winFwd = $resolved -replace '\\', '/'
     $roOpt = ''
     if ($Mode -eq 'ro') { $roOpt = ',ro' }
-    $mountScript = @"
+    $mountScript = $script:CF_GwPreamble + @"
+
 set -e
 mkdir -p '$script:CF_MountRoot/$slug'
-if mountpoint -q '$script:CF_MountRoot/$slug'; then echo ALREADY_MOUNTED; exit 0; fi
-mount -t drvfs '$winFwd' '$script:CF_MountRoot/$slug' -o metadata,uid=1000,gid=1000$roOpt
-mountpoint -q '$script:CF_MountRoot/$slug' && echo MOUNTED
+if [ -z "`$GWPID" ]; then echo NO_GATEWAY; exit 0; fi
+gwns mkdir -p '$script:CF_MountRoot/$slug'
+if gwns mountpoint -q '$script:CF_MountRoot/$slug'; then echo ALREADY_MOUNTED; exit 0; fi
+gwns mount -t drvfs '$winFwd' '$script:CF_MountRoot/$slug' -o metadata,uid=1000,gid=1000$roOpt
+gwns mountpoint -q '$script:CF_MountRoot/$slug' && echo MOUNTED
 "@
     $r = Invoke-ClawWslBash -User 'root' -Script $mountScript
-    if ($r.ExitCode -ne 0) {
+    $mountOut = $r.StdOut.Trim()
+    if ($r.ExitCode -ne 0 -and $mountOut -notmatch 'NO_GATEWAY') {
         Write-GrantAudit -Event 'workspace.mount_failed' -Data @{ path = $resolved; slug = $slug; stderr = $r.StdErr.Trim() }
         throw "Mount failed for '$resolved' (exit=$($r.ExitCode)): $($r.StdErr.Trim())"
+    }
+    if ($mountOut -match 'NO_GATEWAY') {
+        # Grant is recorded now; the launcher replay mounts it into the agent's
+        # namespace the next time the gateway starts. Applies immediately whenever
+        # the gateway is already running (the normal case).
+        Write-Warning 'Gateway not running: grant recorded; it will become visible to the agent when the gateway next starts.'
     }
 
     if ($existing) {
@@ -401,12 +431,14 @@ function Revoke-Workspace {
         Write-Warning "No workspace grant with id '$Id'."
         return $false
     }
-    $unmountScript = @"
-if mountpoint -q '$script:CF_MountRoot/$Id'; then
-    umount '$script:CF_MountRoot/$Id' && echo UNMOUNTED || echo UMOUNT_FAILED
+    $unmountScript = $script:CF_GwPreamble + @"
+
+if [ -n "`$GWPID" ] && gwns mountpoint -q '$script:CF_MountRoot/$Id'; then
+    gwns umount '$script:CF_MountRoot/$Id' && echo UNMOUNTED || echo UMOUNT_FAILED
 else
     echo NOT_MOUNTED
 fi
+[ -n "`$GWPID" ] && gwns rmdir '$script:CF_MountRoot/$Id' 2>/dev/null
 rmdir '$script:CF_MountRoot/$Id' 2>/dev/null && echo RMDIR_OK || echo RMDIR_SKIP
 "@
     $r = Invoke-ClawWslBash -User 'root' -Script $unmountScript
@@ -444,12 +476,30 @@ function Test-Grants {
 # TASK 1.3 -- Launcher replay + Kill Switch
 #===========================================================================
 
+function Get-GatewayPid {
+    # The gateway's PID (empty string if not running). Agents run in this
+    # process's mount namespace, so mounts must target it.
+    $r = Invoke-ClawWslBash -User 'root' -Script ($script:CF_GwPreamble + "`necho `$GWPID")
+    return $r.StdOut.Trim()
+}
+
 function Invoke-GrantReplay {
-    # Replay every ACTIVE workspace grant after a WSL restart: recreate the
-    # mountpoint and remount. A grant whose Windows path has vanished is marked
-    # broken (logged) and SKIPPED -- never silently dropped, never fatal.
-    # Returns a summary object.
+    # Replay every ACTIVE workspace grant into the GATEWAY's mount namespace after
+    # a WSL or gateway restart -- so the AGENT sees them, not just a fresh wsl
+    # shell. The launcher fires Start-Gateway asynchronously, so first wait (up to
+    # ~30s) for the gateway process to exist. A grant whose Windows path vanished
+    # is marked broken and skipped -- never silently dropped, never fatal.
     $replayed = 0; $broken = 0; $skipped = 0
+    $gwPid = ''
+    for ($i = 0; $i -lt 30; $i++) {
+        $gwPid = Get-GatewayPid
+        if ($gwPid) { break }
+        Start-Sleep -Milliseconds 1000
+    }
+    if (-not $gwPid) {
+        Write-GrantAudit -Event 'workspace.replay_no_gateway' -Data @{}
+        return [pscustomobject]@{ replayed = 0; broken = 0; alreadyMounted = 0; note = 'gateway not up within 30s; nothing replayed' }
+    }
     foreach ($g in (Get-ActiveGrants -Type workspace)) {
         if (-not (Test-Path -LiteralPath $g.target)) {
             $broken++
@@ -460,13 +510,18 @@ function Invoke-GrantReplay {
         $winFwd = ($g.target -replace '\\', '/')
         $roOpt = ''
         if ($g.mode -eq 'ro') { $roOpt = ',ro' }
-        $script = @"
+        $mp = "$script:CF_MountRoot/$($g.id)"
+        $rscript = $script:CF_GwPreamble + @"
+
 set -e
-mkdir -p '$script:CF_MountRoot/$($g.id)'
-mount -t drvfs '$winFwd' '$script:CF_MountRoot/$($g.id)' -o metadata,uid=1000,gid=1000$roOpt
-mountpoint -q '$script:CF_MountRoot/$($g.id)' && echo OK
+if [ -z "`$GWPID" ]; then echo NO_GATEWAY; exit 9; fi
+mkdir -p '$mp'
+gwns mkdir -p '$mp'
+if gwns mountpoint -q '$mp'; then echo OK; exit 0; fi
+gwns mount -t drvfs '$winFwd' '$mp' -o metadata,uid=1000,gid=1000$roOpt
+gwns mountpoint -q '$mp' && echo OK
 "@
-        $r = Invoke-ClawWslBash -User 'root' -Script $script
+        $r = Invoke-ClawWslBash -User 'root' -Script $rscript
         if ($r.ExitCode -eq 0) {
             $replayed++
             Write-GrantAudit -Event 'workspace.replayed' -Data @{ id = $g.id; path = $g.target }
@@ -484,7 +539,13 @@ function Invoke-GrantKillUnmount {
     # (kill != revoke) so a later start replays them. Returns count unmounted.
     $count = 0
     foreach ($g in (Get-ActiveGrants -Type workspace)) {
-        $r = Invoke-ClawWslBash -User 'root' -Script "if mountpoint -q '$script:CF_MountRoot/$($g.id)'; then umount '$script:CF_MountRoot/$($g.id)' && echo UNMOUNTED; fi"
+        $mp = "$script:CF_MountRoot/$($g.id)"
+        $ks = $script:CF_GwPreamble + @"
+
+[ -z "`$GWPID" ] && { echo NO_GATEWAY; exit 0; }
+if gwns mountpoint -q '$mp'; then gwns umount '$mp' && echo UNMOUNTED; fi
+"@
+        $r = Invoke-ClawWslBash -User 'root' -Script $ks
         if ($r.StdOut.Trim() -eq 'UNMOUNTED') {
             $count++
             Write-GrantAudit -Event 'workspace.kill_unmounted' -Data @{ id = $g.id }
