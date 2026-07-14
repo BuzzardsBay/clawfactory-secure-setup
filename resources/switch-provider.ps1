@@ -118,8 +118,36 @@ if ($Provider -ne 'ollama') {
         [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
     }
     cmdkey /generic:$($cfg.Cred) /user:clawuser /pass:$ApiKey | Out-Null
-    $ApiKey = ('x' * 64); Remove-Variable ApiKey -ErrorAction SilentlyContinue
     Write-Host "  [x] API key stored at credential target '$($cfg.Cred)'"
+
+    # v1.1 FIX: also write the key into the OpenClaw auth-profiles.json files the
+    # gateway actually reads (the global one plus each per-agent copy). Before
+    # this, switch-provider stored the key in Credential Manager and set profile
+    # METADATA via `openclaw config set`, but never wrote the key VALUE anywhere
+    # the gateway reads -- so a rotated key stayed in Credential Manager while the
+    # gateway kept using the OLD key and every turn 401'd. Mirrors setup.ps1
+    # Step-WireProviderKey (which is why a fresh install worked but a rotation
+    # didn't). The key travels inside the base64'd script, never on a command line.
+    $keyB64w = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($ApiKey))
+    $setKey = @"
+python3 - '$keyB64w' '$($cfg.ProfileId)' '$($cfg.InternalId)' <<'PYEOF'
+import sys, json, os, glob, base64
+key = base64.b64decode(sys.argv[1]).decode('utf-8'); pid = sys.argv[2]; prov = sys.argv[3]
+paths = [os.path.expanduser('~/.openclaw/auth-profiles.json')] + glob.glob(os.path.expanduser('~/.openclaw/agents/*/agent/auth-profiles.json'))
+for p in paths:
+    try: d = json.load(open(p))
+    except Exception: d = {'version': 1, 'profiles': {}}
+    d.setdefault('version', 1); d.setdefault('profiles', {})
+    pr = d['profiles'].setdefault(pid, {}); pr['type'] = 'api_key'; pr['provider'] = prov; pr['key'] = key
+    json.dump(d, open(p, 'w')); os.chmod(p, 0o600)
+print('wrote key into', len(paths), 'auth-profiles.json file(s)')
+PYEOF
+"@
+    $skRc = Invoke-WslBashBlock -Script $setKey -User $WslUser -Cd '/home/clawuser'
+    Remove-Variable keyB64w
+    if ($skRc -ne 0) { Write-Warning "auth-profiles.json key write returned exit $skRc (gateway may still use the old key)." }
+    else { Write-Host "  [x] key written into OpenClaw auth-profiles.json (global + per-agent)" }
+    $ApiKey = ('x' * 64); Remove-Variable ApiKey -ErrorAction SilentlyContinue
 } else {
     # Ensure Ollama is installed and running
     wsl -d $WslDistro -u root -- bash -lc 'command -v ollama >/dev/null 2>&1 || (curl -fsSL https://ollama.com/install.sh | bash); systemctl enable ollama 2>/dev/null || true; systemctl restart ollama 2>/dev/null || true'
