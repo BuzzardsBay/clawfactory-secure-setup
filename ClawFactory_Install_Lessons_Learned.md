@@ -168,3 +168,39 @@ redirect on its own invocation line.
 otherwise. Check for a redirect before believing the product is broken — and note
 that a `finally`-based teardown makes this failure *expensive*: it deletes the
 evidence.
+
+## L6 — without a redirect, a failed `az` call does NOT stop the script (the exact inverse of L5)
+
+**Discovered:** cfv-0715d diagnostic cycle (2026-07-15), immediately after fixing L5.
+
+L5's fix (stop redirecting stderr) removed the false *fatal*. It also created a
+false *success*:
+
+```
+ERROR: {"status":"Failed", ... "code":"OSProvisioningTimedOut" ...}
+[17:31:39] Provisioned. (admin password generated in-memory; never printed or written)
+[17:31:39] Staging ... onto the VM
+```
+
+`az vm create` failed and the harness printed **"Provisioned."** on the next line
+and kept going — because `$ErrorActionPreference = 'Stop'` governs *PowerShell*
+errors, **not a native command's exit code**. Without the redirect there is no
+`ErrorRecord`, so nothing throws.
+
+**The pair, stated once so it is never re-learned:**
+
+| | stderr redirected (`*>&1`) | stderr not redirected |
+|---|---|---|
+| az **WARNING** | becomes a TERMINATING error (**L5**) | correctly ignored |
+| az **ERROR** | terminates | **silently ignored (L6)** |
+
+Neither mode is safe on its own. **The correct pattern is: no redirect + an
+explicit `$LASTEXITCODE` check after every az call whose failure matters.**
+
+**Second half of the rule — do not trust the exit code alone, either.** For this
+custom image ARM reports `OSProvisioningTimedOut` while the guest **boots fine**
+(the agent just reports late): cfv-0715d's VM was `PowerState/running` and serving
+`run-command` while ARM called the deployment Failed. So on a non-zero exit,
+**ask the VM** (`az vm get-instance-view` → `PowerState/running`) before deciding.
+A hard abort on exit code alone would have thrown away a working VM;
+a blind continue spends 40 minutes on a VM that may not exist. Check, then ask.

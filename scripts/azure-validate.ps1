@@ -111,6 +111,23 @@ try {
         --os-disk-name "$VmName-osdisk" --public-ip-address "$VmName-pip" --nsg "$VmName-nsg" `
         --subnet (az network vnet subnet show -g $ResourceGroup --vnet-name bake-vmVNET -n bake-vmSubnet --query id -o tsv) `
         --output none
+    # L6 -- an az failure does NOT throw. EAP=Stop governs PowerShell errors, not a
+    # native command's exit code, and (per L5) we deliberately do not redirect
+    # stderr. So `az vm create` can fail and the script sails on: cfv-0715d printed
+    # "Provisioned." immediately after ERROR: OSProvisioningTimedOut, then spent 40
+    # minutes staging onto a VM it never confirmed. Check $LASTEXITCODE explicitly
+    # -- but do NOT trust it alone in the other direction either: ARM reports
+    # OSProvisioningTimedOut for this custom image while the guest actually boots
+    # fine (the agent reports late), and cfv-0715d's VM was up and serving
+    # run-command. So ask the VM what it is actually doing.
+    if ($LASTEXITCODE -ne 0) {
+        Say "az vm create returned exit $LASTEXITCODE -- asking the VM whether it actually came up..." Yellow
+        $codes = @(az vm get-instance-view -g $ResourceGroup -n $VmName --query "instanceView.statuses[].code" -o tsv 2>$null)
+        if ($codes -notcontains 'PowerState/running') {
+            throw "az vm create failed (exit $LASTEXITCODE) and the VM is not running (statuses: $($codes -join ', ')). Not proceeding."
+        }
+        Say "  ...VM IS running despite the deployment error (OSProvisioningTimedOut is advisory for this image). Continuing." Yellow
+    }
     Say "Provisioned. (admin password generated in-memory; never printed or written)" Green
 
     # ---- 2. Stage the installer ------------------------------------------
