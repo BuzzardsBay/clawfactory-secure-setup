@@ -80,3 +80,57 @@ phase. If you need uninstall-time logic, it belongs in `CurUninstallStepChanged`
 *correct for uninstall* — but the bug was an evaluation-**timing** violation that only manifests
 at runtime. Flag/path correctness is necessary but not sufficient; phase-timing is a separate
 axis that must be checked explicitly.
+
+---
+
+## L2 — `az vm run-command --scripts` mangles multi-line strings
+
+**Discovered:** cfv-0715 clean-install validation (2026-07-15).
+
+An inline multi-line PowerShell string passed to `--scripts` arrives on the VM
+**corrupted**:
+
+```
++ if (Test-Path C:\cfv\setup.exe) {
++                                 ~
+Missing closing '}' in statement block or type definition.
+```
+
+Worse, a mangled script can run *partially* and return **empty stdout** — which
+reads as "the script did nothing" rather than "the script was corrupted", sending
+you diagnosing the wrong layer.
+
+**Rule:** always pass `--scripts "@<localfile>"`. Write the script to a local file
+first. This is the `harness via @file` pattern already recorded in the v1.0.37
+report — it was rediscovered the hard way, so it is now a permanent rule.
+
+## L3 — `--query "[?...]"` filters get mangled by the Windows shell and silently match nothing
+
+**Discovered:** cfv-0715 teardown (2026-07-15). **This one is a billing leak.**
+
+```
+az network nic delete -g $RG -n $(az network nic list -g $RG --query "[?starts_with(name,'cfv-0715')].name" -o tsv)
+  -> ].name was unexpected at this time.
+  -> ERROR: unrecognized arguments: ...
+  -> printed "nic deleted" anyway
+```
+
+The teardown loop reported `nic deleted / public-ip deleted / disk deleted` while
+deleting **nothing**, leaving four orphans (NIC, public IP, NSG, OS disk) billing
+after the VM was gone. A teardown that trusts a filtered query is a teardown that
+reports success and leaks money.
+
+**Rule:** delete by **explicit resource name**. Never rely on a `--query` filter in
+a teardown path. Always finish with an **unfiltered** `az resource list -g <rg>`
+and read it with your own eyes — that listing, not the delete commands' output, is
+the proof.
+
+## L4 — `2>&1` on `az` breaks `ConvertFrom-Json`
+
+**Discovered:** cfv-0715 (2026-07-15).
+
+`az ... -o json 2>&1 | ConvertFrom-Json` fails with
+`Invalid JSON primitive: WARNING.` — PowerShell 5.1 wraps a native command's
+stderr in ErrorRecords and merges Azure's warnings into the stream.
+
+**Rule:** never `2>&1` an `az` call whose stdout you intend to parse.
