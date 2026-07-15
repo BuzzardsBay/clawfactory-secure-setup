@@ -120,6 +120,30 @@ try {
     $sas = az storage blob generate-sas --account-name $StorageAcct --account-key $key `
              --container-name $Container --name $Blob --permissions r --expiry $exp -o tsv
     $url = "https://$StorageAcct.blob.core.windows.net/$Container/$Blob`?$sas"
+
+    # PAYLOAD TRANSPORT (L2): do NOT carry the payload inline through --scripts.
+    # Tried that on cfv-0715c: an ~12 KB base64 blob made `run-command invoke`
+    # return EMPTY stdout with no error -- L2's exact signature ("runs partially,
+    # returns empty stdout"), which reads as "did nothing" rather than "was too
+    # big". Instead reuse the mechanism that provably moves a 325 MB installer:
+    # upload to blob, download on the VM via SAS. Keeps the arm script small --
+    # the shape that worked on cfv-0715.
+    $payloadDl = ""
+    if ($Payload) {
+        $pName = Split-Path $Payload -Leaf
+        az storage blob upload --account-name $StorageAcct --account-key $key `
+            --container-name $Container --name $pName --file $Payload --overwrite --output none
+        $pSas = az storage blob generate-sas --account-name $StorageAcct --account-key $key `
+                  --container-name $Container --name $pName --permissions r --expiry $exp -o tsv
+        $pUrl = "https://$StorageAcct.blob.core.windows.net/$Container/$pName`?$pSas"
+        # Prove it landed AND is non-trivial: a truncated/empty payload.ps1 would
+        # otherwise only surface 20 minutes later as a silent empty diagnostic.
+        $payloadDl = "Invoke-WebRequest -Uri '$pUrl' -OutFile C:\cfv\payload.ps1 -UseBasicParsing`r`n" +
+                     "if (-not (Test-Path C:\cfv\payload.ps1)) { throw 'payload.ps1 did not download' }`r`n" +
+                     "`"PAYLOAD_BYTES=`$((Get-Item C:\cfv\payload.ps1).Length)`""
+        Say "  payload uploaded to blob '$pName' (staged by SAS, not by --scripts)" DarkGray
+    }
+
     # run-command is SYSTEM here -- fine: this is Windows-side only, no WSL.
     $stage = @"
 `$ErrorActionPreference='Stop'
@@ -127,27 +151,29 @@ New-Item -ItemType Directory -Path C:\cfv -Force | Out-Null
 Invoke-WebRequest -Uri '$url' -OutFile C:\cfv\setup.exe -UseBasicParsing
 `$h = (Get-FileHash C:\cfv\setup.exe -Algorithm SHA256).Hash.ToLower()
 if (`$h -ne '$ExpectSha256') { throw "HASH MISMATCH on VM: `$h" }
+$payloadDl
 "OK staged; sha256 verified: `$h"
 "@
     $r = az vm run-command invoke -g $ResourceGroup -n $VmName --command-id RunPowerShellScript --scripts $stage --query "value[0].message" -o tsv
-    Save 'stage.txt' $r; Say "Staged + hash verified." Green
+    Save 'stage.txt' $r
+    if ($r -notmatch 'sha256 verified') { throw "Stage step did not confirm sha256. Output: $r" }
+    if ($Payload -and $r -notmatch 'PAYLOAD_BYTES=\d{3,}') { throw "Payload did not stage (expected PAYLOAD_BYTES). Output: $r" }
+    Say "Staged + hash verified. $(($r -split "`n" | Where-Object { $_ -match 'PAYLOAD_BYTES' }) -join '')" Green
 
     # ---- 3. Install as clawadmin (NOT via run-command: WSL breaks under SYSTEM)
     Say "Configuring auto-logon + RunOnce wrapper so the installer runs as $AdminUser (WSL cannot run as SYSTEM)."
     # Payload (diagnostic mode): staged now, executed by wrapper.cmd right after the
     # installer exits -- same session, same boot, no reboot in between.
-    $payloadStage = ""; $payloadCall = ""
+    # payload.ps1 is already on the box (blob+SAS, in the stage step above), so the
+    # arm script stays small -- it only has to CALL it.
+    $payloadCall = ""
     if ($Payload) {
-        if (-not (Test-Path $Payload)) { throw "-Payload '$Payload' not found." }
-        $pb64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content $Payload -Raw)))
-        $payloadStage = "[IO.File]::WriteAllBytes('C:\cfv\payload.ps1', [Convert]::FromBase64String('$pb64'))"
-        $payloadCall  = "powershell -NoProfile -ExecutionPolicy Bypass -File C:\cfv\payload.ps1 > C:\cfv\diag-out.txt 2>&1`r`necho DIAG_DONE > C:\cfv\DIAG_DONE.txt"
+        $payloadCall = "powershell -NoProfile -ExecutionPolicy Bypass -File C:\cfv\payload.ps1 > C:\cfv\diag-out.txt 2>&1`r`necho DIAG_DONE > C:\cfv\DIAG_DONE.txt"
         Say "  payload armed: $Payload (runs in-session immediately after the installer)" Yellow
     }
     $wrapper = @"
 `$ErrorActionPreference='Stop'
 `$W='C:\cfv'
-$payloadStage
 # Auto-logon once, so a real interactive clawadmin session exists for WSL.
 `$k='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
 Set-ItemProperty `$k AutoAdminLogon '1'
@@ -166,23 +192,15 @@ $payloadCall
 Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' CFV-Install-Wrapper "cmd /c `$W\wrapper.cmd"
 'auto-logon + RunOnce armed'
 "@
-    # L2: NEVER pass a multi-line script inline to --scripts -- az mangles it, and a
-    # mangled script can run PARTIALLY and return empty stdout, which reads as "did
-    # nothing" instead of "was corrupted". Write it to a file and use @file. This
-    # matters doubly in -Payload mode: the arm script carries an ~12 KB base64 blob.
-    # SECRET HANDLING: $wrapper embeds the generated VM admin password (auto-logon
-    # needs it in the registry). So the temp file goes OUTSIDE the repo -- never into
-    # $dir/validation-runs, which is committed evidence -- and is shredded right
-    # after the call, even on failure.
-    $armFile = Join-Path ([IO.Path]::GetTempPath()) ("cfv-arm-{0}.ps1" -f [Guid]::NewGuid())
-    try {
-        [IO.File]::WriteAllText($armFile, $wrapper, (New-Object Text.UTF8Encoding($false)))  # no BOM
-        $r = az vm run-command invoke -g $ResourceGroup -n $VmName --command-id RunPowerShellScript --scripts "@$armFile" --query "value[0].message" -o tsv
-    } finally {
-        Remove-Item $armFile -Force -ErrorAction SilentlyContinue
-    }
+    # Inline --scripts, matching the shape proven on cfv-0715. The payload is NOT
+    # in here (it came down from blob storage), so this stays small. The `@file`
+    # form was tried on cfv-0715c and returned empty stdout -- see L2.
+    $r = az vm run-command invoke -g $ResourceGroup -n $VmName --command-id RunPowerShellScript --scripts $wrapper --query "value[0].message" -o tsv
     Save 'arm.txt' $r   # $r is just the 'auto-logon + RunOnce armed' echo -- no secret
+    # Guard: empty output means the wrapper may be half-written. Rebooting into a
+    # half-written wrapper produces a meaningless run, so stop while it is cheap.
     if (-not $r) { throw "Arm step returned empty output -- suspect a mangled/oversized script (L2). Do not proceed: the wrapper may be half-written." }
+    if ($Payload -and $r -notmatch 'armed') { throw "Arm step did not confirm: $r" }
     Say "Rebooting into the auto-logon session to run the installer..."
     az vm restart -g $ResourceGroup -n $VmName --output none
 
