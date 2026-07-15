@@ -130,6 +130,23 @@ try {
     }
     Say "Provisioned. (admin password generated in-memory; never printed or written)" Green
 
+    # Trap 6, made cheap: `run-command invoke` has NO client-side timeout, so if the
+    # guest agent is unhealthy the invoke just HANGS -- cfv-0715d wedged for 20+
+    # minutes with the output frozen mid-run, looking like a slow install rather
+    # than a dead VM (agent displayStatus "Not Ready", after OSProvisioningTimedOut).
+    # Wait for the agent FIRST and fail fast and honestly instead.
+    Say "Waiting for the VM agent to report Ready (run-command depends on it)..."
+    $agentOk = $false
+    foreach ($i in 1..24) {
+        $ag = @(az vm get-instance-view -g $ResourceGroup -n $VmName --query "instanceView.vmAgent.statuses[].displayStatus" -o tsv 2>$null)
+        if ($ag -match 'Ready') { $agentOk = $true; Say "  agent: Ready" Green; break }
+        Say "  agent: $($ag -join ',') ($i/24)" DarkGray
+        Start-Sleep -Seconds 15
+    }
+    if (-not $agentOk) {
+        throw "VM agent never reported Ready after ~6 min -- run-command would wedge with no timeout. This is a HARNESS/INFRA failure (bad deploy), NOT a product verdict: redeploy on a fresh VM name before concluding anything about ClawFactory."
+    }
+
     # ---- 2. Stage the installer ------------------------------------------
     Say "Staging $Blob onto the VM (SAS, 1h) and verifying sha256 on the box..."
     $key = az storage account keys list -g $ResourceGroup -n $StorageAcct --query "[0].value" -o tsv
