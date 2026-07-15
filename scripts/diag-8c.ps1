@@ -151,13 +151,17 @@ grep -rn 'pam_systemd' /etc/pam.d/ 2>&1 | head
 '@
 
 H "1-3. LINUX SIDE -- one wsl invocation (see DESIGN NOTE above)"
-$tmp = "$env:TEMP\cf-diag.sh"
-# LF endings + no BOM: bash chokes on CRLF ("$'\r': command not found") and on a BOM.
-[IO.File]::WriteAllText($tmp, ($bash -replace "`r`n", "`n"), (New-Object Text.UTF8Encoding($false)))
-
-# Copy in via the distro's own view of the Windows file, then run as root in ONE go.
-$wslTmp = (wsl -d Ubuntu -u root -- wslpath -a "$($tmp -replace '\\','/')") 2>&1
-Write-Output "(bundle staged at: $wslTmp)"
-wsl -d Ubuntu -u root -- bash "$wslTmp" 2>&1
+# TRANSPORT NOTE -- do NOT stage this through a Windows temp file + wslpath.
+# ClawFactory sets [automount] enabled=false in /etc/wsl.conf (setup.ps1
+# Assert-WslAutomountDisabled even THROWS if it cannot verify it). So /mnt/c does
+# not exist on a correctly-installed box and the distro physically cannot read a
+# file from the Windows filesystem -- the isolation being tested is the same
+# isolation that would break the probe. Pass the script as base64 on the command
+# line instead: no shared filesystem, nothing to mount.
+# (LF only + no BOM: bash chokes on CRLF with "$'\r': command not found".)
+$lf   = ($bash -replace "`r`n", "`n")
+$b64  = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($lf))
+Write-Output "(bundle: $($lf.Length) bytes -> $($b64.Length) b64 chars, passed inline; /mnt/c is intentionally absent)"
+wsl -d Ubuntu -u root -- bash -c "echo $b64 | base64 -d | bash" 2>&1
 
 H "DIAG COMPLETE"
