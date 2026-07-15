@@ -29,21 +29,21 @@ ClawFactory Secure Setup is built on **defense in depth**: multiple independent 
 
 **Attack:** A prompt injection or compromised skill instructs the agent to POST sensitive data (the user's prompts, the API key, contents of an attached file) to an attacker-controlled URL.
 
-**Control:** An nftables firewall in the WSL kernel scoped to `meta skuid != clawuser return` (clawuser only) drops every outbound packet except: DNS, loopback (lo), `ct state established,related`, and `ip daddr @allowed_ipv4 tcp dport 443` where `allowed_ipv4` is a dynamic set populated from `getent ahostsv4` against a static base hostlist (GitHub, npm, Docker Hub, OpenClaw, ClawHub) plus the chosen provider's host. Everything else is `counter drop`.
+**Control:** An nftables firewall in the WSL kernel scoped to `meta skuid != clawuser return` (clawuser only) drops every outbound packet except: DNS **to the WSL resolver only** (`ip daddr @dns_resolvers udp/tcp dport 53` — an arbitrary resolver such as `1.1.1.1` is dropped), loopback (lo), `ct state established,related`, and `ip daddr @allowed_ipv4 tcp dport 443` where `allowed_ipv4` is a dynamic set populated from `getent ahostsv4` against a static base hostlist (GitHub, npm, OpenClaw, ClawHub, Ubuntu apt) plus the chosen provider's host. Everything else is `counter drop`.
 
 **Implementation:** `Step-EgressFirewall`, [`setup.ps1` line 347](setup.ps1#L347). The base allowlist is in lines 351–360. The set has a 6h timeout.
 
-**Limitations:** The 6h timeout means provider IPs that rotate behind a CDN can drop out of the set; switching providers via `switch-provider.ps1` re-resolves and re-adds. If the provider you picked is itself the attacker's proxy (compromised LLM endpoint), this firewall trusts that endpoint by definition.
+**Limitations:** The 6h timeout means provider IPs that rotate behind a CDN can drop out of the set; switching providers via `switch-provider.ps1` re-resolves and re-adds. If the provider you picked is itself the attacker's proxy (compromised LLM endpoint), this firewall trusts that endpoint by definition. **DNS exfiltration is reduced, not eliminated:** the agent can no longer pick an arbitrary resolver, but a lookup through the permitted WSL resolver still forwards the (attacker-encoded) hostname upstream. Eliminating it needs a local allowlist-only resolver — see `docs/session_reports/SECFIX_DNS_SOUL_2026-07-14.md`.
 
 ### 3. Prompt injection to lateral movement
 
 **Attack:** A document the agent reads contains adversarial instructions ("then run `cat /mnt/c/Users/.../.aws/credentials`"). The agent obeys.
 
-**Control:** Multiple. `automount=false` in `/etc/wsl.conf` means the agent runtime cannot see `/mnt/c/` at all — it has no path to your Windows files. The agent runs as `clawuser` (non-root, no sudo membership — the `gpasswd -d clawuser sudo` is explicit). Docker is rootless. `SOUL.md` is mode 444 and its SHA-256 is pinned into the orchestrator's `agent.md`; on first turn the agent computes the live hash, compares to the pin, and refuses every tool call on mismatch.
+**Control:** Multiple. `automount=false` in `/etc/wsl.conf` means the agent runtime cannot see `/mnt/c/` at all — it has no path to your Windows files. The agent runs as `clawuser` (non-root, no sudo membership — the `gpasswd -d clawuser sudo` is explicit). There is **no Docker/container boundary** — Docker was removed in SECFIX_CLOSE_DOORS (decision A) because nothing ever ran a container; the agent is a `clawuser` process. `SOUL.md` is **root-owned, mode 444, and `chattr +i` (immutable)** — the agent's own UID cannot write, chmod, or delete-and-recreate it — and its SHA-256 is checked **in code before every turn** (`Test-SoulIntegrity` / the `openclaw` shim's turn gate); on mismatch the turn is refused before the agent runs. The same applies to the workspace `SOUL.md` that OpenClaw actually injects into the prompt.
 
-**Implementation:** `Step-ConfigureWslConf`, [`setup.ps1` line 243](setup.ps1#L243); `Step-CreateClawUser`, [line 274](setup.ps1#L274); `Step-InstallDocker`, [line 317](setup.ps1#L317); `Step-ApplySafetyRules`, [line 764](setup.ps1#L764). Hash substitution into orchestrator prompt: `bootstrap.ps1` `Get-SoulSha256()`.
+**Implementation:** `Step-ConfigureWslConf`; `Step-CreateClawUser`; `Step-ApplySafetyRules` (root-own + immutable + pin); `Step-FreezeInjectedSoul` (the injected copy); `Step-InstallTurnGate` (the `openclaw` shim + `clawfactory-turn-gate.sh`). Code gate: `Test-SoulIntegrity` in `resources/clawfactory-grants.ps1`, called from `Invoke-GatedAgentTurn`.
 
-**Limitations:** The agent can still write to its workspace folder (`~/.openclaw/factory/`) and the egress firewall allowlist (#2). An attacker who controls the prompt and accepts being limited to those destinations can still cause damage within scope. The integrity check assumes the user hasn't rotated `SOUL.md` without re-pinning the orchestrator prompt — `bootstrap.ps1` handles this on installer-driven changes; manual edits do not.
+**Limitations:** The agent can still write to its workspace folder and reach the egress allowlist (#2). An attacker who controls the prompt and accepts being limited to those destinations can still cause damage within scope. **The hash gate covers turns launched via the `openclaw` CLI** (which the shim intercepts); a turn driven through the gateway's `chatCompletions` HTTP endpoint is **not** gated — see the open items in `docs/session_reports/SECFIX_CLOSE_DOORS_2026-07-14.md`. Because the agent and the gateway share the `clawuser` UID, a deliberate full-path call to the real binary also bypasses the shim.
 
 ### 4. LAN-side agent hijacking
 
@@ -63,7 +63,7 @@ ClawFactory Secure Setup is built on **defense in depth**: multiple independent 
 
 **Implementation:** `Step-InstallOpenClaw`, [`setup.ps1` line 446](setup.ps1#L446).
 
-**Limitations:** The pin protects against a runtime swap of `install.sh` but **not** against a compromised upstream that publishes a malicious `install.sh` with a new hash that we then update. Pin rotation requires us to verify each new upstream version. Below the `install.sh` layer, the npm packages and apt repos it pulls are not pinned by us — that trust bottoms out at OpenClaw, npmjs.org, and download.docker.com.
+**Limitations:** The pin protects against a runtime swap of `install.sh` but **not** against a compromised upstream that publishes a malicious `install.sh` with a new hash that we then update. Pin rotation requires us to verify each new upstream version. Below the `install.sh` layer, the npm packages and apt repos it pulls are not pinned by us — that trust bottoms out at OpenClaw, npmjs.org, and the Ubuntu apt repos. (download.docker.com is no longer in that set — Docker was removed in SECFIX_CLOSE_DOORS, decision A.)
 
 ### 6. Filesystem snooping (agent reading Windows files)
 

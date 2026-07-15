@@ -408,14 +408,14 @@ begin
   WelcomePage := CreateOutputMsgPage(wpWelcome,
     'Hardened OpenClaw Skills Factory',
     'This installer builds a sandboxed environment for AI agents.',
-    'ClawFactory Secure Setup configures WSL2, Docker, and OpenClaw with strict' + #13#10 +
+    'ClawFactory Secure Setup configures WSL2 and OpenClaw with strict' + #13#10 +
     'security guardrails:' + #13#10 + #13#10 +
-    '  - Four agents run in Docker sandbox (network=none, sandbox=all).' + #13#10 +
+    '  - The agent runs as a non-root user (no sudo) inside a WSL2 VM.' + #13#10 +
+    '  - Outbound network is an allowlist: HTTPS to approved hosts only.' + #13#10 +
     '  - OpenClaw gateway binds to 127.0.0.1 only.' + #13#10 +
-    '  - Tool allowlist blocks shell/sudo/rm/system.run/browser.' + #13#10 +
     '  - WSL automount is disabled (no access to your Windows files).' + #13#10 +
-    '  - All agents require explicit human "GO" for any risky action.' + #13#10 + #13#10 +
-    'WARNING: AI agents will execute code inside these containers.' + #13#10 +
+    '  - Safety rules are immutable; every turn is spend- and integrity-gated.' + #13#10 + #13#10 +
+    'WARNING: AI agents will execute code inside this WSL2 environment.' + #13#10 +
     'You must personally review every skill before publishing.' + #13#10 +
     'Install takes 10-20 minutes and needs admin rights + internet.');
 

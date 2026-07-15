@@ -165,8 +165,9 @@ $fwScript = @"
 set -euo pipefail
 
 # Full baseHosts list -- must stay in sync with setup.ps1 Step-EgressFirewall.
-# 19 hosts: github (4) + openclaw/clawhub (4) + npm/node (3) + docker (3) + ubuntu apt (5).
-BASE_HOSTS="api.github.com github.com raw.githubusercontent.com codeload.github.com openclaw.ai docs.openclaw.ai clawhub.ai api.clawhub.ai registry.npmjs.org nodejs.org deb.nodesource.com registry-1.docker.io auth.docker.io production.cloudflare.docker.com archive.ubuntu.com security.ubuntu.com ports.ubuntu.com esm.ubuntu.com ppa.launchpad.net"
+# 16 hosts: github (4) + openclaw/clawhub (4) + npm/node (3) + ubuntu apt (5).
+# (Docker Hub hosts removed with Docker itself -- SECFIX_CLOSE_DOORS decision A.)
+BASE_HOSTS="api.github.com github.com raw.githubusercontent.com codeload.github.com openclaw.ai docs.openclaw.ai clawhub.ai api.clawhub.ai registry.npmjs.org nodejs.org deb.nodesource.com archive.ubuntu.com security.ubuntu.com ports.ubuntu.com esm.ubuntu.com ppa.launchpad.net"
 PROVIDER_HOST="$providerHostLiteral"
 
 # Resolve all allowlist hosts to IPv4s.

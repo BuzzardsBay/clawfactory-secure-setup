@@ -1152,38 +1152,40 @@ chmod 644 /etc/wsl.conf
     Save-Checkpoint 'DefaultUser'
 }
 
-function Step-InstallDocker {
-    Write-Log INFO 'Step 6: Installing Docker Engine (rootless for clawuser).'
-    # v1.0.12: every apt-get / curl is wrapped in `timeout 300`. The same
-    # protection is already present in Step-PreInstallOpenClawDeps (added
-    # v1.0.7); back-porting it here closes the remaining stall surface for
-    # Docker's apt mirror or the docker.com gpg fetch.
+function Step-InstallBaseDeps {
+    # Was Step-InstallDocker. DOCKER REMOVED (SECFIX_CLOSE_DOORS_2026-07-14,
+    # decision A): nothing ever ran a container. The agent is a clawuser PROCESS
+    # (Phase 0 + 2.5 VERIFIED, zero containers even during agent work), OpenClaw's
+    # own sandbox is off, the kill switch's container-stop matched nothing, and no
+    # healthcheck used it. It cost a large apt install + a rootless daemon while
+    # protecting nothing -- and the safety rules falsely claimed a Docker sandbox.
+    #
+    # TRAP (why this is NOT a plain deletion): the old Docker step also installed
+    # packages the rest of the product depends on --
+    #   * nftables          -> the egress firewall backend (/usr/sbin/nft). NOT
+    #                          installed anywhere else (Step-PreInstallOpenClawDeps
+    #                          installs iptables only). Removing it silently breaks
+    #                          the firewall on a fresh install.
+    #   * dbus-user-session -> systemd --user, which runs the gateway.
+    #   * loginctl enable-linger clawuser -> gateway survives between sessions.
+    # Those are preserved here. Dropped: uidmap / fuse-overlayfs / slirp4netns
+    # (rootless-Docker only), the docker apt repo + gpg key, docker-ce et al,
+    # dockerd-rootless-setuptool, and the DOCKER_HOST export in .bashrc.
+    Write-Log INFO 'Step 6: Installing base Linux dependencies (nftables + dbus-user-session; Docker removed).'
     $script = @'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 timeout 300 apt-get update -y
 timeout 300 apt-get install -y --no-install-recommends \
-    ca-certificates curl gnupg uidmap dbus-user-session \
-    iptables nftables fuse-overlayfs slirp4netns
-install -m 0755 -d /etc/apt/keyrings
-if [ ! -f /etc/apt/keyrings/docker.gpg ]; then
-    timeout 120 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    chmod a+r /etc/apt/keyrings/docker.gpg
-fi
-CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
-ARCH=$(dpkg --print-architecture)
-echo "deb [arch=$ARCH signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $CODENAME stable" \
-    > /etc/apt/sources.list.d/docker.list
-timeout 300 apt-get update -y
-timeout 300 apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
+    ca-certificates curl gnupg dbus-user-session \
+    iptables nftables
+# Linger so clawuser's systemd --user manager (and the gateway) survives between
+# sessions. Previously a side-effect of the Docker step; kept explicitly.
 loginctl enable-linger clawuser || true
-su - clawuser -c 'dockerd-rootless-setuptool.sh install --force' || true
-grep -q 'DOCKER_HOST=unix' /home/clawuser/.bashrc || \
-    echo 'export DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock' >> /home/clawuser/.bashrc
 '@
     $rc = Invoke-WslBash -Script $script -User 'root'
-    if ($rc -ne 0) { throw 'Docker install failed' }
-    Save-Checkpoint 'Docker'
+    if ($rc -ne 0) { throw 'Base dependency install failed' }
+    Save-Checkpoint 'BaseDeps'
 }
 
 function Step-PreInstallOpenClawDeps {
@@ -1219,8 +1221,8 @@ function Step-EgressFirewall {
         'openclaw.ai','docs.openclaw.ai','clawhub.ai','api.clawhub.ai',
         # npm + Node.js (for skills and updates)
         'registry.npmjs.org','nodejs.org','deb.nodesource.com',
-        # Docker Hub
-        'registry-1.docker.io','auth.docker.io','production.cloudflare.docker.com',
+        # (Docker Hub hosts removed with Docker itself -- SECFIX_CLOSE_DOORS decision A.
+        #  Nothing pulls images any more, so the allowlist no longer opens egress to them.)
         # v1.0.3: Ubuntu apt repos. apt-as-root currently bypasses the firewall
         # (clawuser-scoped), but listed here as defense-in-depth in case install.sh
         # or a future skill drops privileges before running apt.
@@ -2641,7 +2643,7 @@ Invoke-WithRollback {
     Write-Log INFO 'v1.0.13: Pre-created /tmp/openclaw-install.log owned by clawuser, mode 0666.'
     Step-CreateClawUser
     Step-SetDefaultUser
-    Step-InstallDocker
+    Step-InstallBaseDeps         # was Step-InstallDocker; Docker removed (SECFIX_CLOSE_DOORS), nftables/dbus-user-session preserved
     Step-PreInstallOpenClawDeps  # v1.0.4: apt-fetch make/g++/cmake/python3 BEFORE the firewall comes up
     Step-EgressFirewall
     Step-InstallOllama           # no-op unless Provider = ollama

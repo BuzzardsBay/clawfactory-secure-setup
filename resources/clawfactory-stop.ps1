@@ -1,8 +1,15 @@
-# ClawFactory Kill Switch [R6] - stops all agent containers + gateway, and
+# ClawFactory Kill Switch [R6] - stops any running agent turn + the gateway, and
 # unmounts every granted Windows folder so the agent can no longer see any of
 # your files.
 #
-# Safe to run any time. Preserves Docker, WSL, and unrelated containers.
+# Safe to run any time. Preserves WSL and anything unrelated to ClawFactory.
+#
+# SECFIX_CLOSE_DOORS_2026-07-14 (Docker decision A): this used to run
+#   `docker ps --filter label=clawfactory=1` -> `docker kill`
+# which NEVER matched anything -- no container was ever created with that label
+# (Phase 0 + 2.5 VERIFIED zero containers; the agent is a clawuser PROCESS). So
+# the kill switch claimed to kill agents but never did. Docker is now removed;
+# that no-op is replaced with the truthful equivalent: kill the agent processes.
 #
 # KILL != REVOKE: this unmounts your granted folders but LEAVES the grants in the
 # ledger (marked active). The next time ClawFactory starts, they are replayed
@@ -14,8 +21,10 @@ $ErrorActionPreference = 'Continue'
 Write-Host 'ClawFactory Kill Switch' -ForegroundColor Yellow
 Write-Host '-----------------------'
 
-Write-Host 'Stopping labeled agent containers...'
-wsl -d Ubuntu -u clawuser -- bash -lc 'ids=$(docker ps -q --filter label=clawfactory=1); if [ -n "$ids" ]; then docker kill $ids; else echo "(no running clawfactory containers)"; fi'
+Write-Host 'Stopping any running agent turn...'
+# The agent is a clawuser process, not a container. The [o] bracket keeps pkill's
+# -f pattern from matching this command's own shell.
+wsl -d Ubuntu -u clawuser -- bash -lc 'if pkill -u clawuser -f "[o]penclaw agent" 2>/dev/null; then echo "(killed running agent turn(s))"; else echo "(no running agent turns)"; fi'
 
 Write-Host 'Stopping OpenClaw gateway...'
 wsl -d Ubuntu -u clawuser -- bash -lc 'openclaw gateway stop 2>/dev/null || echo "(gateway not running)"'
@@ -36,6 +45,6 @@ try {
 
 Write-Host ''
 Write-Host 'Done. The agent can no longer see your files, the gateway is stopped,' -ForegroundColor Green
-Write-Host 'and agent containers are killed. Your folder grants are preserved and'  -ForegroundColor Green
+Write-Host 'and any running agent turn is killed. Your folder grants are preserved and' -ForegroundColor Green
 Write-Host 'will be re-mounted next time you start ClawFactory (use Revoke to remove'-ForegroundColor Green
 Write-Host 'a grant permanently).'                                                   -ForegroundColor Green
