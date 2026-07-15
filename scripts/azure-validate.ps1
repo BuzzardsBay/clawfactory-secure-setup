@@ -66,6 +66,20 @@ param(
     [switch]$SkipSuite
 )
 $ErrorActionPreference = 'Stop'
+
+# L5 -- DO NOT REDIRECT THIS SCRIPT'S STREAMS (no `*>&1`, no `2>&1`).
+# PowerShell 5.1 wraps a native command's stderr in ErrorRecords ONLY when that
+# stderr is redirected. az writes deprecation WARNINGS to stderr. Combine the two
+# with EAP=Stop and a harmless warning becomes a TERMINATING error -- which fires
+# `finally` and tears down a healthy VM mid-install, then reports the product
+# broken. That happened on cfv-0715b: `az vm create` succeeded, the installer was
+# running, and a "...will be removed in a future release." warning killed the run.
+# Call this script WITHOUT redirection; the caller's harness captures stderr
+# anyway. Related: L4 (never `2>&1` an az call whose stdout you parse).
+if ($MyInvocation.Line -match '\*>&1|2>&1') {
+    throw "Refusing to run: this script's streams are redirected ($($MyInvocation.Line.Trim())). See L5 -- an az stderr WARNING becomes a terminating error under EAP=Stop and will tear down a healthy VM. Re-run without redirection."
+}
+
 $run = "{0}-{1}" -f $VmName, (Get-Date -Format 'yyyyMMdd-HHmmss')
 $dir = Join-Path $OutDir $run
 New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -302,6 +316,19 @@ finally {
         foreach ($n in $nsgNames)  { Say "  deleting nsg $n" DarkGray;  az network nsg delete -g $ResourceGroup -n $n --output none 2>$null }
         foreach ($n in $diskNames) { Say "  deleting disk $n" DarkGray; az disk delete -g $ResourceGroup -n $n --yes --output none 2>$null }
 
+        # ARM deletes are eventually-consistent: a disk can still be listed for a
+        # while after `az disk delete` returns, especially when its VM was being
+        # deleted concurrently. Polling to settle before judging -- otherwise the
+        # assertion cries ORPHAN about a resource that is already on its way out,
+        # and a false alarm every run is how a real alarm gets ignored.
+        $survivors = @()
+        foreach ($try in 1..10) {
+            $survivors = @(az resource list -g $ResourceGroup --query "[].name" -o tsv 2>$null | Where-Object { $_ -like "*$VmName*" })
+            if ($survivors.Count -eq 0) { break }
+            Say ("  settling: still listed -> {0} (check {1}/10)" -f ($survivors -join ','), $try) DarkGray
+            Start-Sleep -Seconds 15
+        }
+
         # ---- PROOF: UNFILTERED. ------------------------------------------
         # The delete commands' output is NOT evidence -- they printed "deleted"
         # while deleting nothing. The evidence is the full listing, unfiltered,
@@ -309,10 +336,6 @@ finally {
         # thing that lied.
         $left = az resource list -g $ResourceGroup -o table | Out-String
         $vms  = az vm list -d -o table | Out-String
-
-        # Hard assertion: nothing named after this VM may survive. This turns a
-        # silent billing leak into a loud failure.
-        $survivors = @(az resource list -g $ResourceGroup --query "[].name" -o tsv 2>$null | Where-Object { $_ -like "*$VmName*" })
         $verdict = if ($survivors.Count -eq 0) { "CLEAN -- no resource matching '$VmName' remains." }
                    else { "!! ORPHANS STILL BILLING: $($survivors -join ', ') -- DELETE THESE BY HAND NOW !!" }
 

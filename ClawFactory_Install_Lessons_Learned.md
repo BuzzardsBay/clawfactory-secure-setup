@@ -134,3 +134,37 @@ the proof.
 stderr in ErrorRecords and merges Azure's warnings into the stream.
 
 **Rule:** never `2>&1` an `az` call whose stdout you intend to parse.
+
+## L5 — a PowerShell harness that redirects its own streams turns `az` WARNINGS into fatal errors
+
+**Discovered:** cfv-0715b diagnostic cycle (2026-07-15). **This one destroys healthy runs.**
+
+The harness was invoked as:
+
+```powershell
+.\scripts\azure-validate.ps1 ... *>&1 | Tee-Object -FilePath $log
+```
+
+`az vm create` **succeeded** — the VM provisioned and the installer was running (an
+independent `run-command` probe returned `STILL_INSTALLING`). But az also printed a
+deprecation warning (`WARNING: ... will be removed in a future release.`) to
+**stderr**. The `*>&1` merged stderr into the output stream; PowerShell 5.1 wraps
+redirected native-command stderr in `ErrorRecord`s (`NativeCommandError`); the
+script runs `$ErrorActionPreference = 'Stop'`; so the *warning* became a
+**terminating error**, `finally` fired, and the harness tore down a perfectly good
+VM ~6 minutes in — then would have reported the run failed.
+
+**Mechanism.** Native stderr becomes `ErrorRecord`s **only when redirected**. Left
+alone it flows to the console harmlessly. So the redirect *creates* the fault; the
+same script run without it is fine. This is L4's sibling: L4 breaks
+`ConvertFrom-Json`, L5 breaks the whole run.
+
+**Rule:** never `*>&1` or `2>&1` a PowerShell harness that calls `az` under
+`EAP=Stop`. Let stderr flow; capture it at the outer layer (the agent harness
+already captures it). `azure-validate.ps1` now refuses to start if it detects a
+redirect on its own invocation line.
+
+**Read-across:** any "az succeeded but my script threw" is this until proven
+otherwise. Check for a redirect before believing the product is broken — and note
+that a `finally`-based teardown makes this failure *expensive*: it deletes the
+evidence.
