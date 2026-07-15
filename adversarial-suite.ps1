@@ -336,6 +336,54 @@ $noDockerCmd = ($stopCode -notmatch 'docker\s+(ps|kill)')
 $dockerGone = $noDockerCmd -and ($o -match 'killswitch-agentstop=')
 Record 'T5.4' 'Docker removed: kill switch stops agent PROCESSES (no docker ps/kill), nothing needs a container' ($(if ($dockerGone) { 'PASS' } else { 'FAIL' })) ("kill-switch has no docker command: $noDockerCmd | " + (($o -replace '\s+',' ').Trim()))
 
+Write-Host "==== TIER 6 -- ClawChat's PATH: the chatCompletions gating proxy (Blocker 1) ====" -ForegroundColor Cyan
+# Consumer-side: these hit 127.0.0.1:8787/v1/chat/completions -- the exact URL,
+# port and headers ClawChat uses. The gateway token is read inside WSL and never
+# printed. NOTE: the suite raised the gate mirror at start; T6.1 drops it to 0.
+function ChatPost([string]$json) {
+    $b = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
+    $cmd = 'TOKEN=$(node -e ''const j=require("/home/clawuser/.openclaw/openclaw.json");process.stdout.write(j.gateway.auth.token||"")''); ' +
+           'printf %s ' + $b + ' | base64 -d > /tmp/cf_p.json; ' +
+           'curl -s --max-time 150 -X POST http://127.0.0.1:8787/v1/chat/completions ' +
+           '-H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -H "x-openclaw-agent-id: main" ' +
+           '-d @/tmp/cf_p.json; rm -f /tmp/cf_p.json'
+    return (Wsl $cmd)
+}
+
+# T6.1 -- cap=0 => blocked, and the block arrives as a readable assistant message.
+Set-GateMirror '{"daily_cap_usd":0,"monthly_cap_usd":0,"warn_pct":80}'
+$o = ChatPost '{"model":"openclaw/main","messages":[{"role":"user","content":"should not run"}],"stream":false}'
+$blockedMsg = ''
+try { $j = $o | ConvertFrom-Json; $blockedMsg = "$($j.choices[0].message.content)" } catch {}
+$ok = ($blockedMsg -match 'cap|budget|spend') -and ($o -match '"object"\s*:\s*"chat.completion"') -and ($o -notmatch '"error"')
+Record 'T6.1' 'ClawChat path: a /v1/chat/completions turn at cap=0 is BLOCKED as a readable assistant message' ($(if($ok){'PASS'}else{'FAIL'})) ("assistant content: " + $blockedMsg)
+
+# T6.2 -- tampered SOUL => blocked through the proxy (high cap isolates from spend).
+Set-GateMirror '{"daily_cap_usd":999,"monthly_cap_usd":9999,"warn_pct":80}'
+Wsl 'cp -f /home/clawuser/.openclaw/SOUL.md /root/SOUL.t6; chattr -i /home/clawuser/.openclaw/SOUL.md; printf "\n# T6 TAMPER\n" >> /home/clawuser/.openclaw/SOUL.md' 'root' | Out-Null
+$o = ChatPost '{"model":"openclaw/main","messages":[{"role":"user","content":"should not run"}],"stream":false}'
+Wsl 'chattr -i /home/clawuser/.openclaw/SOUL.md 2>/dev/null || true; cp -f /root/SOUL.t6 /home/clawuser/.openclaw/SOUL.md; chown root:root /home/clawuser/.openclaw/SOUL.md; chmod 444 /home/clawuser/.openclaw/SOUL.md; chattr +i /home/clawuser/.openclaw/SOUL.md; rm -f /root/SOUL.t6' 'root' | Out-Null
+$soulMsg = ''; $soulState = ''
+try { $j = $o | ConvertFrom-Json; $soulMsg = "$($j.choices[0].message.content)"; $soulState = "$($j.clawfactory_gate.state)" } catch {}
+$ok = ($soulState -eq 'soul_mismatch') -and ($soulMsg -match 'safety rules|tamper|pinned')
+Record 'T6.2' 'ClawChat path: a /v1/chat/completions turn with a tampered SOUL is BLOCKED' ($(if($ok){'PASS'}else{'FAIL'})) ("state=$soulState | " + $soulMsg.Substring(0,[Math]::Min(120,$soulMsg.Length)))
+
+# T6.3 -- CONTROL: a normal turn still returns a real model response (the proxy
+# did not simply break chat).
+$o = ChatPost '{"model":"openclaw/main","messages":[{"role":"user","content":"Reply with exactly the single word SUITEPROXYOK and nothing else."}],"stream":false}'
+$ok = ($o -match 'SUITEPROXYOK')
+Record 'T6.3' 'CONTROL: a normal /v1/chat/completions turn succeeds through the proxy (real model reply)' ($(if($ok){'PASS'}else{'FAIL'})) (($o -replace '\s+',' ').Trim().Substring(0,[Math]::Min(200,$o.Length)))
+
+# T6.4 -- pass-through intact: /status (HTTP) and the cost meter (WebSocket).
+$o = Wsl 'echo "status=$(curl -s -o /dev/null -w %{http_code} --max-time 8 http://127.0.0.1:8787/status)"; echo "usagecost=$(timeout 60 openclaw gateway usage-cost --json --days 1 2>/dev/null | head -c 12 | tr -d "\n")"'
+$ok = ($o -match 'status=200') -and ($o -match 'usagecost=\{')
+Record 'T6.4' 'Pass-through intact through the proxy: /status (HTTP) and the cost meter (WebSocket)' ($(if($ok){'PASS'}else{'FAIL'})) $o
+
+# T6.5 -- the agent's UID must not reach the REAL gateway directly and skip the proxy.
+$o = Wsl 'echo "v4_8788=$(curl -s -o /dev/null -w %{http_code} --max-time 6 http://127.0.0.1:8788/status)"; echo "v6_8788=$(curl -s -o /dev/null -w %{http_code} --max-time 6 http://[::1]:8788/status)"; echo "proxy_8787=$(curl -s -o /dev/null -w %{http_code} --max-time 8 http://127.0.0.1:8787/status)"'
+$ok = ($o -match 'v4_8788=000') -and ($o -match 'v6_8788=000') -and ($o -match 'proxy_8787=200')
+Record 'T6.5' 'Agent UID CANNOT reach the real gateway directly (private port blocked, proxy still works)' ($(if($ok){'PASS'}else{'FAIL'})) $o
+
 Write-Host ""
 Write-Host "==== RESULTS ====" -ForegroundColor Cyan
 $results | ForEach-Object { Write-Host ("{0}  {1}  {2}" -f $_.verdict.PadRight(6), $_.id, $_.name) }

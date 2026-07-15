@@ -1,0 +1,23 @@
+[Unit]
+# ClawFactory chatCompletions gating proxy. Owns 127.0.0.1:8787 -- the address
+# ClawChat, the openclaw CLI, the cost meter and Studio already use. The real
+# OpenClaw gateway is moved to a private loopback port via OPENCLAW_GATEWAY_PORT
+# in its own systemd --user drop-in, and is reachable only through this proxy.
+#
+# Runs as ROOT, deliberately: a different UID from the agent (clawuser) is what
+# lets the nft rule drop clawuser -> the real gateway port while the proxy still
+# reaches it. If this ran as clawuser, the agent could bypass the proxy (the
+# same-UID problem that keeps Door 2 open).
+Description=ClawFactory chatCompletions gating proxy (SOUL + spend gate on 127.0.0.1:8787)
+After=network-online.target
+
+[Service]
+Type=simple
+Environment=CLAWFACTORY_PROXY_PORT=8787
+Environment=CLAWFACTORY_REAL_GATEWAY_PORT=8788
+ExecStart=__NODE__ /usr/local/sbin/clawfactory-proxy.js
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

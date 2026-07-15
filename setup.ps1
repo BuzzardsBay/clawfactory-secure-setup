@@ -1287,6 +1287,15 @@ table inet clawfactory {
     chain output {
         type filter hook output priority 0; policy accept;
         meta skuid != clawuser return
+        # Blocker 1: the REAL OpenClaw gateway listens on a PRIVATE loopback port
+        # (8788) and is reachable only through the ClawFactory gating proxy, which
+        # owns 8787 and runs as ROOT. Drop clawuser's direct path to the private
+        # port so the agent cannot skip the proxy's SOUL + spend gate by talking
+        # to the gateway itself. Both loopback families -- the gateway binds
+        # 127.0.0.1 AND [::1]. Must precede the blanket `oifname lo accept`.
+        # The proxy is root, so `meta skuid != clawuser return` exempts it.
+        ip daddr 127.0.0.1 tcp dport 8788 drop
+        ip6 daddr ::1 tcp dport 8788 drop
         oifname `"lo`" accept
         # Defect 1: port 53 is restricted to the WSL resolver(s) only (populated
         # into @dns_resolvers from /etc/resolv.conf by the apply step). An agent
@@ -2208,6 +2217,39 @@ rm -f /tmp/freeze-injected-soul.sh
     Save-Checkpoint 'FreezeInjectedSoul'
 }
 
+function Step-InstallChatProxy {
+    # Blocker 1 (CHATCOMPLETIONS_PROXY): ClawChat -- the bundled desktop app --
+    # sends every turn to POST 127.0.0.1:8787/v1/chat/completions, which never
+    # runs the `openclaw agent` CLI, so the shim's gate never saw it: those turns
+    # had neither the spend cap nor the SOUL check. This installs a ClawFactory
+    # proxy that OWNS 8787 and gates that route with the same turn gate the shim
+    # runs, and moves the real gateway to private loopback 8788.
+    #
+    # Fail-CLOSED by construction: the real gateway no longer listens on 8787, so
+    # if the proxy is down nothing answers there -- ClawChat cannot fall through
+    # to an ungated gateway. The proxy runs as ROOT on purpose: a different UID
+    # from the agent is what lets the nft rule (Step-EgressFirewall) drop
+    # clawuser -> 8788 while the proxy still reaches it.
+    Write-Log INFO 'Step 15d [Blocker 1]: Installing the chatCompletions gating proxy (owns 8787; real gateway -> 8788).'
+    $resourceDir = Join-Path $PSScriptRoot 'resources'
+    $lfB64 = { param($p) [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(([IO.File]::ReadAllText($p)).Replace("`r`n","`n").Replace("`r","`n"))) }
+    $proxyB64 = & $lfB64 (Join-Path $resourceDir 'clawfactory-proxy.js')
+    $unitB64  = & $lfB64 (Join-Path $resourceDir 'clawfactory-proxy.service')
+    $instB64  = & $lfB64 (Join-Path $resourceDir 'install-chat-proxy.sh')
+    $drop = @"
+set -e
+mkdir -p /usr/local/sbin
+echo '$proxyB64' | base64 -d > /usr/local/sbin/clawfactory-proxy.js
+echo '$unitB64'  | base64 -d > /tmp/clawfactory-proxy.service
+echo '$instB64'  | base64 -d > /tmp/install-chat-proxy.sh
+bash /tmp/install-chat-proxy.sh
+rm -f /tmp/install-chat-proxy.sh
+"@
+    $rc = Invoke-WslBash -Script $drop -User 'root'
+    if ($rc -ne 0) { throw 'Failed to install the chatCompletions gating proxy (Blocker 1). The installer rolled the gateway back to 8787; ClawChat turns would be UNGATED - do not ship this install.' }
+    Save-Checkpoint 'InstallChatProxy'
+}
+
 function Step-WindowsFirewallDeny {
     # [R4] Belt-and-suspenders inbound-deny on gateway port.
     Write-Log INFO "Step 13 [R4]: Creating Windows Firewall inbound-deny rule on TCP/$GatewayPort."
@@ -2665,6 +2707,7 @@ Invoke-WithRollback {
     Step-ConfigureAgents         # step 15: stage agent.md prompts via bootstrap.ps1
     Step-InstallTurnGate         # Defect 3: gated openclaw shim (SOUL + spend on every turn, all callers)
     Step-FreezeInjectedSoul      # Defect 4: deliver + freeze the factory safety rules into the injected SOUL
+    Step-InstallChatProxy        # Blocker 1: gate ClawChat's HTTP path; real gateway -> private 8788
 }
 
 #--- Final gateway health gate ------------------------------------------------

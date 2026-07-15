@@ -281,6 +281,14 @@ sudo -u clawuser bash -c 'systemctl --user stop openclaw-gateway 2>/dev/null; sy
 # Clear immutable flags so the frozen safety files can be removed (Defect 2/4:
 # SOUL.md + workspace SOUL are root:root chattr +i; rm/deluser fail otherwise).
 chattr -i /home/clawuser/.openclaw/SOUL.md /home/clawuser/.openclaw/SOUL.md.sha256 /home/clawuser/.openclaw/workspace/SOUL.md 2>/dev/null
+# Stop + remove the chatCompletions gating proxy and put the gateway back on its
+# public port (Blocker 1). Order matters: drop the proxy BEFORE the drop-in, so
+# nothing is left owning 8787.
+systemctl disable --now clawfactory-proxy 2>/dev/null
+rm -f /etc/systemd/system/clawfactory-proxy.service /usr/local/sbin/clawfactory-proxy.js 2>/dev/null
+rm -f /home/clawuser/.config/systemd/user/openclaw-gateway.service.d/clawfactory-real-port.conf 2>/dev/null
+systemctl daemon-reload 2>/dev/null
+sudo -u clawuser XDG_RUNTIME_DIR=/run/user/1000 systemctl --user daemon-reload 2>/dev/null
 # Remove the ClawFactory turn-gate shim + helper scripts (Defect 3). Removing
 # /usr/bin/openclaw below drops the shim; the real .mjs is removed too.
 rm -f /usr/local/sbin/clawfactory-turn-gate.sh /usr/local/sbin/clawfactory-spend-check.js /usr/local/sbin/clawfactory-dns-resolvers.sh /usr/local/sbin/clawfactory-fw-apply.sh 2>/dev/null
