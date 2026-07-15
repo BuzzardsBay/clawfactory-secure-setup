@@ -56,7 +56,14 @@ param(
     [string]$AdminUser     = "clawadmin",
     [string]$OutDir        = (Join-Path (Split-Path -Parent $PSScriptRoot) "validation-runs"),
     [switch]$KeepVm,
-    [switch]$ApiKeyFromCredMan
+    [switch]$ApiKeyFromCredMan,
+    # DIAGNOSTIC MODE. -Payload runs a script as clawadmin in the SAME session and
+    # SAME boot as the installer, immediately after it exits -- so a FAILED install
+    # can be examined in the exact state it failed in. The suite's probe step
+    # reboots first, which would re-trigger auto-logon and could itself repair the
+    # very state under investigation; -SkipSuite omits it.
+    [string]$Payload       = "",
+    [switch]$SkipSuite
 )
 $ErrorActionPreference = 'Stop'
 $run = "{0}-{1}" -f $VmName, (Get-Date -Format 'yyyyMMdd-HHmmss')
@@ -113,9 +120,20 @@ if (`$h -ne '$ExpectSha256') { throw "HASH MISMATCH on VM: `$h" }
 
     # ---- 3. Install as clawadmin (NOT via run-command: WSL breaks under SYSTEM)
     Say "Configuring auto-logon + RunOnce wrapper so the installer runs as $AdminUser (WSL cannot run as SYSTEM)."
+    # Payload (diagnostic mode): staged now, executed by wrapper.cmd right after the
+    # installer exits -- same session, same boot, no reboot in between.
+    $payloadStage = ""; $payloadCall = ""
+    if ($Payload) {
+        if (-not (Test-Path $Payload)) { throw "-Payload '$Payload' not found." }
+        $pb64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content $Payload -Raw)))
+        $payloadStage = "[IO.File]::WriteAllBytes('C:\cfv\payload.ps1', [Convert]::FromBase64String('$pb64'))"
+        $payloadCall  = "powershell -NoProfile -ExecutionPolicy Bypass -File C:\cfv\payload.ps1 > C:\cfv\diag-out.txt 2>&1`r`necho DIAG_DONE > C:\cfv\DIAG_DONE.txt"
+        Say "  payload armed: $Payload (runs in-session immediately after the installer)" Yellow
+    }
     $wrapper = @"
 `$ErrorActionPreference='Stop'
 `$W='C:\cfv'
+$payloadStage
 # Auto-logon once, so a real interactive clawadmin session exists for WSL.
 `$k='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
 Set-ItemProperty `$k AutoAdminLogon '1'
@@ -127,14 +145,30 @@ Set-ItemProperty `$k AutoLogonCount 1 -Type DWord
 # proven in the v1.0.15+ cycles).
 @'
 @echo off
-"C:\cfv\setup.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="C:\cfv\install.log"
+"C:\cfv\setup.exe" /SILENT /SUPPRESSMSGBOXES /NORESTART /LOG="C:\cfv\install.log" /PROVIDER=claude /LICENSE=CF-TEST-TEST-TEST-TEST
 echo INSTALLER_EXIT=%ERRORLEVEL% > C:\cfv\INSTALLER_DONE.txt
+$payloadCall
 '@ | Set-Content `$W\wrapper.cmd -Encoding ASCII
 Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' CFV-Install-Wrapper "cmd /c `$W\wrapper.cmd"
 'auto-logon + RunOnce armed'
 "@
-    $r = az vm run-command invoke -g $ResourceGroup -n $VmName --command-id RunPowerShellScript --scripts $wrapper --query "value[0].message" -o tsv
-    Save 'arm.txt' $r
+    # L2: NEVER pass a multi-line script inline to --scripts -- az mangles it, and a
+    # mangled script can run PARTIALLY and return empty stdout, which reads as "did
+    # nothing" instead of "was corrupted". Write it to a file and use @file. This
+    # matters doubly in -Payload mode: the arm script carries an ~12 KB base64 blob.
+    # SECRET HANDLING: $wrapper embeds the generated VM admin password (auto-logon
+    # needs it in the registry). So the temp file goes OUTSIDE the repo -- never into
+    # $dir/validation-runs, which is committed evidence -- and is shredded right
+    # after the call, even on failure.
+    $armFile = Join-Path ([IO.Path]::GetTempPath()) ("cfv-arm-{0}.ps1" -f [Guid]::NewGuid())
+    try {
+        [IO.File]::WriteAllText($armFile, $wrapper, (New-Object Text.UTF8Encoding($false)))  # no BOM
+        $r = az vm run-command invoke -g $ResourceGroup -n $VmName --command-id RunPowerShellScript --scripts "@$armFile" --query "value[0].message" -o tsv
+    } finally {
+        Remove-Item $armFile -Force -ErrorAction SilentlyContinue
+    }
+    Save 'arm.txt' $r   # $r is just the 'auto-logon + RunOnce armed' echo -- no secret
+    if (-not $r) { throw "Arm step returned empty output -- suspect a mangled/oversized script (L2). Do not proceed: the wrapper may be half-written." }
     Say "Rebooting into the auto-logon session to run the installer..."
     az vm restart -g $ResourceGroup -n $VmName --output none
 
@@ -152,10 +186,29 @@ Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' CFV-I
     if (-not $done) { throw "Installer did not report INSTALLER_DONE within ~30 min. If run-command wedged this is a HARNESS failure -- retry on a fresh VM before blaming the product." }
     Save 'install.log' (az vm run-command invoke -g $ResourceGroup -n $VmName --command-id RunPowerShellScript --scripts "Get-Content C:\cfv\install.log -Tail 200" --query "value[0].message" -o tsv)
 
+    # ---- 4b. Diagnostic payload (same session/boot as the install) ---------
+    if ($Payload) {
+        Say "Waiting for the in-session diagnostic payload (DIAG_DONE)..."
+        $dgot = $false
+        foreach ($i in 1..20) {
+            $d = az vm run-command invoke -g $ResourceGroup -n $VmName --command-id RunPowerShellScript `
+                  --scripts "if (Test-Path C:\cfv\DIAG_DONE.txt) { Get-Content C:\cfv\diag-out.txt -Raw } else { 'PENDING' }" `
+                  --query "value[0].message" -o tsv 2>$null
+            if ($d -and $d -notmatch '^PENDING') { $dgot = $true; Save 'diag-out.txt' $d; Say "Diagnostic bundle captured." Green; break }
+            Say "  ...waiting for diagnostic ($i/20)" DarkGray
+            Start-Sleep -Seconds 30
+        }
+        if (-not $dgot) { Say "Diagnostic did not report -- evidence incomplete (harness issue, not a product verdict)." Red }
+        else { Write-Host "`n===== DIAGNOSTIC BUNDLE =====" -ForegroundColor Cyan; Get-Content (Join-Path $dir 'diag-out.txt') }
+    }
+
     # ---- 5. Clean-install evidence ---------------------------------------
     # Run the WSL-dependent checks from a clawadmin scheduled wrapper, writing to
     # a file that run-command (SYSTEM) can then read back. Never call wsl from
     # run-command directly.
+    if ($SkipSuite) {
+    Say "-SkipSuite: skipping the validation probe (on a failed install nothing it checks is reachable)." Yellow
+    } else {
     Say "Collecting clean-install evidence (headline isolation, install-path changes)..."
     $probe = Get-Content (Join-Path $PSScriptRoot 'azure-probe.ps1') -Raw
     $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($probe))
@@ -186,6 +239,7 @@ Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' CFV-P
     if (-not $got) { Say "Probe did not report -- harness issue; evidence incomplete." Red }
     Write-Host "`n===== PROBE OUTPUT =====" -ForegroundColor Cyan
     if (Test-Path (Join-Path $dir 'probe-out.txt')) { Get-Content (Join-Path $dir 'probe-out.txt') }
+    }
 }
 finally {
     # ---- 6. Teardown -- ALWAYS. A forgotten VM bills indefinitely. --------
