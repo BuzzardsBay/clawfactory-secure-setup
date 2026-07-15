@@ -648,6 +648,26 @@ function Invoke-WslBash {
 #--- Steps --------------------------------------------------------------------
 function Step-Preflight {
     Write-Log INFO "Step 1: Preflight checks. Selected provider: $($ThisProvider.DisplayName)."
+    # Assert every resource the later steps stream into WSL is actually present.
+    # These are read by Step-ApplySafetyRules / Step-InstallTurnGate /
+    # Step-FreezeInjectedSoul / Step-InstallChatProxy. A real bug shipped past
+    # review once: the steps were added across three security jobs but the
+    # matching .iss [Files] entries were not, so a fresh install aborted at
+    # step 15b with a bare FileNotFoundException and NO security controls. Fail
+    # here instead -- loud, named, and before anything is changed on the machine.
+    $required = @(
+        'safety-rules.md', 'openclaw-shim.sh', 'clawfactory-turn-gate.sh',
+        'clawfactory-spend-check.js', 'install-turn-gate.sh', 'freeze-injected-soul.sh',
+        'clawfactory-proxy.js', 'clawfactory-proxy.service', 'install-chat-proxy.sh'
+    )
+    $resDir  = Join-Path $PSScriptRoot 'resources'
+    $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $resDir $_)) })
+    if ($missing.Count -gt 0) {
+        throw ("Preflight: this build is missing security resources that the installer needs: {0}. " -f ($missing -join ', ') +
+               "They exist in the repo but were not bundled into the installer ([Files] in ClawFactory-Secure-Setup.iss). " +
+               "Installing anyway would produce an agent with NO turn gate, NO SOUL enforcement and NO chat proxy. Refusing.")
+    }
+    Write-Log INFO ("Preflight: all {0} security resources present." -f $required.Count)
     $os = Get-CimInstance Win32_OperatingSystem
     if ([int]$os.BuildNumber -lt 22000) {
         throw "Windows 11 required (detected build $($os.BuildNumber))."

@@ -59,6 +59,22 @@ Source: "resources\lobster.ico";             DestDir: "{app}\resources";  Flags:
 Source: "resources\ubuntu-rootfs.tar.gz";    DestDir: "{tmp}";            Flags: deleteafterinstall
 Source: "resources\ClawChat.exe";            DestDir: "{app}";            Flags: ignoreversion
 Source: "resources\openclaw-install.sh";     DestDir: "{app}\resources";  Flags: ignoreversion
+; --- Security-track resources (SECFIX DNS/SOUL -> gate coverage -> close-doors -> chat proxy).
+; setup.ps1 reads each of these from {app}\resources and base64-streams it into
+; WSL at install time. They MUST ship: without them Step-InstallTurnGate and
+; Step-InstallChatProxy throw FileNotFoundException inside Invoke-WithRollback,
+; so the install ABORTS and every security control is absent. (This was a real
+; bug: the steps were added across three jobs and the [Files] entries were not --
+; caught by the Azure staging preflight, before a VM was ever provisioned.
+; Step-Preflight now asserts these exist, so a future omission fails fast and loud.)
+Source: "resources\openclaw-shim.sh";          DestDir: "{app}\resources";  Flags: ignoreversion
+Source: "resources\clawfactory-turn-gate.sh";  DestDir: "{app}\resources";  Flags: ignoreversion
+Source: "resources\clawfactory-spend-check.js"; DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\install-turn-gate.sh";      DestDir: "{app}\resources";  Flags: ignoreversion
+Source: "resources\freeze-injected-soul.sh";   DestDir: "{app}\resources";  Flags: ignoreversion
+Source: "resources\clawfactory-proxy.js";      DestDir: "{app}\resources";  Flags: ignoreversion
+Source: "resources\clawfactory-proxy.service"; DestDir: "{app}\resources";  Flags: ignoreversion
+Source: "resources\install-chat-proxy.sh";     DestDir: "{app}\resources";  Flags: ignoreversion
 
 [Run]
 ; [R5] No API key on the command line - setup.ps1 reads from Windows Credential Manager.
