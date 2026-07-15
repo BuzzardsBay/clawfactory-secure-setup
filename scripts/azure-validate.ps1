@@ -79,9 +79,15 @@ try {
     # ---- 1. Provision -----------------------------------------------------
     Say "Provisioning $VmName ($Size, $Image, security-type Standard, non-zonal)..."
     $pw = -join ((65..90) + (97..122) + (48..57) + (33,35,37,42) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
+    # L3: every child resource gets a DETERMINISTIC, explicit name at create time.
+    # Without this the OS disk gets a random GUID suffix, which is why the old
+    # teardown fell back to a `--query [?starts_with(...)]` filter -- the filter the
+    # Windows shell mangled into matching nothing while printing "deleted".
+    # Named here => deletable by name in `finally` even if create dies half-way.
     az vm create -g $ResourceGroup -n $VmName --image $Image --size $Size `
         --admin-username $AdminUser --admin-password $pw `
         --security-type Standard --public-ip-sku Standard --nsg-rule NONE `
+        --os-disk-name "$VmName-osdisk" --public-ip-address "$VmName-pip" --nsg "$VmName-nsg" `
         --subnet (az network vnet subnet show -g $ResourceGroup --vnet-name bake-vmVNET -n bake-vmSubnet --query id -o tsv) `
         --output none
     Say "Provisioned. (admin password generated in-memory; never printed or written)" Green
@@ -186,23 +192,80 @@ finally {
     if ($KeepVm) {
         Say "!! -KeepVm SET: $VmName IS STILL RUNNING AND BILLING. Delete it when done. !!" Red
     } else {
-        Say "Tearing down $VmName (VM + NIC + public IP + disk + NSG)..." Yellow
-        az vm delete -g $ResourceGroup -n $VmName --yes --force-deletion true --output none 2>$null
-        foreach ($t in @('nic','public-ip','disk','nsg')) {
-            switch ($t) {
-                'nic'       { az network nic list -g $ResourceGroup --query "[?starts_with(name,'$VmName')].name" -o tsv | ForEach-Object { az network nic delete -g $ResourceGroup -n $_ --output none 2>$null } }
-                'public-ip' { az network public-ip list -g $ResourceGroup --query "[?starts_with(name,'$VmName')].name" -o tsv | ForEach-Object { az network public-ip delete -g $ResourceGroup -n $_ --output none 2>$null } }
-                'disk'      { az disk list -g $ResourceGroup --query "[?starts_with(name,'$VmName')].name" -o tsv | ForEach-Object { az disk delete -g $ResourceGroup -n $_ --yes --output none 2>$null } }
-                'nsg'       { az network nsg list -g $ResourceGroup --query "[?starts_with(name,'$VmName')].name" -o tsv | ForEach-Object { az network nsg delete -g $ResourceGroup -n $_ --output none 2>$null } }
+        # ---- L3 HARDENED TEARDOWN ----------------------------------------
+        # RULE (Lessons Learned L3): delete by EXPLICIT NAME. Never let a
+        # `--query "[?starts_with(...)]"` filter decide what gets deleted -- the
+        # Windows shell mangles it, it matches nothing, and the loop cheerfully
+        # prints "deleted" while four resources keep billing. That happened.
+        #
+        # Names come from two independent sources, unioned:
+        #   1. the VM's OWN record (az vm show) -- authoritative while it exists
+        #   2. the deterministic names pinned at create time -- still correct if
+        #      the VM never fully created, which is exactly when orphans hide
+        Say "Tearing down $VmName -- resolving child resources by explicit name..." Yellow
+
+        $nicNames  = New-Object System.Collections.Generic.List[string]
+        $ipNames   = New-Object System.Collections.Generic.List[string]
+        $diskNames = New-Object System.Collections.Generic.List[string]
+        $nsgNames  = New-Object System.Collections.Generic.List[string]
+        function AddName($list, $n) { if ($n -and -not $list.Contains($n)) { $list.Add($n) } }
+
+        # (1) authoritative: ask the VM what it actually owns, BEFORE deleting it
+        $vmJson = az vm show -g $ResourceGroup -n $VmName -o json 2>$null
+        if ($vmJson) {
+            $vm = $vmJson | ConvertFrom-Json          # no 2>&1 -- L4
+            AddName $diskNames $vm.storageProfile.osDisk.name
+            foreach ($ref in @($vm.networkProfile.networkInterfaces)) {
+                $nicName = $ref.id.Split('/')[-1]
+                AddName $nicNames $nicName
+                $nicJson = az network nic show -g $ResourceGroup -n $nicName -o json 2>$null
+                if ($nicJson) {
+                    $nic = $nicJson | ConvertFrom-Json
+                    if ($nic.networkSecurityGroup) { AddName $nsgNames $nic.networkSecurityGroup.id.Split('/')[-1] }
+                    foreach ($cfg in @($nic.ipConfigurations)) {
+                        if ($cfg.publicIPAddress) { AddName $ipNames $cfg.publicIPAddress.id.Split('/')[-1] }
+                    }
+                }
             }
+        } else {
+            Say "  az vm show returned nothing -- VM absent or create failed. Using pinned names." DarkGray
         }
-        # Teardown PROOF -- a close-out that says "torn down" without this listing
-        # is not acceptable.
-        $left = az resource list -g $ResourceGroup --query "[].{name:name,type:type}" -o table | Out-String
-        $vms  = az vm list -d --query "[].{name:name,power:powerState}" -o table | Out-String
-        Save 'teardown-proof.txt' ("=== resources remaining in $ResourceGroup ===`n$left`n=== VMs in subscription (must be empty) ===`n$vms")
-        Write-Host "`n===== TEARDOWN PROOF =====" -ForegroundColor Yellow
+        # (2) belt-and-braces: the names we pinned at create time + the az CLI's
+        #     own NIC naming convention. Catches a half-created VM's orphans.
+        AddName $nicNames  "${VmName}VMNic"
+        AddName $ipNames   "$VmName-pip"
+        AddName $nsgNames  "$VmName-nsg"
+        AddName $diskNames "$VmName-osdisk"
+
+        Say ("  targets -> nic: {0} | pip: {1} | nsg: {2} | disk: {3}" -f `
+             ($nicNames -join ','), ($ipNames -join ','), ($nsgNames -join ','), ($diskNames -join ',')) DarkGray
+
+        # Order matters: VM -> NIC -> (PIP, NSG) -> disk. A child with a live
+        # parent refuses to delete, which is another way orphans survive.
+        az vm delete -g $ResourceGroup -n $VmName --yes --force-deletion true --output none 2>$null
+        foreach ($n in $nicNames)  { Say "  deleting nic $n" DarkGray;  az network nic delete -g $ResourceGroup -n $n --output none 2>$null }
+        foreach ($n in $ipNames)   { Say "  deleting pip $n" DarkGray;  az network public-ip delete -g $ResourceGroup -n $n --output none 2>$null }
+        foreach ($n in $nsgNames)  { Say "  deleting nsg $n" DarkGray;  az network nsg delete -g $ResourceGroup -n $n --output none 2>$null }
+        foreach ($n in $diskNames) { Say "  deleting disk $n" DarkGray; az disk delete -g $ResourceGroup -n $n --yes --output none 2>$null }
+
+        # ---- PROOF: UNFILTERED. ------------------------------------------
+        # The delete commands' output is NOT evidence -- they printed "deleted"
+        # while deleting nothing. The evidence is the full listing, unfiltered,
+        # read with your own eyes. No --query here on purpose: a query is the
+        # thing that lied.
+        $left = az resource list -g $ResourceGroup -o table | Out-String
+        $vms  = az vm list -d -o table | Out-String
+
+        # Hard assertion: nothing named after this VM may survive. This turns a
+        # silent billing leak into a loud failure.
+        $survivors = @(az resource list -g $ResourceGroup --query "[].name" -o tsv 2>$null | Where-Object { $_ -like "*$VmName*" })
+        $verdict = if ($survivors.Count -eq 0) { "CLEAN -- no resource matching '$VmName' remains." }
+                   else { "!! ORPHANS STILL BILLING: $($survivors -join ', ') -- DELETE THESE BY HAND NOW !!" }
+
+        Save 'teardown-proof.txt' ("=== resources remaining in $ResourceGroup (UNFILTERED) ===`n$left`n=== VMs in subscription, all RGs (UNFILTERED, must be empty) ===`n$vms`n=== verdict ===`n$verdict")
+        Write-Host "`n===== TEARDOWN PROOF (unfiltered) =====" -ForegroundColor Yellow
         Write-Host $left; Write-Host $vms
+        if ($survivors.Count -eq 0) { Say $verdict Green } else { Say $verdict Red }
         Say "Evidence written to $dir" Green
     }
 }
