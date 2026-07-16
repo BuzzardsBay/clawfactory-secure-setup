@@ -1929,8 +1929,6 @@ echo "[gateway-preconfig] gateway.{mode,bind,port} set"
     $gatewayInstall = @'
 set -e
 set -o pipefail
-LOG=/tmp/openclaw-install.log
-mkdir -p "$(dirname "$LOG")"
 
 # --- GUARD (v1.0.39, Task 2): the systemd user-unit chain MUST be clawuser-owned.
 # We run as clawuser here; `openclaw gateway install` will write
@@ -1986,17 +1984,29 @@ fi
 # user bus via XDG_RUNTIME_DIR (the pattern the rest of the tree uses) so they
 # actually succeed, AND (2) keep `|| true` as the safety net regardless -- because
 # whether XDG is the true cause is unconfirmed and the /status poll decides health
-# either way. Their stderr still `tee`s to the log, so which (if any) fails is on
-# record. The /status poll is deliberately NOT tightened.
+# either way.
+#
+# v1.0.41 (false-failure fix): these three lines previously ended `2>&1 | tee -a
+# "$LOG"` with $LOG=/tmp/openclaw-install.log. That log is created ROOT-owned by the
+# npm-install step (its `> >(tee /tmp/openclaw-install.log)` runs as root); this
+# block runs as clawuser, so under `set -o pipefail` the tee failed "Permission
+# denied" and the block surfaced exit 1 EVEN THOUGH the gateway was up (unit
+# created, service active) -- the PowerShell throw below then wrongly reported "did
+# not create the unit" (cfv-0716q, verbatim). The tee was pure redundancy:
+# Invoke-WslBash already captures every stdout/stderr line into
+# C:\ProgramData\ClawFactory\install.log. Dropped it; `2>&1` still merges each
+# command's stderr into this block's stdout, so which (if any) systemctl call fails
+# is still on record in the real install log. The /status poll is deliberately NOT
+# tightened.
 XDG=/run/user/$(id -u clawuser 2>/dev/null || echo 1000)
 echo "[gateway-install] systemctl --user daemon-reload"
-XDG_RUNTIME_DIR="$XDG" systemctl --user daemon-reload 2>&1 | tee -a "$LOG" || true
+XDG_RUNTIME_DIR="$XDG" systemctl --user daemon-reload 2>&1 || true
 
 echo "[gateway-install] systemctl --user enable openclaw-gateway.service"
-XDG_RUNTIME_DIR="$XDG" systemctl --user enable openclaw-gateway.service 2>&1 | tee -a "$LOG" || true
+XDG_RUNTIME_DIR="$XDG" systemctl --user enable openclaw-gateway.service 2>&1 || true
 
 echo "[gateway-install] systemctl --user restart openclaw-gateway.service"
-XDG_RUNTIME_DIR="$XDG" systemctl --user restart openclaw-gateway.service 2>&1 | tee -a "$LOG" || true
+XDG_RUNTIME_DIR="$XDG" systemctl --user restart openclaw-gateway.service 2>&1 || true
 
 # Per #65184, give the unit ~5s to fully bind before probing is-active. This loop
 # is a soft, best-effort check (it exits 0 either way); the authoritative health
@@ -2015,17 +2025,27 @@ exit 0
 '@
     $rcGateway = Invoke-WslBash -Script $gatewayInstall -User $WslUser
     if ($rcGateway -ne 0) {
-        # v1.0.40: the block now exits non-zero ONLY for a genuine, non-recoverable
-        # failure -- the ownership guard (exit 90) or a missing unit file. The three
-        # belt-and-suspenders systemctl calls are tolerated (`|| true`) so they no
-        # longer reach a fatal throw (that was the v1.0.39 regression: a benign
-        # systemctl non-zero aborted the install AFTER the unit was created and the
-        # message wrongly said "unit not created"). Abort HERE, at the point of
-        # failure, with the case that actually happened. Health is the /status poll.
+        # The ownership guard (exit 90) is always a real, non-recoverable failure:
+        # the unit could NOT have been written, so fail loud with that exact case.
         if ($rcGateway -eq 90) {
             throw "gateway install aborted: the ownership guard tripped (exit 90) -- /home/clawuser/.config/systemd/user is not clawuser-owned, so 'openclaw gateway install' (runs as clawuser) cannot write the unit (EACCES). See the FATAL ownership-guard lines in the install log at $LogFile."
         }
-        throw "gateway install failed (exit=$rcGateway): 'openclaw gateway install' did not create the unit /home/clawuser/.config/systemd/user/openclaw-gateway.service. See the [wsl:clawuser ...] lines in the install log at $LogFile for the exact error."
+        # v1.0.41 (false-failure fix): a NON-90 non-zero block exit is NOT sufficient
+        # to declare failure. On a clean box the gateway genuinely comes up (unit
+        # created 923 B clawuser-owned, service active) yet the block could still
+        # surface a benign non-zero -- historically the root-owned-log `tee` under
+        # pipefail (now removed, A1), and more generally the best-effort systemctl
+        # calls in a no-user-bus context. So gate on the INVARIANT (does the unit
+        # file exist?), not on the noisy block exit code. If the unit is genuinely
+        # missing, that is the real failure and we say so accurately. If it exists,
+        # WARN and defer to the /status health poll below -- the authority -- exactly
+        # as the block's internal note and v1.0.38 WARN-not-throw intended.
+        $unit = '/home/clawuser/.config/systemd/user/openclaw-gateway.service'
+        $rcUnit = Invoke-WslBash -Script "test -f $unit" -User $WslUser
+        if ($rcUnit -ne 0) {
+            throw "gateway install failed (exit=$rcGateway): 'openclaw gateway install' did not create the unit $unit (verified missing with test -f). See the [wsl:clawuser ...] lines in the install log at $LogFile for the exact error."
+        }
+        Write-Log WARN "gateway-install block exited $rcGateway, but the unit file $unit exists (verified with test -f). This is the known-benign non-zero block exit (best-effort systemctl in a no-user-bus context); NOT a gateway failure. Deferring the verdict to the /status health poll below, which is the authority."
     }
 
     # Poll gateway health via curl /status for up to ~120s (13 attempts, 10s
