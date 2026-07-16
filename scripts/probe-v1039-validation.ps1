@@ -93,6 +93,15 @@ Try-Task "TASK 2 -- INSTALL-COMPLETION GATE" {
     W ("gateway-install FATAL lines (must be none): " + (($il | Select-String -Pattern '\[gateway-install\] FATAL' | Out-String).Trim()))
     W "--- A3/B2.5: the three systemctl --user lines + any nearby error (for the record -- which/if any failed) ---"
     W (($il | Select-String -Pattern 'systemctl --user (daemon-reload|enable|restart)|Failed to connect to bus|Failed to (enable|reload|restart)|Interactive authentication|No such file' -Context 0,1 | Select-Object -Last 12 | Out-String).Trim())
+    W "--- FULL gateway-install section of install.log (from the install cmd to the wsl exit code -- resolves the exit=1-yet-unit-exists contradiction) ---"
+    $gwStart = ($il | Select-String -Pattern '\[gateway-install\] openclaw gateway install' | Select-Object -Last 1).LineNumber
+    if ($gwStart) {
+        $tail = $il[($gwStart - 1)..([Math]::Min($il.Count - 1, $gwStart + 40))]
+        # keep only the gateway-relevant + exit-code lines
+        W (($tail | Where-Object { $_ -match 'gateway-install|wsl:clawuser (exit|err)|openclaw-gateway|systemctl|active|EACCES|rc=|exit' } | Out-String).Trim())
+    } else { W "(no [gateway-install] openclaw gateway install line found)" }
+    W "--- the [wsl:clawuser exit] value(s) around the gateway step (THE load-bearing number) ---"
+    W (($il | Select-String -Pattern '\[wsl:clawuser exit\]' | Select-Object -Last 4 | Out-String).Trim())
 }
 W ""
 W ("=====> TASK 2 GATE: " + $(if ($gateOk) { 'PASS -- proceeding to the full suite' } else { 'FAIL -- STOPPING. Tasks 3-9 skipped (no point validating a broken install).' }))
