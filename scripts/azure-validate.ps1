@@ -292,13 +292,36 @@ try {
         Say "Waiting for the in-session diagnostic payload (DIAG_DONE)..."
         $dgot = $false
         foreach ($i in 1..20) {
-            $d = Invoke-Rc "if (Test-Path C:\cfv\DIAG_DONE.txt) { Get-Content C:\cfv\diag-out.txt -Raw } else { 'PENDING' }" 'poll-diag'
-            if ($d -and $d -notmatch '^PENDING') { $dgot = $true; Save 'diag-out.txt' $d; Say "Diagnostic bundle captured." Green; break }
+            $d = Invoke-Rc "if (Test-Path C:\cfv\DIAG_DONE.txt) { 'DIAG_READY' } else { 'PENDING' }" 'poll-diag'
+            if ($d -match 'DIAG_READY') { $dgot = $true; Say "Diagnostic finished on the VM." Green; break }
             Say "  ...waiting for diagnostic ($i/20)" DarkGray
             Start-Sleep -Seconds 30
         }
         if (-not $dgot) { Say "Diagnostic did not report -- evidence incomplete (harness issue, not a product verdict)." Red }
-        else { Write-Host "`n===== DIAGNOSTIC BUNDLE =====" -ForegroundColor Cyan; Get-Content (Join-Path $dir 'diag-out.txt') }
+        else {
+            # Do NOT return the bundle through run-command's `message`: that field is
+            # capped at ~4 KB, and it keeps only the TAIL. cfv-0715g's bundle came back
+            # silently truncated to its last 4116 bytes -- sections 3.1-3.4 simply
+            # vanished, with no error and no marker to tell you they were missing.
+            # Push the file to blob storage from the VM and pull it down whole.
+            Say "Retrieving the bundle via blob (run-command's message field truncates at ~4 KB)..."
+            $dName = "diag-out-$VmName.txt"
+            $dSas  = az storage blob generate-sas --account-name $StorageAcct --account-key $key `
+                       --container-name $Container --name $dName --permissions cw --expiry $exp -o tsv
+            $dUrl  = "https://$StorageAcct.blob.core.windows.net/$Container/$dName`?$dSas"
+            $up = Invoke-Rc ("Invoke-WebRequest -Uri '$dUrl' -Method Put -Headers @{'x-ms-blob-type'='BlockBlob'} " +
+                             "-InFile C:\cfv\diag-out.txt -UseBasicParsing | Out-Null; " +
+                             "`"UPLOADED=`$((Get-Item C:\cfv\diag-out.txt).Length)`"") 'upload-diag'
+            if ($up -notmatch 'UPLOADED=\d+') { throw "Diagnostic upload did not confirm: $up" }
+            Say "  $up" DarkGray
+            az storage blob download --account-name $StorageAcct --account-key $key `
+                --container-name $Container --name $dName --file (Join-Path $dir 'diag-out.txt') --overwrite --output none
+            $local = (Get-Item (Join-Path $dir 'diag-out.txt')).Length
+            Say "Diagnostic bundle captured: $local bytes locally." Green
+            if ("$up" -notmatch [regex]::Escape("UPLOADED=$local")) { Say "  WARNING: local size $local does not match the VM's -- bundle may be incomplete." Red }
+            Write-Host "`n===== DIAGNOSTIC BUNDLE =====" -ForegroundColor Cyan
+            Get-Content (Join-Path $dir 'diag-out.txt')
+        }
     }
 
     # ---- 5. Clean-install evidence ---------------------------------------

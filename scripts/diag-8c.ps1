@@ -22,9 +22,12 @@
 $ErrorActionPreference = 'Continue'
 $env:WSL_UTF8 = 1   # else wsl -l -v emits UTF-16 and reads back as garbage
 
-function H($t) { Write-Output ""; Write-Output "########## $t ##########" }
+# NB: do NOT name this `H`. PowerShell ships `h` as a built-in ALIAS for
+# Get-History, and aliases take precedence over functions -- so every `H "..."`
+# call silently ran `Get-History "..."` and threw instead of printing a header.
+function Section($t) { Write-Output ""; Write-Output "########## $t ##########" }
 
-H "0. WINDOWS SIDE -- context"
+Section "0. WINDOWS SIDE -- context"
 Write-Output "--- date ---"; Get-Date -Format 'u'
 Write-Output "--- whoami (must NOT be SYSTEM; WSL refuses to run as LocalSystem) ---"; whoami
 Write-Output "--- INSTALLER_DONE ---"; Get-Content C:\cfv\INSTALLER_DONE.txt -ErrorAction SilentlyContinue
@@ -35,7 +38,7 @@ Write-Output "--- checkpoint (how far the installer got) ---"
 Get-ChildItem -Path C:\ProgramData\ClawFactory -Filter *.json -Recurse -ErrorAction SilentlyContinue |
     ForEach-Object { $_.FullName; Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue }
 
-H "0b. The WSL keepalive task -- setup.ps1:2771 registers it AFTER the gateway step"
+Section "0b. The WSL keepalive task -- setup.ps1:2771 registers it AFTER the gateway step"
 # v1.0.2 lore: 'ClawFactory WSL Host' runs `wsl -d Ubuntu -u clawuser -- sleep
 # infinity` AT LOGON to hold one session open so the session-exit shutdown never
 # fires. If it does not exist / has never run at gateway-start time, nothing is
@@ -150,7 +153,7 @@ echo "--- was /etc/pam.d/su|login wired for pam_systemd? ---"
 grep -rn 'pam_systemd' /etc/pam.d/ 2>&1 | head
 '@
 
-H "1-3. LINUX SIDE -- one wsl invocation (see DESIGN NOTE above)"
+Section "1-3. LINUX SIDE -- one wsl invocation (see DESIGN NOTE above)"
 # TRANSPORT NOTE -- do NOT stage this through a Windows temp file + wslpath.
 # ClawFactory sets [automount] enabled=false in /etc/wsl.conf (setup.ps1
 # Assert-WslAutomountDisabled even THROWS if it cannot verify it). So /mnt/c does
@@ -164,4 +167,4 @@ $b64  = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($lf))
 Write-Output "(bundle: $($lf.Length) bytes -> $($b64.Length) b64 chars, passed inline; /mnt/c is intentionally absent)"
 wsl -d Ubuntu -u root -- bash -c "echo $b64 | base64 -d | bash" 2>&1
 
-H "DIAG COMPLETE"
+Section "DIAG COMPLETE"
