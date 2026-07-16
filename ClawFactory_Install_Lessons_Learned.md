@@ -338,3 +338,35 @@ don't test often.
 - A silent success signal is the same anti-pattern one layer up: setup.exe exited 0 on a
   failed install because Inno swallowed the `[Run]` child's exit code. Assert on the honest
   marker (`INSTALLER_DONE=success`), never on the lossy proxy.
+
+## L10 -- an external activation call in the install path leaks state that teardown must reclaim
+
+**Discovered:** v1.0.40 validation blocked (2026-07-16). The installer activates a license at
+InitializeWizard via `POST /activate {key, machine_id, product}`; `machine_id` is the Windows
+MachineGuid. Every validation VM consumed a license slot, and deleting the VM did NOT free it
+-- so `CF-TEST-TEST-TEST-TEST` hit its 10-machine cap and blocked a whole run at the license
+gate, with a misleading "missing or invalid /LICENSE=" abort (the arg was present; the slot
+was full).
+
+**Rule:** any install-path call to an EXTERNAL service that registers per-machine state
+(license activation, device enrolment, a seat/slot) leaks that state on a throwaway VM. The
+teardown that reclaims the VM must ALSO reclaim the external state -- here, `POST /deactivate`
+with the SAME machine_id the install activated (read it from the VM while it is alive; a
+mismatched id frees nothing). A failed reclaim is a logged warning, not a teardown failure,
+but it MUST be visible or the leak is silent until the cap blocks the next run.
+
+## L11 -- gate on the invariant, not on a shell block's exit code (a benign `tee` can fail it)
+
+**Discovered:** v1.0.40 cfv-0716q (2026-07-16). The gateway-install block SUCCEEDS (unit
+installed, service active) but exits 1 because `... | tee -a /tmp/openclaw-install.log` fails
+"Permission denied" (the log is root-owned; the block runs as clawuser). The install then
+throws "did not create the unit" -- which it plainly did (923 B, observed).
+
+**Rule:** do not treat a multi-command shell block's raw exit code as a success/fail gate
+when the block does belt-and-suspenders work (logging, best-effort restarts). Gate on the
+ACTUAL invariant -- here, the unit file existing + the /status poll -- and let noisy,
+non-load-bearing failures (a `tee` to an unwritable log, a systemctl call with no user bus)
+be non-fatal. A redundant `tee` to a root-owned file is exactly the kind of benign failure
+that should never fail an install; if the [wsl] capture already logs the output, drop the
+tee. Related: fail-loud scope (L9) -- distinguish the authoritative check from the
+belt-and-suspenders.
