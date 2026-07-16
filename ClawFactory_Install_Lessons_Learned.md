@@ -270,3 +270,34 @@ transport was fine and the script had simply thrown. Use `value[].message`.
 
 `azure-validate.ps1` now funnels every run-command through one `Invoke-Rc` helper
 that does both.
+
+## L8 — `Where-Object | Set-Content` silently no-ops when the filter empties the pipeline
+
+**Discovered:** cfv-0715p (2026-07-15), in the sweep-list guard added the same session.
+
+The sweep list (`validation-runs/ACTIVE_VMS.txt`) exists because a **killed** process
+never runs `finally` — that is how cfv-0715d ended up torn down by hand while billing.
+Entries are removed once an unfiltered listing proves the VM gone:
+
+```powershell
+(Get-Content $f) | Where-Object { $_ -notmatch "^$VmName\s" } | Set-Content $f   # WRONG
+```
+
+When the filter removes the **only** line, `Where-Object` emits nothing, so
+`Set-Content`'s process block **never runs** and the file is left **unchanged**. The
+list therefore only ever cleared when 2+ VMs were registered — and a stale entry makes
+the sweep cry wolf, which is how a real alarm gets ignored. (Same failure family as the
+teardown assertion that reported an ORPHAN before ARM had settled.)
+
+**Rule:** when rewriting a file by filtering it, **materialise the survivors and write
+unconditionally** — never pipe a filter straight into `Set-Content`:
+
+```powershell
+$keep = @(Get-Content $f | Where-Object { $_.Trim() -and $_ -notmatch "^$VmName\s" })
+[IO.File]::WriteAllText($f, (($keep -join "`r`n") + $(if ($keep.Count) { "`r`n" } else { "" })), (New-Object Text.ASCIIEncoding))
+```
+
+**Read-across:** any "my cleanup code ran but the file still says otherwise" in
+PowerShell is this until proven otherwise. Verify a guard's *negative* path — the case
+where it should erase the last row — because that is the path that only fires when it
+matters.

@@ -453,10 +453,17 @@ finally {
                    else { "!! ORPHANS STILL BILLING: $($survivors -join ', ') -- DELETE THESE BY HAND NOW !!" }
 
         # De-register from the sweep list only once the listing proves it is gone.
+        # NB: do NOT pipe Where-Object straight into Set-Content. When the filter
+        # removes the ONLY line the pipeline is empty, Set-Content's process block
+        # never runs, and the file is left UNCHANGED -- so the list would only ever
+        # clear when 2+ VMs were registered, and a stale entry makes the sweep cry
+        # wolf. Materialise the survivors and write unconditionally.
         if ($survivors.Count -eq 0) {
             $sweepFile = Join-Path $OutDir 'ACTIVE_VMS.txt'
             if (Test-Path $sweepFile) {
-                (Get-Content $sweepFile) | Where-Object { $_ -notmatch "^$VmName\s" } | Set-Content $sweepFile -Encoding ascii
+                $keep = @(Get-Content $sweepFile | Where-Object { $_.Trim() -and $_ -notmatch "^$VmName\s" })
+                [IO.File]::WriteAllText($sweepFile, (($keep -join "`r`n") + $(if ($keep.Count) { "`r`n" } else { "" })), (New-Object Text.ASCIIEncoding))
+                Say "  de-registered '$VmName' from the sweep list ($($keep.Count) still registered)" DarkGray
             }
         }
         Save 'teardown-proof.txt' ("=== resources remaining in $ResourceGroup (UNFILTERED) ===`n$left`n=== VMs in subscription, all RGs (UNFILTERED, must be empty) ===`n$vms`n=== verdict ===`n$verdict")
