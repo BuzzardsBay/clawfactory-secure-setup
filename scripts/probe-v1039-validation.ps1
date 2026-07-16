@@ -17,8 +17,12 @@ $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 function W($m) { Write-Output $m }
 function Section($t) { W ""; W ("########## " + $t + " ##########") }
 function Wsl([string]$cmd, [string]$user = 'clawuser') {
+    # --cd / : with automount=false (the isolation under test), wsl.exe cannot
+    # translate the Windows CWD (C:\Windows\system32 under RunOnce) and spews
+    # "Failed to translate ..." to stderr, polluting output and breaking verdict
+    # parsing. Forcing the WSL cwd to / avoids the translation entirely.
     $b = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($cmd))
-    return (& wsl.exe -d Ubuntu -u $user -- bash -lc "echo $b | base64 -d | bash" 2>&1 | Out-String)
+    return (& wsl.exe -d Ubuntu --cd / -u $user -- bash -lc "echo $b | base64 -d | bash" 2>&1 | Out-String)
 }
 # Drive the REAL gated agent (openclaw agent runs through the turn-gate shim), as
 # clawuser, and return its own words. Plugin-staging noise stripped.
@@ -26,7 +30,7 @@ function AgentSay([string]$Msg, [string]$Agent = 'main', [int]$T = 150) {
     $mb = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Msg))
     $inner = "timeout $T openclaw agent --agent $Agent --message `"`$(printf %s '$mb' | base64 -d)`" 2>&1"
     $b = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($inner))
-    $o = (& wsl.exe -d Ubuntu -u clawuser -- bash -lc "echo $b | base64 -d | bash" 2>&1 | Out-String)
+    $o = (& wsl.exe -d Ubuntu --cd / -u clawuser -- bash -lc "echo $b | base64 -d | bash" 2>&1 | Out-String)
     return (($o -split "`n") | Where-Object { $_ -notmatch 'staging bundled|installed bundled' }) -join "`n"
 }
 # A chatCompletions turn through the gating proxy (127.0.0.1:8787). Returns raw JSON.
@@ -75,8 +79,11 @@ Try-Task "TASK 2 -- INSTALL-COMPLETION GATE" {
     W "`n--- 2.4 OWNERSHIP: the .config/systemd/user chain (converts the cfv-0715p inference to observation) ---"
     $own = Wsl 'for d in /home/clawuser/.config /home/clawuser/.config/systemd /home/clawuser/.config/systemd/user /home/clawuser/.config/systemd/user/openclaw-gateway.service.d; do echo "$(stat -c "%U:%G %A" "$d" 2>/dev/null || echo MISSING)  $d"; done'
     W $own
-    $badOwn = ($own -split "`n" | Where-Object { $_.Trim() -and $_ -notmatch '^clawuser:clawuser' })
-    if ($badOwn) { $script:gateOk = $false; W "2.4 VERDICT: FAIL -- not all clawuser-owned" } else { W "2.4 VERDICT: PASS -- entire chain clawuser-owned (fix confirmed by observation)" }
+    # Only the real stat lines contain '/home/clawuser/.config'; ignore any wsl
+    # stderr noise. Each such line MUST start clawuser:clawuser.
+    $ownLines = @($own -split "`n" | Where-Object { $_ -match '/home/clawuser/\.config' })
+    $badOwn = @($ownLines | Where-Object { $_ -notmatch '^clawuser:clawuser' })
+    if ($ownLines.Count -lt 4 -or $badOwn.Count) { $script:gateOk = $false; W "2.4 VERDICT: FAIL -- not all clawuser-owned (or chain incomplete)" } else { W "2.4 VERDICT: PASS -- entire chain clawuser-owned (fix confirmed by observation)" }
 
     W "`n--- 2.5 install.log: ownership guard passed + zero 'ft:' (nft mangling) + key found ---"
     $il = Get-Content 'C:\ProgramData\ClawFactory\install.log' -EA SilentlyContinue
