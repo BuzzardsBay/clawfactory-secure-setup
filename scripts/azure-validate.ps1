@@ -159,6 +159,14 @@ try {
         }
         Say "  ...VM IS running despite the deployment error (OSProvisioningTimedOut is advisory for this image). Continuing." Yellow
     }
+    # SWEEP LIST: a killed process cannot run `finally`. cfv-0715d had to be torn
+    # down by hand for exactly that reason. Record the VM name the moment it exists
+    # so a leftover is always deletable by name, even if this process dies:
+    #   .\scripts\azure-sweep.ps1        (deletes everything still listed)
+    $sweep = Join-Path $OutDir 'ACTIVE_VMS.txt'
+    Add-Content -Path $sweep -Value "$VmName $ResourceGroup" -Encoding ascii
+    Say "  registered '$VmName' in $sweep (sweep list -- survives a killed harness)" DarkGray
+
     Say "Provisioned. (admin password generated in-memory; never printed or written)" Green
 
     # Trap 6, made cheap: `run-command invoke` has NO client-side timeout, so if the
@@ -444,6 +452,13 @@ finally {
         $verdict = if ($survivors.Count -eq 0) { "CLEAN -- no resource matching '$VmName' remains." }
                    else { "!! ORPHANS STILL BILLING: $($survivors -join ', ') -- DELETE THESE BY HAND NOW !!" }
 
+        # De-register from the sweep list only once the listing proves it is gone.
+        if ($survivors.Count -eq 0) {
+            $sweepFile = Join-Path $OutDir 'ACTIVE_VMS.txt'
+            if (Test-Path $sweepFile) {
+                (Get-Content $sweepFile) | Where-Object { $_ -notmatch "^$VmName\s" } | Set-Content $sweepFile -Encoding ascii
+            }
+        }
         Save 'teardown-proof.txt' ("=== resources remaining in $ResourceGroup (UNFILTERED) ===`n$left`n=== VMs in subscription, all RGs (UNFILTERED, must be empty) ===`n$vms`n=== verdict ===`n$verdict")
         Write-Host "`n===== TEARDOWN PROOF (unfiltered) =====" -ForegroundColor Yellow
         Write-Host $left; Write-Host $vms
