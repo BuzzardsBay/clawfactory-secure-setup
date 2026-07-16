@@ -91,6 +91,8 @@ Try-Task "TASK 2 -- INSTALL-COMPLETION GATE" {
     W ("'ft: command not found' matches (must be 0): " + (@($il | Select-String -Pattern 'ft: command not found').Count))
     W ("API key found line: " + (($il | Select-String -Pattern 'API key found \(length=' | Select-Object -Last 1 | Out-String).Trim()))
     W ("gateway-install FATAL lines (must be none): " + (($il | Select-String -Pattern '\[gateway-install\] FATAL' | Out-String).Trim()))
+    W "--- A3/B2.5: the three systemctl --user lines + any nearby error (for the record -- which/if any failed) ---"
+    W (($il | Select-String -Pattern 'systemctl --user (daemon-reload|enable|restart)|Failed to connect to bus|Failed to (enable|reload|restart)|Interactive authentication|No such file' -Context 0,1 | Select-Object -Last 12 | Out-String).Trim())
 }
 W ""
 W ("=====> TASK 2 GATE: " + $(if ($gateOk) { 'PASS -- proceeding to the full suite' } else { 'FAIL -- STOPPING. Tasks 3-9 skipped (no point validating a broken install).' }))
