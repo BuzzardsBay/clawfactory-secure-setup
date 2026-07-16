@@ -255,6 +255,13 @@ try {
         '@echo off'
         '"C:\cfv\setup.exe" /SILENT /SUPPRESSMSGBOXES /NORESTART /LOG="C:\cfv\install.log" /PROVIDER=claude /LICENSE=CF-TEST-TEST-TEST-TEST'
         'echo INSTALLER_EXIT=%ERRORLEVEL% > C:\cfv\INSTALLER_DONE.txt'
+        'rem INSTALLER_EXIT above is setup.EXE''s code -- NOT authoritative. Inno does'
+        'rem not propagate the [Run] child (setup.ps1) exit code, so it is ~always 0'
+        'rem even on a failed install. setup.ps1 writes the HONEST verdict to'
+        'rem install-result.txt (INSTALLER_DONE=success|failure). Append it; the poll'
+        'rem below asserts on that, not on INSTALLER_EXIT.'
+        'type "C:\ProgramData\ClawFactory\install-result.txt" >> C:\cfv\INSTALLER_DONE.txt 2>NUL'
+        'if not exist "C:\ProgramData\ClawFactory\install-result.txt" type C:\install-result.txt >> C:\cfv\INSTALLER_DONE.txt 2>NUL'
     )
     if ($Payload) {
         # Same session, same boot, immediately after the installer exits.
@@ -289,7 +296,23 @@ try {
     foreach ($i in 1..40) {
         Start-Sleep -Seconds 45
         $p = Invoke-Rc "if (Test-Path C:\cfv\INSTALLER_DONE.txt) { Get-Content C:\cfv\INSTALLER_DONE.txt } else { 'PENDING' }" 'poll-install'
-        if ($p -match 'INSTALLER_EXIT') { $done = $true; Save 'installer_done.txt' $p; Say "Install finished: $p" Green; break }
+        if ($p -match 'INSTALLER_EXIT') {
+            $done = $true; Save 'installer_done.txt' $p
+            # setup.exe's INSTALLER_EXIT is NOT authoritative (Inno swallows the
+            # [Run] child's exit code -- ~always 0 even on a failed setup.ps1). The
+            # honest verdict is setup.ps1's own INSTALLER_DONE=success|failure marker
+            # (appended by wrapper.cmd from install-result.txt). Surface THAT.
+            if ($p -match 'INSTALLER_DONE=(success|failure)([^\r\n]*)') {
+                $verdict = "$($Matches[1])$($Matches[2])".Trim()
+                Save 'install-verdict.txt' "INSTALLER_DONE=$verdict"
+                $col = if ($verdict -like 'success*') { 'Green' } else { 'Yellow' }
+                Say "Install finished. HONEST VERDICT (setup.ps1): INSTALLER_DONE=$verdict  [setup.exe INSTALLER_EXIT is not authoritative -- ignore it]" $col
+            } else {
+                Save 'install-verdict.txt' 'INSTALLER_DONE=UNKNOWN'
+                Say "Install finished but NO INSTALLER_DONE marker found -- setup.ps1 may have died before its finally block, or rebooted mid-install. setup.exe exit is not authoritative. Raw: $($p -replace '\s+',' ')" Red
+            }
+            break
+        }
         Say "  ...still installing ($i/40)" DarkGray
     }
     if (-not $done) { throw "Installer did not report INSTALLER_DONE within ~30 min. If run-command wedged this is a HARNESS failure -- retry on a fresh VM before blaming the product." }

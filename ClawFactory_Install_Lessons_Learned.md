@@ -301,3 +301,40 @@ $keep = @(Get-Content $f | Where-Object { $_.Trim() -and $_ -notmatch "^$VmName\
 PowerShell is this until proven otherwise. Verify a guard's *negative* path — the case
 where it should erase the last row — because that is the path that only fires when it
 matters.
+
+## L9 — when you remove a component, assert the invariants its side effects were silently upholding
+
+**Discovered:** the v1.0.38 gateway-unit EACCES bug (probe `cfv-0715p`, fixed v1.0.39).
+
+The gateway install broke on clean machines because `openclaw gateway install` runs as
+clawuser and could not write `~/.config/systemd/user/openclaw-gateway.service` — root
+owned the parent chain (root's `mkdir -p` created it; the chown-back covered only the
+leaf). But that ownership bug had existed **since the initial release**. It only became
+reachable when Docker was removed, because `dockerd-rootless-setuptool.sh install` had
+been creating `~/.config/systemd/user/` **as clawuser** first, so root's later `mkdir -p`
+created nothing and ownership stayed correct.
+
+The Docker-removal commit was careful — it documented **three** hidden dependencies it was
+preserving (nftables, dbus-user-session, linger). It still shipped a broken installer,
+because a **fourth** side effect (the `.config/systemd/user` ownership) was invisible:
+nothing in the flow ever asserted it, so nothing could catch its loss.
+
+**The general rule:** removing a component also removes every *incidental* side effect it
+had. Enumerating the ones you know about is necessary but not sufficient — the dangerous
+ones are the side effects nobody documented, that some later step silently relied on. You
+cannot grep for an invisible dependency. What you *can* do is make the **invariant** each
+critical step depends on **explicit and asserted at the point of use**, so that if any
+future change (a removal, a reorder, an upstream update) breaks it, it fails loud, named,
+and immediately — not 38 versions later, behind a misleading error, on a clean machine you
+don't test often.
+
+**How to apply:**
+- When deleting a step, ask not "what did this install?" but "what state did everything
+  *downstream* assume this left behind?" — and assert that state where it is consumed.
+- Prefer an assertion at the consumer over a comment at the producer. The v1.0.39 fix adds
+  both an explicit chown (producer) **and** a fail-loud ownership guard right before the
+  gateway install (consumer). The guard is the durable half: it would have caught this bug
+  the first time it shipped, and it will catch any future regression regardless of cause.
+- A silent success signal is the same anti-pattern one layer up: setup.exe exited 0 on a
+  failed install because Inno swallowed the `[Run]` child's exit code. Assert on the honest
+  marker (`INSTALLER_DONE=success`), never on the lossy proxy.

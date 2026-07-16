@@ -42,10 +42,13 @@ Write-Output "--- INSTALLER_DONE ---"; Get-Content C:\cfv\INSTALLER_DONE.txt -Er
 Write-Output "--- checkpoint (expect: ends at OpenClawConfigured) ---"
 Get-Content C:\ProgramData\ClawFactory\checkpoint.json -Raw -ErrorAction SilentlyContinue
 
-Section "2.3 setup.ps1's OWN log -- CORRECT PATH THIS TIME"
-# Last cycle's diag-8c.ps1 read 'C:\Program Files\ClawFactory Secure Setup\install.log'
-# -- wrong. The [Run] entry in the Inno log proves the real dir is ...\ClawFactory\.
-$log = 'C:\Program Files\ClawFactory\install.log'
+Section "2.3 setup.ps1's OWN log -- REAL PATH (confirmed setup.ps1:66-67)"
+# setup.ps1 defines $LogDir = Join-Path $env:ProgramData 'ClawFactory' and
+# $LogFile = "$LogDir\install.log". So the GW-JOURNAL/GW-STATUS/GW-PORT/GW-TMPLOG
+# dump lands in C:\ProgramData\ClawFactory\install.log -- NOT under Program Files
+# (both earlier guesses -- '...\ClawFactory Secure Setup\' and '...\ClawFactory\'
+# under Program Files -- were wrong, which is why the dump was never read back).
+$log = 'C:\ProgramData\ClawFactory\install.log'
 Write-Output "--- path exists? $(Test-Path $log) : $log ---"
 if (Test-Path $log) {
     Write-Output "--- GW-* diagnostic dump (the markers setup.ps1:1987-1990 writes) ---"
@@ -54,8 +57,8 @@ if (Test-Path $log) {
     Write-Output "--- tail 150 ---"
     Get-Content $log -Tail 150
 } else {
-    Write-Output "NOT FOUND -- enumerating what IS under C:\Program Files\ClawFactory:"
-    Get-ChildItem 'C:\Program Files\ClawFactory' -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+    Write-Output "NOT FOUND -- enumerating *.log under C:\ProgramData\ClawFactory:"
+    Get-ChildItem 'C:\ProgramData\ClawFactory' -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
 }
 
 # ---------------------------------------------------------------------------

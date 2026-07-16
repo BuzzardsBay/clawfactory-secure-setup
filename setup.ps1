@@ -1704,6 +1704,24 @@ done
 # Zero on both means: never give up retrying.
 OVERRIDE_DIR=/home/clawuser/.config/systemd/user/openclaw-gateway.service.d
 mkdir -p "$OVERRIDE_DIR"
+# OWNERSHIP FIX (v1.0.39). This block runs as ROOT, so the mkdir -p above created
+# .config, .config/systemd and .config/systemd/user OWNED BY ROOT. Later
+# `openclaw gateway install` runs as CLAWUSER (deliberately, so the unit lands in
+# /home/clawuser not /root) and must WRITE the unit into .../systemd/user -- which
+# fails EACCES if root owns that chain. The leaf-only `chown -R ...service.d` in
+# sub-block (h) descends INTO the leaf; it never climbs to these parents. Chown the
+# whole chain to clawuser now: non-recursive per level, so it touches only these
+# four directories -- it CORRECTS them if root owns them (the v1.0.38 bug) and is a
+# harmless no-op if clawuser already owns them (Docker-era boxes, re-runs).
+# Docker's rootless setuptool used to create this chain as clawuser first, which is
+# why the bug stayed latent for 38 versions until Docker's removal
+# (SECFIX_CLOSE_DOORS). Do NOT reintroduce Docker -- make ownership explicit and
+# assert it (see the guard at the top of $gatewayInstall).
+chown clawuser:clawuser \
+    /home/clawuser/.config \
+    /home/clawuser/.config/systemd \
+    /home/clawuser/.config/systemd/user \
+    "$OVERRIDE_DIR"
 cat > "$OVERRIDE_DIR/clawfactory-tunables.conf" <<'EOF'
 [Service]
 TimeoutStartSec=infinity
@@ -1910,31 +1928,72 @@ echo "[gateway-preconfig] gateway.{mode,bind,port} set"
     # .config/systemd/user/, not /root/.
     $gatewayInstall = @'
 set -e
+set -o pipefail
 LOG=/tmp/openclaw-install.log
 mkdir -p "$(dirname "$LOG")"
 
+# --- GUARD (v1.0.39, Task 2): the systemd user-unit chain MUST be clawuser-owned.
+# We run as clawuser here; `openclaw gateway install` will write
+# ~/.config/systemd/user/openclaw-gateway.service. If root owns ANY level of that
+# chain, the write fails EACCES and the unit is never created (the v1.0.38 bug:
+# root's mkdir -p in sub-block (b) created the chain, the leaf-only chown never
+# climbed to the parents). The absence of exactly this assertion is what let a
+# 38-version-old bug hide behind Docker's rootless setuptool. Fail loud, named.
+UNIT_DIR=/home/clawuser/.config/systemd/user
+for d in /home/clawuser/.config /home/clawuser/.config/systemd "$UNIT_DIR"; do
+    owner="$(stat -c '%U' "$d" 2>/dev/null || echo MISSING)"
+    if [ "$owner" != "clawuser" ]; then
+        echo "[gateway-install] FATAL: $d is owned by '$owner', not clawuser -- 'openclaw gateway install' runs as clawuser and cannot write the gateway unit through a directory it does not own (EACCES). This is the gateway-unit ownership bug; the fix is in Step-PreinstallGatewayRuntime sub-block (b)." >&2
+        ls -ld /home/clawuser/.config /home/clawuser/.config/systemd "$UNIT_DIR" 2>/dev/null >&2 || true
+        exit 90
+    fi
+done
+echo "[gateway-install] ownership guard OK: .config/systemd/user chain is clawuser-owned"
+
 echo "[gateway-install] openclaw gateway install --force --port 8787"
 set +e
-openclaw gateway install --force --port 8787 2>&1
+install_out="$(openclaw gateway install --force --port 8787 2>&1)"
 rc=$?
 set -e
+printf '%s\n' "$install_out"
+
+# --- FAIL LOUD (v1.0.39, Task 3). The success criterion for this command is that
+# it CREATED the unit file. The prior WARN-and-continue swallowed a non-zero rc and
+# marched on to daemon-reload/enable/restart against a non-existent unit, so a
+# precise EACCES surfaced 120s later as the misleading "Gateway did not respond".
+UNIT="$UNIT_DIR/openclaw-gateway.service"
+if [ ! -f "$UNIT" ]; then
+    echo "[gateway-install] FATAL: 'openclaw gateway install' exited $rc and did NOT create $UNIT." >&2
+    echo "[gateway-install] install output was:" >&2
+    printf '%s\n' "$install_out" >&2
+    if [ "$rc" -ne 0 ]; then exit "$rc"; else exit 1; fi
+fi
+# The unit exists. A non-zero rc HERE is the documented transient case (unit
+# written, service auto-start hiccup); the downstream PowerShell /status poll is the
+# source of truth for that, so do NOT abort on rc alone once the unit is present.
 if [ "$rc" -ne 0 ]; then
-    echo "[gateway-install] WARN: openclaw gateway install --force returned $rc - continuing to daemon-reload/restart; PowerShell-side /status poll is the source of truth for health." >&2
+    echo "[gateway-install] note: install exited $rc but $UNIT exists; deferring health to the /status poll" >&2
 fi
 
+# daemon-reload / enable / restart -- the unit provably exists, so these act on a
+# real unit. No `|| true` (was silently swallowing failures); set -e + pipefail make
+# a genuine failure abort here rather than 120s later. `restart` returns as soon as
+# node is exec'd for a Type=simple unit -- BEFORE the port binds -- so it does not
+# race the documented 3-14s cold-start window; that window is covered by the /status
+# poll below, which is deliberately left untouched.
 echo "[gateway-install] systemctl --user daemon-reload"
-systemctl --user daemon-reload 2>&1 | tee -a "$LOG" || true
+systemctl --user daemon-reload 2>&1 | tee -a "$LOG"
 
 echo "[gateway-install] systemctl --user enable openclaw-gateway.service"
-systemctl --user enable openclaw-gateway.service 2>&1 | tee -a "$LOG" || true
+systemctl --user enable openclaw-gateway.service 2>&1 | tee -a "$LOG"
 
 echo "[gateway-install] systemctl --user restart openclaw-gateway.service"
-systemctl --user restart openclaw-gateway.service 2>&1 | tee -a "$LOG" || true
+systemctl --user restart openclaw-gateway.service 2>&1 | tee -a "$LOG"
 
-# Per #65184, give the unit ~5s to fully bind before probing is-active.
+# Per #65184, give the unit ~5s to fully bind before probing is-active. This loop
+# is a soft, best-effort check (it exits 0 either way); the authoritative health
+# gate is the PowerShell /status poll, NOT tightened here.
 sleep 5
-
-# Poll is-active up to 6x with 2s gaps (~12s total). Non-blocking on miss.
 for i in 1 2 3 4 5 6; do
     state="$(systemctl --user is-active openclaw-gateway.service 2>/dev/null || true)"
     if [ "$state" = "active" ]; then
@@ -1943,12 +2002,19 @@ for i in 1 2 3 4 5 6; do
     fi
     sleep 2
 done
-echo "[gateway-install] WARNING: gateway service did not become active within 12s - install will continue" >&2
+echo "[gateway-install] note: service not 'active' within 12s; the PowerShell /status poll (120s) is authoritative" >&2
 exit 0
 '@
     $rcGateway = Invoke-WslBash -Script $gatewayInstall -User $WslUser
     if ($rcGateway -ne 0) {
-        Write-Log WARN "openclaw gateway install --force returned $rcGateway; the install command's exit code is no longer treated as fatal. Health is determined by the /status poll below."
+        # v1.0.39 (Task 3): the gateway-install block now exits non-zero ONLY when
+        # the unit was not created (missing unit file, or the ownership guard tripped
+        # with exit 90) -- i.e. a genuine, non-recoverable failure. Abort HERE, at the
+        # point of failure, with the actual cause, instead of swallowing it and letting
+        # the /status poll surface a misleading "Gateway did not respond" 120s later.
+        # The precise error (e.g. EACCES on the unit path, or the FATAL ownership-guard
+        # message) is captured in the [wsl:clawuser ...] lines of the install log.
+        throw "openclaw gateway install failed (exit=$rcGateway): the systemd user unit /home/clawuser/.config/systemd/user/openclaw-gateway.service was not created. See the [wsl:clawuser ...] lines in the install log at $LogFile for the exact error (exit 90 = the .config/systemd/user ownership guard tripped; any other non-zero = the install itself did not write the unit)."
     }
 
     # Poll gateway health via curl /status for up to ~120s (13 attempts, 10s
