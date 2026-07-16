@@ -63,7 +63,19 @@ param(
     # reboots first, which would re-trigger auto-logon and could itself repair the
     # very state under investigation; -SkipSuite omits it.
     [string]$Payload       = "",
-    [switch]$SkipSuite
+    [switch]$SkipSuite,
+    # Full-validation mode. -SeedKeyB64 is base64(UTF8(provider key)); it is written
+    # into clawadmin's Credential Manager on the VM (as UTF-16LE, exactly what the
+    # installer's CredRead expects) BEFORE the install, at -SeedKeyTarget. The value
+    # is never printed here or on the VM (it flows machine-to-machine, base64, and
+    # the arm temp file is shredded). -Pktmon starts an ETW capture before the
+    # install for the phone-home analysis.
+    [string]$SeedKeyB64    = "",
+    [string]$SeedKeyTarget = "ClawFactory/AnthropicApiKey",
+    [switch]$Pktmon,
+    # Extra file(s) to stage to C:\cfv on the VM (e.g. the adversarial suite the
+    # full probe runs). Uploaded to blob + pulled down via SAS like the payload.
+    [string[]]$ExtraFiles  = @()
 )
 $ErrorActionPreference = 'Stop'
 
@@ -215,6 +227,17 @@ try {
                      "`"PAYLOAD_BYTES=`$((Get-Item C:\cfv\payload.ps1).Length)`"; "
         Say "  payload uploaded to blob '$pName' (staged by SAS, not by --scripts)" DarkGray
     }
+    foreach ($xf in $ExtraFiles) {
+        if (-not (Test-Path $xf)) { throw "-ExtraFiles '$xf' not found." }
+        $xn = Split-Path $xf -Leaf
+        az storage blob upload --account-name $StorageAcct --account-key $key `
+            --container-name $Container --name $xn --file $xf --overwrite --output none
+        $xSas = az storage blob generate-sas --account-name $StorageAcct --account-key $key `
+                  --container-name $Container --name $xn --permissions r --expiry $exp -o tsv
+        $xUrl = "https://$StorageAcct.blob.core.windows.net/$Container/$xn`?$xSas"
+        $payloadDl += "Invoke-WebRequest -Uri '$xUrl' -OutFile 'C:\cfv\$xn' -UseBasicParsing; "
+        Say "  extra file staged: $xn" DarkGray
+    }
 
     # run-command is SYSTEM here -- fine: this is Windows-side only, no WSL.
     #
@@ -251,8 +274,47 @@ try {
     # RunOnce -> wrapper.cmd runs in the clawadmin session (batch-logon rights make
     # a scheduled task unreliable on Win11; wrapper.cmd from RunOnce is the pattern
     # proven in the v1.0.15+ cycles).
+    # Pre-install steps that must run in the clawadmin session BEFORE setup.exe:
+    #   - seed the provider key into clawadmin's Credential Manager (the store the
+    #     installer's CredRead reads). Written as a UTF-16LE blob so it round-trips
+    #     through the installer's Encoding.Unicode.GetString. Key carried base64,
+    #     never printed.
+    #   - start a pktmon ETW capture so Task 5 has install-phase egress.
+    $preLines = @()
+    if ($SeedKeyB64) {
+        $seedPs = @"
+`$ErrorActionPreference='Stop'
+Add-Type -Namespace CF -Name Cred -MemberDefinition @'
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet=System.Runtime.InteropServices.CharSet.Unicode)]
+public struct CREDENTIAL { public uint Flags; public uint Type; public string TargetName; public string Comment; public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten; public uint CredentialBlobSize; public System.IntPtr CredentialBlob; public uint Persist; public uint AttributeCount; public System.IntPtr Attributes; public string TargetAlias; public string UserName; }
+[System.Runtime.InteropServices.DllImport("Advapi32.dll", EntryPoint="CredWriteW", CharSet=System.Runtime.InteropServices.CharSet.Unicode, SetLastError=true)]
+public static extern bool CredWrite(ref CREDENTIAL c, uint f);
+public static bool Write(string target, string secret) {
+    byte[] blob = System.Text.Encoding.Unicode.GetBytes(secret);
+    System.IntPtr p = System.Runtime.InteropServices.Marshal.AllocHGlobal(blob.Length);
+    System.Runtime.InteropServices.Marshal.Copy(blob, 0, p, blob.Length);
+    CREDENTIAL c = new CREDENTIAL();
+    c.Type = 1; c.TargetName = target; c.CredentialBlobSize = (uint)blob.Length;
+    c.CredentialBlob = p; c.Persist = 2; c.UserName = "clawfactory";
+    bool ok = CredWrite(ref c, 0);
+    System.Runtime.InteropServices.Marshal.FreeHGlobal(p);
+    return ok;
+}
+'@ -Language CSharp
+`$k=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$SeedKeyB64'))
+if(-not [CF.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
+`$k=`$null
+'seeded len='+([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$SeedKeyB64'))).Length | Out-File C:\cfv\seed-key.txt -Encoding ascii
+"@
+        $seedEnc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($seedPs))
+        $preLines += "powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand $seedEnc"
+    }
+    if ($Pktmon) {
+        $preLines += 'pktmon start --capture --comp nics --pkt-size 0 --file-name C:\cfv\cap-install.etl > C:\cfv\pktmon-install.log 2>&1'
+    }
     $cmdLines = @(
         '@echo off'
+    ) + $preLines + @(
         '"C:\cfv\setup.exe" /SILENT /SUPPRESSMSGBOXES /NORESTART /LOG="C:\cfv\install.log" /PROVIDER=claude /LICENSE=CF-TEST-TEST-TEST-TEST'
         'echo INSTALLER_EXIT=%ERRORLEVEL% > C:\cfv\INSTALLER_DONE.txt'
         'rem INSTALLER_EXIT above is setup.EXE''s code -- NOT authoritative. Inno does'
