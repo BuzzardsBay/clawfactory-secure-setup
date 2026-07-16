@@ -86,6 +86,37 @@ New-Item -ItemType Directory -Path $dir -Force | Out-Null
 function Say($m, $c = 'Cyan') { Write-Host "[$([DateTime]::Now.ToString('HH:mm:ss'))] $m" -ForegroundColor $c }
 function Save($name, $content) { $content | Out-File (Join-Path $dir $name) -Encoding utf8; }
 
+# ---------------------------------------------------------------------------
+# Invoke-Rc -- the ONE way this harness talks to run-command. Two traps, both of
+# which cost a billed VM to learn:
+#
+# 1. `az` on Windows is **az.cmd**, a BATCH wrapper. Arguments therefore get
+#    re-parsed by cmd.exe, which mangles " ( ) & | < > ^. That is why an inline
+#    script containing `$((Get-Item x).Length)` died with cmd's own
+#    `.Length)"; "OK was unexpected at this time.`, why a SAS URL's `&` is unsafe
+#    inline, and (L3) why `--query "[?starts_with(...)]"` matched nothing. Passing
+#    the script via `@file` means the only argument is a plain path -- nothing for
+#    cmd to mangle.
+# 2. `--query "value[0].message"` reads **StdOut ONLY**. A script that THROWS
+#    leaves StdOut empty and its error in value[1] (StdErr) -- so the harness saw
+#    "empty output" and blamed the transport while the real error sat unread.
+#    Read BOTH streams. (`value[].message` has no parens, so cmd leaves it alone.)
+# ---------------------------------------------------------------------------
+function Invoke-Rc {
+    param([string]$Script, [string]$Label = 'run-command')
+    $f = Join-Path ([IO.Path]::GetTempPath()) ("cfv-rc-{0}.ps1" -f [Guid]::NewGuid())
+    try {
+        # Secrets (SAS tokens, the generated admin password) can appear in $Script,
+        # so this file lives OUTSIDE the repo and is shredded in finally.
+        [IO.File]::WriteAllText($f, $Script, (New-Object Text.UTF8Encoding($false)))
+        $out = az vm run-command invoke -g $ResourceGroup -n $VmName `
+                 --command-id RunPowerShellScript --scripts "@$f" `
+                 --query "value[].message" -o tsv
+        if ($LASTEXITCODE -ne 0) { throw "$Label : az run-command exited $LASTEXITCODE" }
+        return ($out -join "`n")
+    } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue }
+}
+
 try {
     # ---- 0. Preflight -----------------------------------------------------
     Say "Preflight: subscription must be live (verify via az rest -- the cached profile has lied before)."
@@ -194,7 +225,7 @@ try {
              "if (`$h -ne '$ExpectSha256') { throw `"HASH MISMATCH on VM: `$h`" }; " +
              $payloadDl +
              "`"OK staged; sha256 verified: `$h`""
-    $r = az vm run-command invoke -g $ResourceGroup -n $VmName --command-id RunPowerShellScript --scripts $stage --query "value[0].message" -o tsv
+    $r = Invoke-Rc $stage 'stage'
     Save 'stage.txt' $r
     if ($r -notmatch 'sha256 verified') { throw "Stage step did not confirm sha256. Output: $r" }
     if ($Payload -and $r -notmatch 'PAYLOAD_BYTES=\d{3,}') { throw "Payload did not stage (expected PAYLOAD_BYTES). Output: $r" }
@@ -235,7 +266,7 @@ try {
                "Set-ItemProperty `$k AutoLogonCount 1 -Type DWord; " +
                "Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' CFV-Install-Wrapper 'cmd /c C:\cfv\wrapper.cmd'; " +
                "'auto-logon + RunOnce armed'"
-    $r = az vm run-command invoke -g $ResourceGroup -n $VmName --command-id RunPowerShellScript --scripts $wrapper --query "value[0].message" -o tsv
+    $r = Invoke-Rc $wrapper 'arm'
     Save 'arm.txt' $r   # $r is just the 'auto-logon + RunOnce armed' echo -- no secret
     # Guard: empty output means the wrapper may be half-written. Rebooting into a
     # half-written wrapper produces a meaningless run, so stop while it is cheap.
@@ -249,23 +280,19 @@ try {
     $done = $false
     foreach ($i in 1..40) {
         Start-Sleep -Seconds 45
-        $p = az vm run-command invoke -g $ResourceGroup -n $VmName --command-id RunPowerShellScript `
-              --scripts "if (Test-Path C:\cfv\INSTALLER_DONE.txt) { Get-Content C:\cfv\INSTALLER_DONE.txt } else { 'PENDING' }" `
-              --query "value[0].message" -o tsv 2>$null
+        $p = Invoke-Rc "if (Test-Path C:\cfv\INSTALLER_DONE.txt) { Get-Content C:\cfv\INSTALLER_DONE.txt } else { 'PENDING' }" 'poll-install'
         if ($p -match 'INSTALLER_EXIT') { $done = $true; Save 'installer_done.txt' $p; Say "Install finished: $p" Green; break }
         Say "  ...still installing ($i/40)" DarkGray
     }
     if (-not $done) { throw "Installer did not report INSTALLER_DONE within ~30 min. If run-command wedged this is a HARNESS failure -- retry on a fresh VM before blaming the product." }
-    Save 'install.log' (az vm run-command invoke -g $ResourceGroup -n $VmName --command-id RunPowerShellScript --scripts "Get-Content C:\cfv\install.log -Tail 200" --query "value[0].message" -o tsv)
+    Save 'install.log' (Invoke-Rc "Get-Content C:\cfv\install.log -Tail 200" 'install-log')
 
     # ---- 4b. Diagnostic payload (same session/boot as the install) ---------
     if ($Payload) {
         Say "Waiting for the in-session diagnostic payload (DIAG_DONE)..."
         $dgot = $false
         foreach ($i in 1..20) {
-            $d = az vm run-command invoke -g $ResourceGroup -n $VmName --command-id RunPowerShellScript `
-                  --scripts "if (Test-Path C:\cfv\DIAG_DONE.txt) { Get-Content C:\cfv\diag-out.txt -Raw } else { 'PENDING' }" `
-                  --query "value[0].message" -o tsv 2>$null
+            $d = Invoke-Rc "if (Test-Path C:\cfv\DIAG_DONE.txt) { Get-Content C:\cfv\diag-out.txt -Raw } else { 'PENDING' }" 'poll-diag'
             if ($d -and $d -notmatch '^PENDING') { $dgot = $true; Save 'diag-out.txt' $d; Say "Diagnostic bundle captured." Green; break }
             Say "  ...waiting for diagnostic ($i/20)" DarkGray
             Start-Sleep -Seconds 30
@@ -284,27 +311,24 @@ try {
     Say "Collecting clean-install evidence (headline isolation, install-path changes)..."
     $probe = Get-Content (Join-Path $PSScriptRoot 'azure-probe.ps1') -Raw
     $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($probe))
-    $runProbe = @"
-`$ErrorActionPreference='Continue'
-[IO.File]::WriteAllBytes('C:\cfv\probe.ps1', [Convert]::FromBase64String('$b64'))
-@'
-@echo off
-powershell -NoProfile -ExecutionPolicy Bypass -File C:\cfv\probe.ps1 > C:\cfv\probe-out.txt 2>&1
-echo PROBE_DONE > C:\cfv\PROBE_DONE.txt
-'@ | Set-Content C:\cfv\probe.cmd -Encoding ASCII
-`$k='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
-Set-ItemProperty `$k AutoAdminLogon '1'; Set-ItemProperty `$k AutoLogonCount 1 -Type DWord
-Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' CFV-Probe "cmd /c C:\cfv\probe.cmd"
-'probe armed'
-"@
-    az vm run-command invoke -g $ResourceGroup -n $VmName --command-id RunPowerShellScript --scripts $runProbe --output none
+    # Same transport rules as everything else (see Invoke-Rc): one line, @file,
+    # base64 for any multi-line content. probe.cmd is carried as base64 too.
+    $probeCmdB64 = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(
+        "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File C:\cfv\probe.ps1 > C:\cfv\probe-out.txt 2>&1`r`necho PROBE_DONE > C:\cfv\PROBE_DONE.txt`r`n"))
+    $runProbe = "`$ErrorActionPreference='Continue'; " +
+                "[IO.File]::WriteAllBytes('C:\cfv\probe.ps1', [Convert]::FromBase64String('$b64')); " +
+                "[IO.File]::WriteAllBytes('C:\cfv\probe.cmd', [Convert]::FromBase64String('$probeCmdB64')); " +
+                "`$k='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'; " +
+                "Set-ItemProperty `$k AutoAdminLogon '1'; Set-ItemProperty `$k AutoLogonCount 1 -Type DWord; " +
+                "Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' CFV-Probe 'cmd /c C:\cfv\probe.cmd'; " +
+                "'probe armed'"
+    $pa = Invoke-Rc $runProbe 'arm-probe'
+    if ($pa -notmatch 'probe armed') { throw "Probe arm did not confirm: $pa" }
     az vm restart -g $ResourceGroup -n $VmName --output none
     $got = $false
     foreach ($i in 1..20) {
         Start-Sleep -Seconds 30
-        $p = az vm run-command invoke -g $ResourceGroup -n $VmName --command-id RunPowerShellScript `
-              --scripts "if (Test-Path C:\cfv\PROBE_DONE.txt) { Get-Content C:\cfv\probe-out.txt -Raw } else { 'PENDING' }" `
-              --query "value[0].message" -o tsv 2>$null
+        $p = Invoke-Rc "if (Test-Path C:\cfv\PROBE_DONE.txt) { Get-Content C:\cfv\probe-out.txt -Raw } else { 'PENDING' }" 'poll-probe'
         if ($p -and $p -notmatch '^PENDING') { $got = $true; Save 'probe-out.txt' $p; Say "Probe results captured." Green; break }
         Say "  ...waiting for probe ($i/20)" DarkGray
     }

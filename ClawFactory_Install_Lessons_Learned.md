@@ -233,3 +233,40 @@ blob storage via SAS — never paste it into `--scripts`.
 **Corollary:** always assert on run-command output (`if ($r -notmatch '<marker>')
 { throw }`). Without a marker assertion, an empty `message` sails straight through
 and the next step runs against a machine that is not in the state you think it is.
+
+## L7 — `az` on Windows is `az.cmd`: cmd.exe re-parses every argument (this is the root of L2 AND L3)
+
+**Discovered:** cfv-0715f (2026-07-15), after L2/L3 had each been "fixed" twice.
+
+`az` on Windows is **`az.cmd`, a batch wrapper**. Invoking it from PowerShell hands
+the argument string to **cmd.exe**, which re-parses it before Python ever sees it.
+cmd treats `" ( ) & | < > ^` as metacharacters. The proof was unmistakable — the
+harness's own output contained a **local cmd prompt echo**:
+
+```
+Output: C:\Users\bmcki\ClawFactory-Secure-Setup>  "C:\Program
+.Length)"; "OK was unexpected at this time.
+```
+
+`was unexpected at this time` is cmd.exe. The script was never sent to Azure; cmd
+tried to run it **locally**.
+
+**This single fact explains the whole lineage, which was misdiagnosed three times:**
+- **L3** — `--query "[?starts_with(name,'x')]"` "mangled by the Windows shell": the
+  `(` `)` `'` are cmd metacharacters.
+- **L2** — multi-line `--scripts` "mangled": embedded `"` break cmd's quoting.
+- A SAS URL inline is unsafe: `&` is a cmd command separator.
+- `$((Get-Item x).Length)` inline: parens.
+
+**Rule:** never pass a script, a JMESPath filter with parens, or any string
+containing `" ( ) & | < > ^` as an inline `az` argument on Windows. Pass scripts
+via **`--scripts "@file"`** (the only argument is then a plain path). Keep
+`--query` expressions paren-free (`value[].message` is fine; `[?foo(x)]` is not).
+
+**And read BOTH streams.** `--query "value[0].message"` is **StdOut only**. A script
+that throws leaves StdOut empty and its error in `value[1]` (StdErr) — which is how
+cfv-0715c's `@file` run looked like "empty output, transport broken" when the
+transport was fine and the script had simply thrown. Use `value[].message`.
+
+`azure-validate.ps1` now funnels every run-command through one `Invoke-Rc` helper
+that does both.
