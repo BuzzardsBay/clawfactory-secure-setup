@@ -169,7 +169,16 @@ try {
         if ($codes -notcontains 'PowerState/running') {
             throw "az vm create failed (exit $LASTEXITCODE) and the VM is not running (statuses: $($codes -join ', ')). Not proceeding."
         }
-        Say "  ...VM IS running despite the deployment error (OSProvisioningTimedOut is advisory for this image). Continuing." Yellow
+        # NEW (cfv-0716v): PowerState/running + agent Ready is NOT enough. A VM can
+        # report both while its PROVISIONING reached terminal 'Failed'
+        # (ProvisioningState/failed/OSProvisioningTimedOut) -- and Azure REFUSES
+        # run-command against such a VM, so the first big run-command (stage) hangs
+        # ~20 min then fails. That is an INFRA failure (the baseline-image
+        # provisioning lottery), not product or harness. Catch it in milliseconds.
+        if ($codes -match 'ProvisioningState/failed') {
+            throw "INFRA: VM $VmName reached terminal provisioning-Failed ($([string]($codes -match 'ProvisioningState/failed'))). run-command will not work on it. This is the baseline-image OSProvisioningTimedOut lottery -- NOT a product or harness fault. Retry with a fresh VM name."
+        }
+        Say "  ...VM IS running, provisioning not failed (OSProvisioningTimedOut is advisory here). Continuing." Yellow
     }
     # SWEEP LIST: a killed process cannot run `finally`. cfv-0715d had to be torn
     # down by hand for exactly that reason. Record the VM name the moment it exists
@@ -196,6 +205,14 @@ try {
     }
     if (-not $agentOk) {
         throw "VM agent never reported Ready after ~6 min -- run-command would wedge with no timeout. This is a HARNESS/INFRA failure (bad deploy), NOT a product verdict: redeploy on a fresh VM name before concluding anything about ClawFactory."
+    }
+    # Final terminal-provisioning check right before the first big run-command: the
+    # state can flip to Failed after create returned but before staging (cfv-0716v
+    # passed agent-Ready, then the stage run-command hung 20 min and failed on
+    # ProvisioningState/failed). Milliseconds here save 20 min of a doomed hang.
+    $pstate = az vm show -g $ResourceGroup -n $VmName --query "provisioningState" -o tsv 2>$null
+    if ($pstate -eq 'Failed') {
+        throw "INFRA: VM $VmName provisioningState=Failed (OSProvisioningTimedOut lottery). run-command will not work -- retry with a fresh VM name. NOT a product or harness fault."
     }
 
     # ---- 2. Stage the installer ------------------------------------------
@@ -383,11 +400,13 @@ if(-not [CF.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
     # ---- 4b. Diagnostic payload (same session/boot as the install) ---------
     if ($Payload) {
         Say "Waiting for the in-session diagnostic payload (DIAG_DONE)..."
+        # The full validation probe is long: a 5-min idle window + many ~150s agent
+        # turns + pktmon. Poll up to ~75 min (150 x 30s) so it is not cut off.
         $dgot = $false
-        foreach ($i in 1..20) {
+        foreach ($i in 1..150) {
             $d = Invoke-Rc "if (Test-Path C:\cfv\DIAG_DONE.txt) { 'DIAG_READY' } else { 'PENDING' }" 'poll-diag'
             if ($d -match 'DIAG_READY') { $dgot = $true; Say "Diagnostic finished on the VM." Green; break }
-            Say "  ...waiting for diagnostic ($i/20)" DarkGray
+            if ($i % 4 -eq 0) { Say "  ...waiting for diagnostic ($i/150, ~$([int]($i*0.5))min)" DarkGray }
             Start-Sleep -Seconds 30
         }
         if (-not $dgot) { Say "Diagnostic did not report -- evidence incomplete (harness issue, not a product verdict)." Red }
