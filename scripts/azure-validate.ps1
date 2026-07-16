@@ -172,22 +172,28 @@ try {
         $pUrl = "https://$StorageAcct.blob.core.windows.net/$Container/$pName`?$pSas"
         # Prove it landed AND is non-trivial: a truncated/empty payload.ps1 would
         # otherwise only surface 20 minutes later as a silent empty diagnostic.
-        $payloadDl = "Invoke-WebRequest -Uri '$pUrl' -OutFile C:\cfv\payload.ps1 -UseBasicParsing`r`n" +
-                     "if (-not (Test-Path C:\cfv\payload.ps1)) { throw 'payload.ps1 did not download' }`r`n" +
-                     "`"PAYLOAD_BYTES=`$((Get-Item C:\cfv\payload.ps1).Length)`""
+        $payloadDl = "Invoke-WebRequest -Uri '$pUrl' -OutFile C:\cfv\payload.ps1 -UseBasicParsing; " +
+                     "`"PAYLOAD_BYTES=`$((Get-Item C:\cfv\payload.ps1).Length)`"; "
         Say "  payload uploaded to blob '$pName' (staged by SAS, not by --scripts)" DarkGray
     }
 
     # run-command is SYSTEM here -- fine: this is Windows-side only, no WSL.
-    $stage = @"
-`$ErrorActionPreference='Stop'
-New-Item -ItemType Directory -Path C:\cfv -Force | Out-Null
-Invoke-WebRequest -Uri '$url' -OutFile C:\cfv\setup.exe -UseBasicParsing
-`$h = (Get-FileHash C:\cfv\setup.exe -Algorithm SHA256).Hash.ToLower()
-if (`$h -ne '$ExpectSha256') { throw "HASH MISMATCH on VM: `$h" }
-$payloadDl
-"OK staged; sha256 verified: `$h"
-"@
+    #
+    # L2 (sharpened) -- THIS SCRIPT MUST BE ONE LINE. A MULTI-LINE --scripts value
+    # silently breaks the sibling --query: az returns the whole JSON envelope
+    # instead of value[0].message, AND the script itself produces no output at all
+    # (StdOut "" and StdErr "" -- it looks like the box did nothing). Single-line
+    # --scripts + --query is the shape that provably works: it is exactly what the
+    # INSTALLER_DONE poll below uses, and that poll worked on cfv-0715. So compose
+    # with `;` separators, never newlines. The `@file` form is not a fix either --
+    # cfv-0715c returned empty with it.
+    $stage = "`$ErrorActionPreference='Stop'; " +
+             "New-Item -ItemType Directory -Path C:\cfv -Force | Out-Null; " +
+             "Invoke-WebRequest -Uri '$url' -OutFile C:\cfv\setup.exe -UseBasicParsing; " +
+             "`$h = (Get-FileHash C:\cfv\setup.exe -Algorithm SHA256).Hash.ToLower(); " +
+             "if (`$h -ne '$ExpectSha256') { throw `"HASH MISMATCH on VM: `$h`" }; " +
+             $payloadDl +
+             "`"OK staged; sha256 verified: `$h`""
     $r = az vm run-command invoke -g $ResourceGroup -n $VmName --command-id RunPowerShellScript --scripts $stage --query "value[0].message" -o tsv
     Save 'stage.txt' $r
     if ($r -notmatch 'sha256 verified') { throw "Stage step did not confirm sha256. Output: $r" }
@@ -200,35 +206,35 @@ $payloadDl
     # installer exits -- same session, same boot, no reboot in between.
     # payload.ps1 is already on the box (blob+SAS, in the stage step above), so the
     # arm script stays small -- it only has to CALL it.
-    $payloadCall = ""
+    # wrapper.cmd's CONTENT is built here and carried as base64, so the arm script
+    # itself can stay ONE line (see the L2 note on $stage above -- a multi-line
+    # --scripts value silently breaks --query and produces no output at all).
+    # RunOnce -> wrapper.cmd runs in the clawadmin session (batch-logon rights make
+    # a scheduled task unreliable on Win11; wrapper.cmd from RunOnce is the pattern
+    # proven in the v1.0.15+ cycles).
+    $cmdLines = @(
+        '@echo off'
+        '"C:\cfv\setup.exe" /SILENT /SUPPRESSMSGBOXES /NORESTART /LOG="C:\cfv\install.log" /PROVIDER=claude /LICENSE=CF-TEST-TEST-TEST-TEST'
+        'echo INSTALLER_EXIT=%ERRORLEVEL% > C:\cfv\INSTALLER_DONE.txt'
+    )
     if ($Payload) {
-        $payloadCall = "powershell -NoProfile -ExecutionPolicy Bypass -File C:\cfv\payload.ps1 > C:\cfv\diag-out.txt 2>&1`r`necho DIAG_DONE > C:\cfv\DIAG_DONE.txt"
+        # Same session, same boot, immediately after the installer exits.
+        $cmdLines += 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\cfv\payload.ps1 > C:\cfv\diag-out.txt 2>&1'
+        $cmdLines += 'echo DIAG_DONE > C:\cfv\DIAG_DONE.txt'
         Say "  payload armed: $Payload (runs in-session immediately after the installer)" Yellow
     }
-    $wrapper = @"
-`$ErrorActionPreference='Stop'
-`$W='C:\cfv'
-# Auto-logon once, so a real interactive clawadmin session exists for WSL.
-`$k='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
-Set-ItemProperty `$k AutoAdminLogon '1'
-Set-ItemProperty `$k DefaultUserName '$AdminUser'
-Set-ItemProperty `$k DefaultPassword '$pw'
-Set-ItemProperty `$k AutoLogonCount 1 -Type DWord
-# RunOnce -> wrapper.cmd runs in the clawadmin session (batch-logon rights make
-# a scheduled task unreliable on Win11; wrapper.cmd from RunOnce is the pattern
-# proven in the v1.0.15+ cycles).
-@'
-@echo off
-"C:\cfv\setup.exe" /SILENT /SUPPRESSMSGBOXES /NORESTART /LOG="C:\cfv\install.log" /PROVIDER=claude /LICENSE=CF-TEST-TEST-TEST-TEST
-echo INSTALLER_EXIT=%ERRORLEVEL% > C:\cfv\INSTALLER_DONE.txt
-$payloadCall
-'@ | Set-Content `$W\wrapper.cmd -Encoding ASCII
-Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' CFV-Install-Wrapper "cmd /c `$W\wrapper.cmd"
-'auto-logon + RunOnce armed'
-"@
-    # Inline --scripts, matching the shape proven on cfv-0715. The payload is NOT
-    # in here (it came down from blob storage), so this stays small. The `@file`
-    # form was tried on cfv-0715c and returned empty stdout -- see L2.
+    $cmdB64 = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(($cmdLines -join "`r`n") + "`r`n"))
+
+    # Auto-logon once, so a real interactive clawadmin session exists for WSL.
+    $wrapper = "`$ErrorActionPreference='Stop'; " +
+               "[IO.File]::WriteAllBytes('C:\cfv\wrapper.cmd', [Convert]::FromBase64String('$cmdB64')); " +
+               "`$k='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'; " +
+               "Set-ItemProperty `$k AutoAdminLogon '1'; " +
+               "Set-ItemProperty `$k DefaultUserName '$AdminUser'; " +
+               "Set-ItemProperty `$k DefaultPassword '$pw'; " +
+               "Set-ItemProperty `$k AutoLogonCount 1 -Type DWord; " +
+               "Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' CFV-Install-Wrapper 'cmd /c C:\cfv\wrapper.cmd'; " +
+               "'auto-logon + RunOnce armed'"
     $r = az vm run-command invoke -g $ResourceGroup -n $VmName --command-id RunPowerShellScript --scripts $wrapper --query "value[0].message" -o tsv
     Save 'arm.txt' $r   # $r is just the 'auto-logon + RunOnce armed' echo -- no secret
     # Guard: empty output means the wrapper may be half-written. Rebooting into a

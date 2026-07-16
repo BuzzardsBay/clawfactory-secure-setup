@@ -204,3 +204,32 @@ custom image ARM reports `OSProvisioningTimedOut` while the guest **boots fine**
 **ask the VM** (`az vm get-instance-view` → `PowerState/running`) before deciding.
 A hard abort on exit code alone would have thrown away a working VM;
 a blind continue spends 40 minutes on a VM that may not exist. Check, then ask.
+
+### L2 (sharpened) — the real rule is ONE LINE, and `@file` is not the fix
+
+**Sharpened:** cfv-0715c/e (2026-07-15), after L2 cost three more VMs.
+
+L2 said "use `@<localfile>`". That is **wrong** — or at least insufficient. What the
+cfv-0715 lineage actually shows:
+
+| `--scripts` shape | result |
+|---|---|
+| **single line** + `--query` | **WORKS** (this is what the `INSTALLER_DONE` poll uses, and it worked on cfv-0715) |
+| **multi-line inline** | `--query` is silently **ignored** — az returns the whole JSON envelope — *and* the script yields `StdOut: ""`, `StdErr: ""` |
+| **`@file`** | returned **empty** on cfv-0715c |
+
+The multi-line failure is doubly deceptive: both `StdOut` and `StdErr` come back
+empty with `"displayStatus": "Provisioning succeeded"`, so it reads as *"the box ran
+my script and it printed nothing"* — you go debugging the VM, the image, the
+network. The script never coherently ran. Meanwhile the wrapping `--query`
+disappearing means `$r` is a JSON blob, so any `if ($r -match 'expected')` guard
+fails for a second, unrelated-looking reason.
+
+**Rule:** compose run-command scripts as a **single line** with `;` separators.
+If you need multi-line content on the VM (a `.cmd`, a `.ps1`), carry it as
+**base64** and `[IO.File]::WriteAllBytes` it in that one line, or download it from
+blob storage via SAS — never paste it into `--scripts`.
+
+**Corollary:** always assert on run-command output (`if ($r -notmatch '<marker>')
+{ throw }`). Without a marker assertion, an empty `message` sails straight through
+and the next step runs against a machine that is not in the state you think it is.
