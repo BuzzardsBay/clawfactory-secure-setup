@@ -370,3 +370,37 @@ be non-fatal. A redundant `tee` to a root-owned file is exactly the kind of beni
 that should never fail an install; if the [wsl] capture already logs the output, drop the
 tee. Related: fail-loud scope (L9) -- distinguish the authoritative check from the
 belt-and-suspenders.
+
+**v1.0.41 confirmed (cfv-0716r, 2026-07-16):** the fix (A2 `test -f` the unit, then WARN +
+defer to the /status poll instead of throwing) worked on a clean box -- verbatim, the block
+STILL exits 1 even after the tee was removed, so the tee was NOT the sole cause and the
+`test -f`-then-defer is the load-bearing half. Do BOTH (drop the redundant tee AND gate on
+the invariant); do not assume removing the noisy command makes the block exit 0.
+
+## L12 -- fixing one false-failure exposes the NEXT step; the same too-short-timeout bug recurs
+
+**Discovered:** v1.0.41 cfv-0716r (2026-07-16). With the gateway false-failure (L11) fixed,
+the install reached -- for the first time on a clean box -- `Step-InstallChatProxy` /
+`resources/install-chat-proxy.sh` (Blocker 1: proxy owns 8787, real gateway -> private 8788).
+It moved the gateway to 8788 via a systemd `ExecStart=` drop-in, restarted via
+`systemctl --user restart`, and health-checked the new port for only ~30s
+(`seq 1 15; sleep 2`), the proxy /status for ~20s (`seq 1 10; sleep 2`), and
+`Step-EnableChatCompletions` waited 12s. But the gateway cold-start on a 2-vCPU VM is ~67s
+(the SAME number that forced the gateway `/status` poll from 60s -> 120s). All three windows
+undershoot 67s -> the restarted gateway is still cold-starting when the proxy step gives up ->
+FATAL rollback -> `INSTALLER_DONE=failure` ("ClawChat would be UNGATED - do not ship").
+
+**Rules:**
+1. **Every gateway restart+health-check in the install path must budget for the ~67s cold
+   start**, not a hopeful 12-30s. When you widen one such timeout, grep for the others -- they
+   are the same bug waiting for the step above them to stop RED-gating first.
+2. **A fixed blocker uncovers the next domino.** A run that has *never* reached step N cannot
+   have validated step N. Expect the first green-past-a-longstanding-gate run to expose a fresh
+   failure downstream; budget a follow-up build for it rather than calling the fix "done."
+3. **Prefer the mechanism that already works over the one that's fragile in-context.** The
+   gateway *install* comes up reliably because `openclaw gateway install --force` direct-starts
+   it; the proxy step's port-move leans on `systemctl --user restart`, which is fragile in the
+   no-user-bus install context (see the deferred `enable-linger || true`). Route (v1.0.42):
+   widen the health windows to >=120s to match the /status poll, AND harden the restart the way
+   the install does. The fail-closed behavior itself is correct -- do not relax the gate; make
+   the gateway actually come up in time.
