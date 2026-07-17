@@ -434,3 +434,44 @@ deliverable, not the one fix.
    *restart* steps lean on `systemctl --user restart`, which is the fragile link (L12 rule 3, still
    open -> v1.0.43). Instrument the failing step (the probe now captures the `[chat-proxy]` detail)
    before assuming the timeout was the whole story.
+
+## L14 -- restart via the mechanism the install PROVES works; and audit the CONTEXT of every health probe
+
+**Discovered:** v1.0.43 (cfv-0717a/b, 2026-07-17). L13 confirmed 120s clears the cold start but the
+install still failed -- the *restart* was the bug, and there were TWO of them:
+1. **Restart mechanism.** Every restart step (`Step-EnableChatCompletions`, `install-chat-proxy.sh`)
+   used a bare `systemctl --user restart`, fragile in the no-login WSL install context. The gateway
+   *install* comes up reliably via `openclaw gateway install --force` (its own start). Fix = a shared
+   `restart_gateway_reliably <port>`: `openclaw gateway restart` (openclaw's OWN, token-preserving),
+   fallback `openclaw gateway install --force` (proven start, honors the ExecStart drop-in), with XDG
+   + `assert_user_manager_ready`. Never a bare unit restart. This made the install GREEN.
+2. **Health-probe CONTEXT (the latent one).** `install-chat-proxy.sh` health-checked the moved
+   gateway on 8788 **as clawuser** -- but the nft firewall DROPS `clawuser->8788` (that is the whole
+   point of the private port). So the probe got 000 even when the gateway was healthy -> fail-closed
+   rollback. Latent since the feature shipped; never exercised until the step first ran on a
+   firewall-active clean box. **Rule: a health probe must run from a context the firewall ALLOWS for
+   that port.** Probe the private port as root (exempt); probe the public/proxy port as the client
+   (clawuser). Audit the uid of every `curl`/health check against the egress rules, not just its
+   timeout.
+
+## L15 -- a green install gate exposes the RUNTIME; the agent's first real run is its own gate
+
+**Discovered:** v1.0.43 cfv-0717b (2026-07-17). The install finally passed, so the agent ran on a
+clean box for the FIRST time (every prior run died at the install gate) -- and it couldn't start:
+`EACCES: permission denied, open '/home/clawuser/.openclaw/workspace/AGENTS.md'`. Root cause:
+`freeze-injected-soul.sh` runs as root and `mkdir -p …/workspace` BEFORE OpenClaw creates it lazily,
+leaving the workspace **directory** root-owned; it chowns only `SOUL.md`, so clawuser can't write
+`AGENTS.md`. The B4 positive control failed -> the whole headline test is INVALID (by its own rule).
+
+**Rules:**
+1. **Fixing the gate reveals the next domino (L12 again, now at the runtime layer).** A step that
+   creates a path AS ROOT on behalf of a clawuser service must `chown` it back, or the service can't
+   write there. `mkdir -p` as root is a silent ownership trap -- grep every root `mkdir`/`install -d`
+   under a user's `$HOME` for a matching chown.
+2. **Only freeze the file, not its directory.** Immutability belongs on `SOUL.md` (root:root 444 +i);
+   the workspace *directory* must stay writable by the agent uid.
+3. **The consumer view has its own control.** The isolation SUBSTRATE was validated by observation
+   this run (private-port firewall: `clawuser->8788=000`, `proxy_8787=200`; SOUL immutable; spend
+   gate; docker gone), but the headline's agent's-own-output proof needs a working agent -- which is
+   itself gated by (1). Separate "the substrate holds" from "the agent, driven, cannot reach it"; the
+   second needs the agent to actually run.
