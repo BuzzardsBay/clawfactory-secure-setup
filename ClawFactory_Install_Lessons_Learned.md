@@ -404,3 +404,33 @@ FATAL rollback -> `INSTALLER_DONE=failure` ("ClawChat would be UNGATED - do not 
    widen the health windows to >=120s to match the /status poll, AND harden the restart the way
    the install does. The fail-closed behavior itself is correct -- do not relax the gate; make
    the gateway actually come up in time.
+
+## L13 -- a cold-start-sensitive timeout is never a single site; fix the CLASS, and don't stop at the window
+
+**Discovered:** v1.0.42 (cfv-0716r -> cfv-0716s, 2026-07-16). L12 fixed the ONE window that fired;
+this session audited EVERY gateway health window in the install path and swept the whole class to a
+single 120s standard behind a shared helper (`resources/gateway-wait.sh`, `wait_for_gateway_healthy`
+sourced by both `install-chat-proxy.sh` and `Step-EnableChatCompletions`, staged by
+`Step-StageGatewayHelper`; PS-only sites -- the PostInstall-Smoke `/status` Check and `launcher.ps1`
+-- widened in place to match). The inventory (10 sites; 5 were under the ~67s cold start) is the
+deliverable, not the one fix.
+
+**Rules:**
+1. **Audit the class before editing.** A timeout that failed because of a cold start is a *symptom
+   of a shared constant*, not a one-off. Grep the whole install path (`curl`/`/status`, `seq 1`,
+   `sleep`, `for i in`, `is-active`, "did not respond within") and list every window with its
+   effective seconds. Fixing three of four wastes the whole VM cycle.
+2. **One source of truth.** Put the window in a single helper both callers source, so the numbers
+   cannot drift apart again. Widen-in-place only where a shared source is genuinely too invasive
+   (PS-vs-bash transport), and comment the link.
+3. **Wall-clock, not accumulated sleep.** A cold gateway can cost `curl --max-time` per probe, so a
+   loop that counts only its sleeps overshoots its own budget. Bound on `date +%s`.
+4. **But the window may not be the bug.** v1.0.42 CONFIRMED 120s clears the ~67s cold start (the
+   main `/status` poll caught `exit 7,7,7,7,28,28,28 -> 0`) -- yet the install STILL failed, because
+   `Step-EnableChatCompletions` timed out at **120s** after its `systemctl --user restart`: the
+   *restart* took the gateway down and it did not come back. When a widened timeout still fails, the
+   failing operation (here the restart in the no-login WSL context), not the wait, is the real
+   defect. The gateway *install* comes up reliably via `openclaw gateway install --force`; the
+   *restart* steps lean on `systemctl --user restart`, which is the fragile link (L12 rule 3, still
+   open -> v1.0.43). Instrument the failing step (the probe now captures the `[chat-proxy]` detail)
+   before assuming the timeout was the whole story.
