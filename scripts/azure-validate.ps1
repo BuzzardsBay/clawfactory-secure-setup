@@ -434,14 +434,27 @@ if(-not [CF.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
             # Push the file to blob storage from the VM and pull it down whole.
             Say "Retrieving the bundle via blob (run-command's message field truncates at ~4 KB)..."
             $dName = "diag-out-$VmName.txt"
+            # FRESH expiry (not the staging-time $exp): a full-suite run with a WORKING
+            # agent takes >1h, so the staging SAS ($exp = start+1h) was already expired
+            # by the time the bundle was retrieved -> the VM's PUT failed
+            # "AuthenticationFailed" and the bundle was LOST (cfv-0717c). Compute the
+            # expiry NOW, generously, so retrieval never races the staging window.
+            $dExp  = (Get-Date).ToUniversalTime().AddHours(2).ToString('yyyy-MM-ddTHH:mmZ')
             $dSas  = az storage blob generate-sas --account-name $StorageAcct --account-key $key `
-                       --container-name $Container --name $dName --permissions cw --expiry $exp -o tsv
+                       --container-name $Container --name $dName --permissions cw --expiry $dExp -o tsv
             $dUrl  = "https://$StorageAcct.blob.core.windows.net/$Container/$dName`?$dSas"
             $up = Invoke-Rc ("Invoke-WebRequest -Uri '$dUrl' -Method Put -Headers @{'x-ms-blob-type'='BlockBlob'} " +
                              "-InFile C:\cfv\diag-out.txt -UseBasicParsing | Out-Null; " +
                              "`"UPLOADED=`$((Get-Item C:\cfv\diag-out.txt).Length)`"") 'upload-diag'
             if ($up -notmatch 'UPLOADED=\d+') { throw "Diagnostic upload did not confirm: $up" }
             Say "  $up" DarkGray
+            # AUTHORITATIVE check: the VM's "UPLOADED=<localsize>" prints even when the
+            # PUT itself failed (it reports the local file size, not the HTTP result), so
+            # it silently masked the expired-SAS failure on cfv-0717c. Confirm the blob
+            # ACTUALLY landed before trusting it / downloading.
+            $landed = az storage blob exists --account-name $StorageAcct --account-key $key `
+                        --container-name $Container --name $dName --query exists -o tsv
+            if ("$landed" -ne 'true') { throw "Diagnostic bundle did NOT land in blob storage (the VM PUT failed -- likely an expired SAS mid-run). VM reported '$up'. The bundle is on the VM but not retrievable; do not tear down blind next time." }
             az storage blob download --account-name $StorageAcct --account-key $key `
                 --container-name $Container --name $dName --file (Join-Path $dir 'diag-out.txt') --overwrite --output none
             $local = (Get-Item (Join-Path $dir 'diag-out.txt')).Length
