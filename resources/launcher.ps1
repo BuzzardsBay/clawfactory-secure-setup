@@ -2,7 +2,12 @@
 param(
     [string]$WslDistro  = 'Ubuntu',
     [string]$WslUser    = 'clawuser',
-    [int]   $TimeoutSec = 15,
+    # v1.0.42 (cold-start class sweep, L13): 120s, matching the install-path
+    # health windows (gateway-wait.sh) and the ~67s 2-vCPU cold start. The old 15s
+    # default showed the "could not start" dialog on the very first launch after a
+    # reboot, while the gateway was still warming up. Breaks on the first 200, so a
+    # warm gateway still opens instantly.
+    [int]   $TimeoutSec = 120,
     [int]   $PollSec    = 2
 )
 

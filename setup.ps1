@@ -658,7 +658,8 @@ function Step-Preflight {
     $required = @(
         'safety-rules.md', 'openclaw-shim.sh', 'clawfactory-turn-gate.sh',
         'clawfactory-spend-check.js', 'install-turn-gate.sh', 'freeze-injected-soul.sh',
-        'clawfactory-proxy.js', 'clawfactory-proxy.service', 'install-chat-proxy.sh'
+        'clawfactory-proxy.js', 'clawfactory-proxy.service', 'install-chat-proxy.sh',
+        'gateway-wait.sh'
     )
     $resDir  = Join-Path $PSScriptRoot 'resources'
     $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $resDir $_)) })
@@ -1201,7 +1202,17 @@ timeout 300 apt-get install -y --no-install-recommends \
     iptables nftables
 # Linger so clawuser's systemd --user manager (and the gateway) survives between
 # sessions. Previously a side-effect of the Docker step; kept explicitly.
+# v1.0.42 (L13, A2): verify the readback instead of a silent `|| true`. Linger is
+# what makes `systemctl --user` work in the no-login install context; a silent
+# failure here is what let the gateway port-move restart be a no-op. The
+# authoritative fail-loud assert is in gateway-wait.sh (assert_user_manager_ready),
+# re-run right before that restart; this is the early best-effort with a loud WARN.
 loginctl enable-linger clawuser || true
+if [ "$(loginctl show-user clawuser --property=Linger --value 2>/dev/null || echo no)" = "yes" ]; then
+    echo "[linger] enabled for clawuser"
+else
+    echo "[linger] WARN: enable-linger did not stick for clawuser (re-asserted before the gateway port-move)" >&2
+fi
 '@
     $rc = Invoke-WslBash -Script $script -User 'root'
     if ($rc -ne 0) { throw 'Base dependency install failed' }
@@ -1750,7 +1761,14 @@ fi
 # clawuser has no active session, killing openclaw-gateway. Studio's
 # wsl-keepalive helper holds a session at runtime, but linger covers the
 # install / reboot / restart gap.
+# v1.0.42 (L13, A2): verify the readback instead of a silent `|| true` (the
+# fail-loud assert before the gateway port-move is in gateway-wait.sh).
 loginctl enable-linger clawuser || true
+if [ "$(loginctl show-user clawuser --property=Linger --value 2>/dev/null || echo no)" = "yes" ]; then
+    echo "[linger] enabled for clawuser"
+else
+    echo "[linger] WARN: enable-linger did not stick for clawuser (re-asserted before the gateway port-move)" >&2
+fi
 
 # --- e. Resolve LLM-provider hostnames into the egress firewall allowlist
 # (this depends on Step-EgressFirewall having run already so the table or
@@ -2170,6 +2188,35 @@ echo 'auth profile registered'
     Save-Checkpoint 'OpenClawConfigured'
 }
 
+function Step-StageGatewayHelper {
+    # v1.0.42 (cold-start class sweep, L13): stage the shared gateway-health helper
+    # (resources/gateway-wait.sh) to a stable, world-readable path so BOTH
+    # Step-EnableChatCompletions and install-chat-proxy.sh source ONE definition of
+    # the 120s cold-start health window (wait_for_gateway_healthy) and the
+    # user-manager readiness assert (assert_user_manager_ready). This is what stops
+    # the windows drifting apart and re-introducing the v1.0.41 class of
+    # false-failure. MUST run before Step-EnableChatCompletions and Step-InstallChatProxy.
+    Write-Log INFO 'Staging shared gateway-health helper (gateway-wait.sh).'
+    $libPath = Join-Path $PSScriptRoot 'resources\gateway-wait.sh'
+    if (-not (Test-Path -LiteralPath $libPath)) { throw "gateway-wait.sh not found at $libPath (installer bundling error -- Step-Preflight should have caught this)." }
+    $libB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(([IO.File]::ReadAllText($libPath)).Replace("`r`n","`n").Replace("`r","`n")))
+    $drop = @"
+set -e
+mkdir -p /usr/local/lib/clawfactory
+echo '$libB64' | base64 -d > /usr/local/lib/clawfactory/gateway-wait.sh
+chown root:root /usr/local/lib/clawfactory/gateway-wait.sh
+chmod 0644 /usr/local/lib/clawfactory/gateway-wait.sh
+bash -n /usr/local/lib/clawfactory/gateway-wait.sh
+. /usr/local/lib/clawfactory/gateway-wait.sh
+type wait_for_gateway_healthy >/dev/null 2>&1 || { echo '[gateway-helper] FATAL: wait_for_gateway_healthy not defined after source' >&2; exit 1; }
+type assert_user_manager_ready >/dev/null 2>&1 || { echo '[gateway-helper] FATAL: assert_user_manager_ready not defined after source' >&2; exit 1; }
+echo '[gateway-helper] staged /usr/local/lib/clawfactory/gateway-wait.sh'
+"@
+    $rc = Invoke-WslBash -Script $drop -User 'root'
+    if ($rc -ne 0) { throw "Failed to stage the shared gateway-health helper gateway-wait.sh (exit=$rc). See the [wsl:root ...] lines in the install log at $LogFile." }
+    Save-Checkpoint 'StageGatewayHelper'
+}
+
 function Step-EnableChatCompletions {
     # v1.0.1: enable the OpenClaw gateway's HTTP /v1/chat/completions endpoint
     # so a future native chat app can talk to the gateway over loopback. Idempotent
@@ -2188,19 +2235,23 @@ function Step-EnableChatCompletions {
     # Also: --strict-json was the wrong flag for boolean values - --json is
     # what writes booleans correctly.
     Write-Log INFO 'Step 9b: Enabling gateway.http.endpoints.chatCompletions.enabled.'
+    # v1.0.42 (cold-start class sweep, L13): this restart triggers a fresh gateway
+    # cold start (~67s on a 2-vCPU VM). The prior 12s health loop undershot it and
+    # WARNed on a healthy gateway. Source the SHARED helper (gateway-wait.sh,
+    # staged by Step-StageGatewayHelper) and use the one 120s window used
+    # everywhere else, so this site cannot drift short again. Runs as clawuser, so
+    # no as_user arg (the gateway is on 8787 here; the move to 8788 is later).
     $script9b = @'
 set -e
+. /usr/local/lib/clawfactory/gateway-wait.sh
 openclaw config set gateway.http.endpoints.chatCompletions.enabled true --json >/dev/null
 echo "[chatCompletions-set] gateway.http.endpoints.chatCompletions.enabled = true"
 systemctl --user restart openclaw-gateway 2>&1 || true
-for i in 1 2 3 4 5 6; do
-    if curl -fsS --max-time 5 http://127.0.0.1:8787/status >/dev/null 2>&1; then
-        echo "[chatCompletions-restart] gateway healthy on attempt $i"
-        exit 0
-    fi
-    sleep 2
-done
-echo "[chatCompletions-restart] WARNING: gateway did not respond within 12s after restart" >&2
+if wait_for_gateway_healthy 8787; then
+    echo "[chatCompletions-restart] gateway healthy within ${CLAWFACTORY_GATEWAY_HEALTH_TIMEOUT_S}s after restart"
+    exit 0
+fi
+echo "[chatCompletions-restart] WARNING: gateway did not respond within ${CLAWFACTORY_GATEWAY_HEALTH_TIMEOUT_S}s after restart" >&2
 exit 1
 '@
     try {
@@ -2649,8 +2700,16 @@ Check "AgentBootstrap checkpoint recorded" {
     (Get-Content $cp -Raw | ConvertFrom-Json).completedSteps -contains "AgentBootstrap" }
 
 Check "Gateway responds 200 on loopback" {
-    try { (Invoke-WebRequest -Uri http://127.0.0.1:8787/status -UseBasicParsing -TimeoutSec 5).StatusCode -eq 200 }
-    catch { $false } }
+    # v1.0.42 (cold-start class sweep, L13): poll up to 120s (break on first 200)
+    # instead of a single 5s probe. This smoke task fires AtLogon and can race the
+    # ~67s gateway cold start on a just-booted box; a single-shot probe produced a
+    # false FAIL. Matches the install-path 120s standard (gateway-wait.sh).
+    $deadline = (Get-Date).AddSeconds(120); $ok = $false
+    do {
+        try { if ((Invoke-WebRequest -Uri http://127.0.0.1:8787/status -UseBasicParsing -TimeoutSec 5).StatusCode -eq 200) { $ok = $true; break } } catch {}
+        Start-Sleep -Seconds 3
+    } while ((Get-Date) -lt $deadline)
+    $ok }
 
 Check "Firewall inbound-deny rule on 8787" {
     $r = Get-NetFirewallRule -DisplayName "ClawFactory-Block-Inbound-8787" -ErrorAction SilentlyContinue
@@ -2815,6 +2874,7 @@ Invoke-WithRollback {
     # connection) avoids the cycle entirely.
     Step-ConfigureOpenClaw       # gateway, default model, auth profile registration (writes openclaw.json)
     Step-PreinstallGatewayRuntime  # bypass egress firewall: install gateway deps as root, then start gateway
+    Step-StageGatewayHelper      # v1.0.42: stage the shared 120s gateway-health helper (gateway-wait.sh) BEFORE the two steps that source it
     Step-EnableChatCompletions   # v1.0.1, repositioned in v1.0.2: must run AFTER runtime install (`openclaw config set` needs the runtime present, or it just prints --help)
     Step-CreateAgentDirectories  # pre-create 4 agent dirs (orchestrator, scout, builder, publisher)
     Step-ApplySafetyRules        # SOUL.md + hash pinning

@@ -3,7 +3,7 @@
 ; Compile with: "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ClawFactory-Secure-Setup.iss
 
 #define MyAppName      "ClawFactory Secure Setup"
-#define MyAppVersion   "1.0.41"
+#define MyAppVersion   "1.0.42"
 #define MyAppPublisher "Frontier Automation Systems LLC"
 #define MyAppURL       "https://openclaw.ai"
 
@@ -75,6 +75,7 @@ Source: "resources\freeze-injected-soul.sh";   DestDir: "{app}\resources";  Flag
 Source: "resources\clawfactory-proxy.js";      DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\clawfactory-proxy.service"; DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\install-chat-proxy.sh";     DestDir: "{app}\resources";  Flags: ignoreversion
+Source: "resources\gateway-wait.sh";           DestDir: "{app}\resources";  Flags: ignoreversion
 
 [Run]
 ; [R5] No API key on the command line - setup.ps1 reads from Windows Credential Manager.
