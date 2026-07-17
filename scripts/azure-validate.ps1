@@ -51,8 +51,8 @@ param(
     [string]$Size          = "Standard_D2s_v4",     # NOT D2s_v5: quota 0 in westus2
     [string]$StorageAcct   = "clawfactoryvalc467",
     [string]$Container     = "installers",
-    [string]$Blob          = "ClawFactory-Secure-Setup-v1.0.43.exe",
-    [string]$ExpectSha256  = "04f31366afe40604e3e4f25a07a7e71b3d3a7211e2819bbe87bf4505d8cc444e",
+    [string]$Blob          = "ClawFactory-Secure-Setup-v1.0.44.exe",
+    [string]$ExpectSha256  = "08c9be10fff0756677e2a490b85226c7e137074f8f1d6c0d20f39669262bc282",
     [string]$AdminUser     = "clawadmin",
     [string]$OutDir        = (Join-Path (Split-Path -Parent $PSScriptRoot) "validation-runs"),
     [switch]$KeepVm,
