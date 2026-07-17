@@ -22,7 +22,6 @@ UNITFILE=/home/clawuser/.config/systemd/user/openclaw-gateway.service
 DROPDIR=/home/clawuser/.config/systemd/user/openclaw-gateway.service.d
 DROPIN=$DROPDIR/clawfactory-real-port.conf
 REAL_PORT=8788
-UCTL='XDG_RUNTIME_DIR=/run/user/1000 systemctl --user'
 
 # Shared cold-start health helpers -- the SINGLE source of the 120s health window
 # (wait_for_gateway_healthy) and the user-manager readiness assert
@@ -32,7 +31,7 @@ UCTL='XDG_RUNTIME_DIR=/run/user/1000 systemctl --user'
 if [ -r /usr/local/lib/clawfactory/gateway-wait.sh ]; then
     . /usr/local/lib/clawfactory/gateway-wait.sh
 fi
-if ! type wait_for_gateway_healthy >/dev/null 2>&1 || ! type assert_user_manager_ready >/dev/null 2>&1; then
+if ! type wait_for_gateway_healthy >/dev/null 2>&1 || ! type assert_user_manager_ready >/dev/null 2>&1 || ! type restart_gateway_reliably >/dev/null 2>&1; then
     echo "[chat-proxy] FATAL: gateway-wait.sh helper not available (Step-StageGatewayHelper must run first)" >&2
     exit 1
 fi
@@ -63,42 +62,40 @@ mkdir -p "$DROPDIR"
 } > "$DROPIN"
 chown -R clawuser:clawuser "$DROPDIR"
 
-# A2 (linger): the port-move restart below is `systemctl --user`, which is a
-# silent no-op unless clawuser's user manager is actually up. Assert it (enables
-# linger idempotently + waits for /run/user/1000 and a live bus) and FAIL LOUD if
-# it never comes up -- otherwise the restart would appear to succeed while the
-# gateway never actually moves to $REAL_PORT.
-if ! assert_user_manager_ready clawuser; then
-    echo "[chat-proxy] FATAL: clawuser systemd --user manager is not ready (linger/user-bus). The gateway port-move restart would be a silent no-op. Enable linger and ensure /run/user/1000 is up." >&2
-    exit 1
-fi
-su clawuser -s /bin/bash -c "$UCTL daemon-reload; $UCTL restart openclaw-gateway"
-
-# Health window = 120s (shared standard), matched to the ~67s cold-start. A
-# restart triggers a fresh cold start; the previous ~30s loop undershot it and
-# fail-closed a healthy install (v1.0.41, cfv-0716r).
-ok=0
-wait_for_gateway_healthy "$REAL_PORT" "" clawuser && ok=1
-if [ "$ok" != "1" ]; then
-    echo "[chat-proxy] FATAL: gateway did not come up on $REAL_PORT within ${CLAWFACTORY_GATEWAY_HEALTH_TIMEOUT_S}s -- rolling back to 8787" >&2
+# v1.0.43 (restart class + firewall-context fix): move the gateway to $REAL_PORT
+# using the RELIABLE restart -- openclaw's own `openclaw gateway restart`, falling
+# back to `openclaw gateway install --force` (the mechanism the gateway install
+# proves works in the no-login WSL context) -- NOT a bare `systemctl --user
+# restart`, which cfv-0716s showed fails to rebind. restart_gateway_reliably
+# asserts the user manager first (linger/bus) and fails loud if it never comes up.
+#
+# CRITICAL: restart_gateway_reliably runs the HEALTH PROBE as the caller's uid,
+# and we are ROOT here -- ON PURPOSE. The nft firewall drops
+# clawuser->127.0.0.1:$REAL_PORT (the private port is reachable only by root and
+# the proxy). Probing $REAL_PORT as clawuser (the pre-v1.0.43 code) is DROPPED
+# (000) even when the gateway is perfectly healthy -- a latent bug that fail-closed
+# a healthy install once the firewall + this step both ran on a clean box.
+if ! restart_gateway_reliably "$REAL_PORT"; then
+    echo "[chat-proxy] FATAL: gateway did not come up on $REAL_PORT (root-probed) within the health window -- rolling back to 8787" >&2
     rm -f "$DROPIN"
-    su clawuser -s /bin/bash -c "$UCTL daemon-reload; $UCTL restart openclaw-gateway"
+    restart_gateway_reliably 8787 || true
     exit 1
 fi
 echo "[chat-proxy] real gateway is on 127.0.0.1:$REAL_PORT"
 
 # --- Start the proxy on the public port ------------------------------------
 systemctl enable --now clawfactory-proxy >/dev/null 2>&1 || true
-# Health window = 120s (shared standard). The proxy forwards to the gateway on
-# $REAL_PORT, so this also absorbs any residual gateway warmup; the previous ~20s
-# loop undershot the ~67s cold-start.
+# The proxy on 8787 is the CLIENT path -- verify it AS CLAWUSER, because that is
+# exactly the reachability the CLI/ClawChat get (clawuser->8787 is allowed; only
+# ->8788 is dropped). The proxy forwards /status to the gateway on $REAL_PORT, so
+# a 200 here also confirms the gateway. 120s shared window.
 ok=0
 wait_for_gateway_healthy 8787 "" clawuser && ok=1
 if [ "$ok" != "1" ]; then
     echo "[chat-proxy] FATAL: /status not 200 through the proxy within ${CLAWFACTORY_GATEWAY_HEALTH_TIMEOUT_S}s -- rolling back" >&2
     systemctl disable --now clawfactory-proxy >/dev/null 2>&1 || true
     rm -f "$DROPIN"
-    su clawuser -s /bin/bash -c "$UCTL daemon-reload; $UCTL restart openclaw-gateway"
+    restart_gateway_reliably 8787 || true
     exit 1
 fi
 echo "[chat-proxy] gating proxy is live on 127.0.0.1:8787 -> 127.0.0.1:$REAL_PORT"

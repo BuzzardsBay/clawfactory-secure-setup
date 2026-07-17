@@ -80,3 +80,53 @@ assert_user_manager_ready() {
     done
     return 1
 }
+
+# _gw_run_clawuser <cmd> -- run <cmd> as clawuser with XDG_RUNTIME_DIR and a login
+#   PATH (so ~/.local/bin/openclaw resolves), whether the caller is root or already
+#   clawuser. Internal helper for restart_gateway_reliably.
+_gw_run_clawuser() {
+    local uid
+    uid="$(id -u clawuser 2>/dev/null || echo 1000)"
+    if [ "$(id -u)" = "0" ]; then
+        su clawuser -s /bin/bash -lc "XDG_RUNTIME_DIR=/run/user/$uid $1"
+    else
+        bash -lc "XDG_RUNTIME_DIR=/run/user/$uid $1"
+    fi
+}
+
+# restart_gateway_reliably <port> -- (re)start the openclaw gateway and confirm it
+#   answers on <port>, using the mechanism the gateway INSTALL proves works rather
+#   than a bare `systemctl --user restart` (which demonstrably fails to rebind in
+#   the no-login WSL install context -- cfv-0716s: EnableChatCompletions timed out
+#   at 120s after its restart). Steps: (root) assert the user manager is up ->
+#   daemon-reload -> `openclaw gateway restart` (openclaw's OWN sanctioned,
+#   token-preserving restart) -> wait 60s -> if still not healthy, fall back to
+#   `openclaw gateway install --force` (the proven install-start; the OpenClaw
+#   runbook's supported re-resolve after a port change; --force is idempotent and
+#   an ExecStart drop-in still wins on daemon-reload, so the gateway comes up on
+#   the drop-in port) -> wait 120s.
+#
+#   The HEALTH PROBE runs as the CALLER's uid, not clawuser: the nft firewall drops
+#   clawuser->127.0.0.1:8788 (the private port is reachable only by root/the proxy),
+#   so a clawuser probe of 8788 can never succeed even when the gateway is healthy.
+#   Callers on 8788 MUST run as root; callers on 8787 may be clawuser (that path is
+#   allowed). Returns 0 if healthy within the window, 1 otherwise.
+restart_gateway_reliably() {
+    local port="$1"
+    local timeout_s="${2:-$CLAWFACTORY_GATEWAY_HEALTH_TIMEOUT_S}"
+    if [ "$(id -u)" = "0" ]; then
+        assert_user_manager_ready clawuser || return 1
+    fi
+    # Attempt 1 -- openclaw's OWN restart (token-preserving; the runbook's
+    # sanctioned restart). Give it the full cold-start window so a working restart
+    # is not abandoned early (the ~67s cold start would overrun a shorter wait).
+    _gw_run_clawuser "systemctl --user daemon-reload" >/dev/null 2>&1 || true
+    _gw_run_clawuser "openclaw gateway restart" >/dev/null 2>&1 || true
+    if wait_for_gateway_healthy "$port" "$timeout_s"; then return 0; fi
+    # Attempt 2 (fallback) -- the install's proven start. Heavier (may re-resolve
+    # the service / regenerate the token), so it is the last resort; ordering keeps
+    # it safe (the proxy and clients read the token after the gateway is up).
+    _gw_run_clawuser "openclaw gateway install --force --port 8787" >/dev/null 2>&1 || true
+    _gw_run_clawuser "systemctl --user daemon-reload" >/dev/null 2>&1 || true
+    wait_for_gateway_healthy "$port" "$timeout_s"
+}

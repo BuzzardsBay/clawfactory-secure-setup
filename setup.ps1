@@ -2235,23 +2235,24 @@ function Step-EnableChatCompletions {
     # Also: --strict-json was the wrong flag for boolean values - --json is
     # what writes booleans correctly.
     Write-Log INFO 'Step 9b: Enabling gateway.http.endpoints.chatCompletions.enabled.'
-    # v1.0.42 (cold-start class sweep, L13): this restart triggers a fresh gateway
-    # cold start (~67s on a 2-vCPU VM). The prior 12s health loop undershot it and
-    # WARNed on a healthy gateway. Source the SHARED helper (gateway-wait.sh,
-    # staged by Step-StageGatewayHelper) and use the one 120s window used
-    # everywhere else, so this site cannot drift short again. Runs as clawuser, so
-    # no as_user arg (the gateway is on 8787 here; the move to 8788 is later).
+    # v1.0.43 (restart class, L14): enabling chatCompletions needs the gateway to
+    # restart to pick up the config. The prior bare `systemctl --user restart`
+    # (v1.0.42) with no XDG demonstrably took the gateway DOWN on 8787 and it did
+    # not come back within 120s (cfv-0716s: exit=1). Use the shared reliable restart
+    # instead -- `openclaw gateway restart` (openclaw's own), falling back to
+    # `openclaw gateway install --force` (the mechanism the install proves works),
+    # with XDG + a login PATH. Runs as clawuser; the 8787 health probe is a
+    # clawuser-allowed path (only ->8788 is firewall-dropped).
     $script9b = @'
 set -e
 . /usr/local/lib/clawfactory/gateway-wait.sh
 openclaw config set gateway.http.endpoints.chatCompletions.enabled true --json >/dev/null
 echo "[chatCompletions-set] gateway.http.endpoints.chatCompletions.enabled = true"
-systemctl --user restart openclaw-gateway 2>&1 || true
-if wait_for_gateway_healthy 8787; then
-    echo "[chatCompletions-restart] gateway healthy within ${CLAWFACTORY_GATEWAY_HEALTH_TIMEOUT_S}s after restart"
+if restart_gateway_reliably 8787; then
+    echo "[chatCompletions-restart] gateway healthy after reliable restart"
     exit 0
 fi
-echo "[chatCompletions-restart] WARNING: gateway did not respond within ${CLAWFACTORY_GATEWAY_HEALTH_TIMEOUT_S}s after restart" >&2
+echo "[chatCompletions-restart] WARNING: gateway did not respond after reliable restart" >&2
 exit 1
 '@
     try {
