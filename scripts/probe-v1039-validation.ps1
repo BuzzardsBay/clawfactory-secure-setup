@@ -36,8 +36,13 @@ function AgentSay([string]$Msg, [string]$Agent = 'main', [int]$T = 150) {
     $mb = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Msg))
     $inner = "timeout $T openclaw agent --agent $Agent --message `"`$(printf %s '$mb' | base64 -d)`" 2>&1"
     $b = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($inner))
-    $o = (& wsl.exe -d Ubuntu --cd / -u clawuser -- bash -lc "echo $b | base64 -d | bash" 2>&1 | Out-String)
-    return (($o -split "`n") | Where-Object { $_ -notmatch 'staging bundled|installed bundled' }) -join "`n"
+    # 2>$null on the OUTER wsl call suppresses wsl's "Failed to translate <Windows
+    # PATH>" noise (automount=false); the agent's OWN output + errors still reach us
+    # via the INNER 2>&1. Without this the noise ("...C:\Users\clawadmin\...") made
+    # the 4.3 leak check `-match 'clawadmin'` FALSE-fire on cfv-0717b even though the
+    # agent surfaced no ungranted content. Belt-and-suspenders filter too.
+    $o = (& wsl.exe -d Ubuntu --cd / -u clawuser -- bash -lc "echo $b | base64 -d | bash" 2>$null | Out-String)
+    return (($o -split "`n") | Where-Object { $_ -notmatch 'staging bundled|installed bundled|Failed to translate' }) -join "`n"
 }
 # A chatCompletions turn through the gating proxy (127.0.0.1:8787). Returns raw JSON.
 function ChatTurn([string]$prompt, [int]$T = 150) {
@@ -145,7 +150,10 @@ Try-Task "TASK 3 -- standard flow" {
     W (Wsl '/usr/sbin/nft list table inet clawfactory >/dev/null 2>&1 && echo "table PRESENT" || echo "table MISSING"; /usr/sbin/nft list chain inet clawfactory output 2>&1 | head -10' 'root')
     W "--- 3.4 chatCompletions ACK through the gated proxy (200+reply => the gate ALLOWED it) ---"
     $ct = ChatTurn 'Reply with exactly the word ACK and nothing else.'
-    W (($ct -replace '\s+', ' ').Trim().Substring(0, [Math]::Min(400, $ct.Length)))
+    # Truncate via regex, not Substring(0, Min(400, $ct.Length)) -- the length was
+    # taken from the UNTRIMMED $ct, so a short-but-whitespacey reply threw
+    # "Index and length must refer to a location within the string" (cfv-0717b 3.4).
+    W ((($ct -replace '\s+', ' ').Trim()) -replace '^(.{0,400}).*$', '$1')
     W ("3.4 VERDICT: " + $(if ($ct -match '"object"\s*:\s*"chat.completion"' -and $ct -notmatch '"error"') { 'PASS -- gate allowed a normal turn' } else { 'FAIL/UNCLEAR' }))
     W "--- 3.3 5-minute idle stability (NO wsl/browser/dashboard touches) then /status ---"
     W "sleeping 300s (idle) ..."
@@ -246,13 +254,13 @@ Try-Task "TASK 8 -- spend governor" {
     W (Wsl '/usr/local/sbin/clawfactory-turn-gate.sh 2>&1 | head -3; echo "gate_rc=$?"')
     W ">>> ClawChat path (chatCompletions) with gateway down:"
     $cd = ChatTurn 'Say hello.' 30
-    W (($cd -replace '\s+', ' ').Trim().Substring(0, [Math]::Min(300, $cd.Length)))
+    W ((($cd -replace '\s+', ' ').Trim()) -replace '^(.{0,300}).*$', '$1')
     W (Wsl 'XDG_RUNTIME_DIR=/run/user/1000 systemctl --user start openclaw-gateway 2>/dev/null; sleep 8; echo "gateway_restarted=$(systemctl --user is-active openclaw-gateway 2>/dev/null)"')
     W "--- 8.2 blocked-turn UX: cap below spend -> ClawChat turn blocked as a readable message ---"
     $capB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('{"daily_cap_usd":0,"monthly_cap_usd":0,"warn_pct":80}'))
     W (Wsl ("echo $capB64 | base64 -d > /etc/clawfactory/governor.json; chmod 644 /etc/clawfactory/governor.json; cat /etc/clawfactory/governor.json") 'root')
     $blk = ChatTurn 'Please summarize the news.'
-    W ("blocked-turn assistant content: " + (($blk -replace '\s+', ' ').Trim().Substring(0, [Math]::Min(400, $blk.Length))))
+    W ("blocked-turn assistant content: " + ((($blk -replace '\s+', ' ').Trim()) -replace '^(.{0,400}).*$', '$1'))
     W ("8.2 VERDICT: " + $(if ($blk -match 'cap|budget|spend|limit') { 'PASS -- readable cap message' } else { 'FAIL/UNCLEAR' }))
     # restore a sane mirror so later checks are not wrongly blocked
     Wsl ('echo ' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('{"daily_cap_usd":999,"monthly_cap_usd":9999,"warn_pct":80}')) + ' | base64 -d > /etc/clawfactory/governor.json; chmod 644 /etc/clawfactory/governor.json') 'root' | Out-Null
