@@ -102,6 +102,23 @@ Try-Task "TASK 2 -- INSTALL-COMPLETION GATE" {
     } else { W "(no [gateway-install] openclaw gateway install line found)" }
     W "--- the [wsl:clawuser exit] value(s) around the gateway step (THE load-bearing number) ---"
     W (($il | Select-String -Pattern '\[wsl:clawuser exit\]' | Select-Object -Last 4 | Out-String).Trim())
+
+    # v1.0.42: the install gate now blocks at the chatCompletions gating-proxy step,
+    # not the gateway install. Capture the linger readback, helper staging,
+    # EnableChatCompletions restart, and the [chat-proxy] FATAL detail so the next
+    # run pins down WHY (user-manager assert vs 8788 health-wait vs proxy /status).
+    W "--- B2.5 chatCompletions gating-proxy step (the current install-gate blocker) ---"
+    W ("[linger] readback: " + (($il | Select-String -Pattern '\[linger\]' | Select-Object -Last 4 | Out-String).Trim()))
+    W ("[gateway-helper] stage: " + (($il | Select-String -Pattern '\[gateway-helper\]' | Select-Object -Last 2 | Out-String).Trim()))
+    W ("[chatCompletions-restart] + EnableChatCompletions rc: " + (($il | Select-String -Pattern '\[chatCompletions-restart\]|Step-EnableChatCompletions returned' | Select-Object -Last 4 | Out-String).Trim()))
+    W "--- [chat-proxy] FATAL detail (8788 move / user-manager assert / rollback) ---"
+    W (($il | Select-String -Pattern '\[chat-proxy\]|user manager is not ready|did not come up on 8788|not 200 through the proxy|rolling back|real gateway is on 127|gating proxy is live' | Select-Object -Last 20 | Out-String).Trim())
+    W "--- full window around the chat-proxy step (exit codes) ---"
+    $cpStart = ($il | Select-String -Pattern 'Installing the chatCompletions gating proxy|Step 15d' | Select-Object -Last 1).LineNumber
+    if ($cpStart) {
+        $ctail = $il[($cpStart - 1)..([Math]::Min($il.Count - 1, $cpStart + 30))]
+        W (($ctail | Where-Object { $_ -match 'chat-proxy|chatCompletions|wsl:(clawuser|root) (exit|err)|8788|proxy|linger|gateway-helper|rolling back|user manager' } | Out-String).Trim())
+    } else { W "(no chatCompletions-proxy start marker found)" }
 }
 W ""
 W ("=====> TASK 2 GATE: " + $(if ($gateOk) { 'PASS -- proceeding to the full suite' } else { 'FAIL -- STOPPING. Tasks 3-9 skipped (no point validating a broken install).' }))
