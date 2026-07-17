@@ -19,10 +19,16 @@ function Section($t) { W ""; W ("########## " + $t + " ##########") }
 function Wsl([string]$cmd, [string]$user = 'clawuser') {
     # --cd / : with automount=false (the isolation under test), wsl.exe cannot
     # translate the Windows CWD (C:\Windows\system32 under RunOnce) and spews
-    # "Failed to translate ..." to stderr, polluting output and breaking verdict
-    # parsing. Forcing the WSL cwd to / avoids the translation entirely.
+    # "Failed to translate ..." to stderr. --cd / fixes the CWD, but wsl STILL
+    # spews the same "Failed to translate" for every Windows PATH entry it inherits,
+    # and `2>&1` turns those into PS ErrorRecords that pollute the captured string.
+    # On cfv-0717a that noise false-FAILed the exact-match 2.3 check (http was 200,
+    # but $st.Trim() -ne '200' because the noise was prepended) -> the gate halted
+    # and skipped the headline on a GREEN install. Suppress wsl's own stderr with
+    # `2>$null`; commands that need their OWN stderr merge it via an inner `2>&1`
+    # (e.g. Task 8's turn-gate), which reaches us on stdout regardless.
     $b = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($cmd))
-    return (& wsl.exe -d Ubuntu --cd / -u $user -- bash -lc "echo $b | base64 -d | bash" 2>&1 | Out-String)
+    return (& wsl.exe -d Ubuntu --cd / -u $user -- bash -lc "echo $b | base64 -d | bash" 2>$null | Out-String)
 }
 # Drive the REAL gated agent (openclaw agent runs through the turn-gate shim), as
 # clawuser, and return its own words. Plugin-staging noise stripped.
@@ -73,8 +79,11 @@ Try-Task "TASK 2 -- INSTALL-COMPLETION GATE" {
 
     W "`n--- 2.3 /status = 200 ---"
     $st = Wsl 'curl -s -o /dev/null -w "%{http_code}" --max-time 8 http://127.0.0.1:8787/status'
-    W ("http=$st")
-    if ($st.Trim() -ne '200') { $script:gateOk = $false; W "2.3 VERDICT: FAIL" } else { W "2.3 VERDICT: PASS" }
+    # Extract the http code robustly (last 3-digit token) instead of an exact-match
+    # on the whole string, so any residual wsl noise cannot false-fail a 200.
+    $code = ([regex]::Matches("$st", '\b\d{3}\b') | Select-Object -Last 1).Value
+    W ("http=$code")
+    if ($code -ne '200') { $script:gateOk = $false; W "2.3 VERDICT: FAIL" } else { W "2.3 VERDICT: PASS" }
 
     W "`n--- 2.4 OWNERSHIP: the .config/systemd/user chain (converts the cfv-0715p inference to observation) ---"
     $own = Wsl 'for d in /home/clawuser/.config /home/clawuser/.config/systemd /home/clawuser/.config/systemd/user /home/clawuser/.config/systemd/user/openclaw-gateway.service.d; do echo "$(stat -c "%U:%G %A" "$d" 2>/dev/null || echo MISSING)  $d"; done'
