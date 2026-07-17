@@ -25,6 +25,21 @@ FACTORY=/home/clawuser/.openclaw/SOUL.md
 PIN=/etc/clawfactory/workspace-soul.sha256
 MARKER='<!-- CLAWFACTORY-SAFETY-END: everything below is persona (workspace-owned) -->'
 mkdir -p /home/clawuser/.openclaw/workspace /etc/clawfactory
+# v1.0.44 (L16): this script runs as ROOT, and the `mkdir -p` above creates the agent
+# workspace directory ROOT-OWNED on a fresh box (OpenClaw creates it lazily on the
+# first turn; if the freeze runs first, root owns it). The agent (clawuser) then
+# EACCES'd creating /home/clawuser/.openclaw/workspace/AGENTS.md and could not start
+# (cfv-0717b). The DIRECTORY must be clawuser-owned so the agent can create AGENTS.md
+# and its own workspace files; only SOUL.md inside stays root-owned + immutable
+# (per-file chattr +i, applied below) -- directory write governs sibling creation, so
+# this does NOT weaken SOUL.md's protection. Mirror of the gateway .config ownership
+# fix. Non-recursive: if the dir pre-existed (clawuser created it), this is a no-op
+# and does not touch existing files; the confirmed openclaw#21571/#5434 EACCES class.
+chown clawuser:clawuser /home/clawuser/.openclaw/workspace
+# Only correct .openclaw itself if THIS run left it root-owned (it is normally
+# created clawuser-owned by the OpenClaw install; never blindly chown a pre-existing
+# clawuser tree).
+[ "$(stat -c '%U' /home/clawuser/.openclaw 2>/dev/null)" = "root" ] && chown clawuser:clawuser /home/clawuser/.openclaw
 [ -r "$FACTORY" ] || { echo "[injected-soul] FATAL: factory SOUL missing ($FACTORY); run Step-ApplySafetyRules first" >&2; exit 1; }
 
 DEFAULT_PERSONA='# SOUL.md - Who You Are
@@ -63,3 +78,12 @@ chown root:root "$WS"; chmod 444 "$WS"; chattr +i "$WS"
 sha256sum "$WS" | awk '{print $1}' > "$PIN"
 chown root:root "$PIN"; chmod 444 "$PIN"
 echo "[injected-soul] frozen + pinned: $(cat "$PIN") ($(wc -c < "$WS") bytes)"
+
+# v1.0.44 (L16) fail-loud: the two invariants this step now owns. The agent
+# (clawuser) MUST own its workspace directory (else it EACCES on AGENTS.md and cannot
+# start); SOUL.md inside MUST stay root-owned (immutability + the code gate protect
+# it). Assert both so this class cannot silently regress.
+WSDIR=/home/clawuser/.openclaw/workspace
+[ "$(stat -c '%U' "$WSDIR")" = "clawuser" ] || { echo "[injected-soul] FATAL: $WSDIR is not clawuser-owned; the agent will EACCES creating AGENTS.md and cannot start." >&2; exit 1; }
+[ "$(stat -c '%U' "$WS")" = "root" ]        || { echo "[injected-soul] FATAL: $WS is not root-owned -- SOUL protection lost." >&2; exit 1; }
+echo "[injected-soul] ownership OK: workspace dir=$(stat -c '%U:%G %A' "$WSDIR"); SOUL.md=$(stat -c '%U:%G %A' "$WS") lsattr=$(lsattr "$WS" 2>/dev/null | awk '{print $1}')"
