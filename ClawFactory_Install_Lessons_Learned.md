@@ -475,3 +475,45 @@ leaving the workspace **directory** root-owned; it chowns only `SOUL.md`, so cla
    gate; docker gone), but the headline's agent's-own-output proof needs a working agent -- which is
    itself gated by (1). Separate "the substrate holds" from "the agent, driven, cannot reach it"; the
    second needs the agent to actually run.
+
+## L16 -- the fix is proven when the CONSUMER runs; and a working-agent suite outlasts a 1h SAS
+
+**Discovered:** v1.0.44 (cfv-0717c/d, 2026-07-17). The L15 one-line `chown clawuser:clawuser
+/home/clawuser/.openclaw/workspace` (mirror of the gateway `.config` ownership fix -- root creates a
+path under the agent's $HOME, must chown it back) WORKED: the agent created its whole workspace
+(`AGENTS.md HEARTBEAT.md IDENTITY.md SOUL.md TOOLS.md USER.md`), and **the headline isolation is
+PROVEN from the agent's own output** -- it refuses the ungranted canary via `/mnt/c` and by listing,
+refuses symlink/`../../..` escapes, `/etc/shadow` denied, canary never appears (4.3/4.4). SOUL.md
+stayed root:root 444 +i and every tamper still blocked (T1.2a-c/T4.4) -- directory ownership and
+per-file immutability are orthogonal, exactly as intended.
+
+**Rules:**
+1. **Prove a runtime fix by driving the consumer, not by re-reading the config.** "AGENTS.md exists
+   in the workspace listing" + "the agent produced a real refusal in its own words" is the proof; a
+   mount table or an ownership `stat` is not.
+2. **A full suite with a WORKING agent easily exceeds 1h -- don't pin a SAS at staging time.** Every
+   prior run halted at the install gate in minutes, so nobody noticed the diag-retrieval SAS reused
+   the staging `$exp` (start+1h). The first run that actually ran the agent (cfv-0717c) took ~65 min
+   and the bundle-upload SAS was already expired -> AuthenticationFailed -> the evidence was lost and
+   the VM was torn down. Compute the retrieval SAS FRESH at retrieval time, and verify the blob
+   actually landed (`az storage blob exists`) -- the VM's `UPLOADED=<localsize>` marker prints even
+   when the PUT failed, silently masking it.
+
+## L17 -- the first agent turn after an idle is cold; warm before any load-bearing turn
+
+**Discovered:** v1.0.44 cfv-0717d (2026-07-17). The probe runs a 5-min idle (3.3) immediately before
+the Task 4 headline, so the 4.2 positive control was the FIRST agent turn after the idle -- and it
+came back blank: the gateway/spend-meter was cold, so the turn-gate fail-safed (`spend_meter_unknown
+=> block`, which is the CORRECT fail-safe) or the turn timed out. The very next turns warmed up and
+produced full, articulate responses. A cold first turn is not an agent failure; it is warmup.
+
+**Rules:**
+1. **Warm the agent with a throwaway turn before any make-or-break turn** (a positive control, a
+   demo, a first customer turn after boot/idle). Retry once on an empty/blocked result before
+   declaring failure.
+2. **`spend_meter_unknown => block` is a feature, not the bug.** The gate fail-safing on a cold meter
+   is correct; the fix is to warm the meter, not to weaken the gate.
+3. **Corroborate a blocked control against other turns.** 4.2 blanked, but T1.2f (turn runs after
+   SOUL restore), T6.3 (normal proxy turn, real reply), and T1.1a/b (real fetches) all ran in the
+   same session -- so the agent demonstrably works and the 4.3/4.4 refusals are discriminating, not a
+   broken-everything artifact.
