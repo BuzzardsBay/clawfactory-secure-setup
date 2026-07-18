@@ -13,6 +13,18 @@ Security fixes land on the latest minor of the current major. Older releases do 
 
 ClawFactory Secure Setup is built on **defense in depth**: multiple independent layers, each scoped to a different attack surface, so no single failure is catastrophic. A bad prompt, a compromised model, a misconfigured agent, or a leaked credential should each be stopped by something the next layer doesn't depend on. The controls below describe each layer with its concrete implementation site.
 
+> **Two classes of guarantee.** ClawFactory's controls split into two kinds, and
+> the distinction matters when you assume the agent itself may be hostile.
+> **Structural** controls (file isolation, egress allowlist, inbound deny,
+> credential-at-rest, safety-rules *file integrity*, the user kill switch) are
+> enforced by the OS/kernel and hold against **both** a network attacker **and** a
+> hostile agent running as `clawuser`. **Gateway-path** controls (spend cap,
+> chatCompletions gating, safety-rules *enforcement at turn time*) hold on the
+> path through the local gateway but are **advisory** against an agent that
+> starts the runtime by another route. The full split, the one accepted residual
+> (Door-2), and its committed v2 closure are documented in
+> [`SECURITY_FINDINGS.md`](SECURITY_FINDINGS.md).
+
 ## What We Protect Against
 
 ### 1. API key theft via `.env` grep or process enumeration
@@ -43,7 +55,7 @@ ClawFactory Secure Setup is built on **defense in depth**: multiple independent 
 
 **Implementation:** `Step-ConfigureWslConf`; `Step-CreateClawUser`; `Step-ApplySafetyRules` (root-own + immutable + pin); `Step-FreezeInjectedSoul` (the injected copy); `Step-InstallTurnGate` (the `openclaw` shim + `clawfactory-turn-gate.sh`). Code gate: `Test-SoulIntegrity` in `resources/clawfactory-grants.ps1`, called from `Invoke-GatedAgentTurn`.
 
-**Limitations:** The agent can still write to its workspace folder and reach the egress allowlist (#2). An attacker who controls the prompt and accepts being limited to those destinations can still cause damage within scope. **The hash gate covers turns launched via the `openclaw` CLI** (which the shim intercepts); a turn driven through the gateway's `chatCompletions` HTTP endpoint is **not** gated — see the open items in `docs/session_reports/SECFIX_CLOSE_DOORS_2026-07-14.md`. Because the agent and the gateway share the `clawuser` UID, a deliberate full-path call to the real binary also bypasses the shim.
+**Limitations:** The agent can still write to its workspace folder and reach the egress allowlist (#2). An attacker who controls the prompt and accepts being limited to those destinations can still cause damage within scope. Turn-time enforcement (the SOUL hash check + spend cap) is a **gateway-path** guarantee, not a structural one. It covers turns launched via the `openclaw` CLI (the shim intercepts them) **and**, since v1.0.43, turns driven through the gateway's `chatCompletions` HTTP endpoint — a root-owned proxy now owns `127.0.0.1:8787` and gates that path with the same turn gate, moving the real gateway to private `127.0.0.1:8788` (Door-1, closed and verified). What it does **not** cover: because the agent and the gateway share the `clawuser` UID, a deliberate full-path invocation of the runtime bypasses both the shim and the proxy (**Door-2**, an accepted v1 residual). The `SOUL.md` *file* remains immutable to `clawuser` either way — only its turn-time *enforcement* is bypassable. Actor model, harm ceiling, and the v2 closure: [`SECURITY_FINDINGS.md`](SECURITY_FINDINGS.md).
 
 ### 4. LAN-side agent hijacking
 

@@ -1,20 +1,19 @@
 # ClawFactory Secure Setup
 
-[![v1.0.37](https://img.shields.io/badge/release-v1.0.37-green)](../../releases/tag/v1.0.37) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Windows 11](https://img.shields.io/badge/Windows-10%202004%2B%20%2F%2011-0078D6?logo=windows)](#system-requirements)
+[![v1.0.45](https://img.shields.io/badge/release-v1.0.45-green)](../../releases/tag/v1.0.45) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Windows 11](https://img.shields.io/badge/Windows-10%202004%2B%20%2F%2011-0078D6?logo=windows)](#system-requirements)
 
-A Windows installer that drops a hardened OpenClaw runtime onto a fresh Windows machine in 10–20 minutes, with every default flipped to the secure side. WSL2 with Windows automount disabled, a non-sudo `clawuser`, rootless Docker, an nftables egress firewall scoped to that user's UID, the OpenClaw gateway bound only to `127.0.0.1`, a Windows Firewall inbound-deny on port 8787, the API key stored in DPAPI Credential Manager, and a `SOUL.md` safety policy hash-pinned at file mode 444. One installer, fifteen steps, no telemetry, fully auditable PowerShell.
+A Windows installer that drops a hardened OpenClaw runtime onto a fresh Windows machine in 10–20 minutes, with every default flipped to the secure side. WSL2 with Windows automount disabled, a non-sudo `clawuser`, an nftables egress firewall scoped to that user's UID, the OpenClaw gateway bound only to `127.0.0.1`, a Windows Firewall inbound-deny on port 8787, the API key stored in DPAPI Credential Manager, and a `SOUL.md` safety policy hash-pinned at file mode 444. One installer, fifteen steps, no telemetry, fully auditable PowerShell.
 
 ## What's inside
 
 - **WSL2 + Ubuntu** — bundled rootfs imported offline via `wsl --import` (no Microsoft Store dependency).
 - **`clawuser`** — non-root, no sudo group membership, locked password.
-- **Docker** in rootless mode under `clawuser`.
-- **Egress firewall (nftables)** — drops everything from `clawuser`'s UID except DNS, loopback, and the IPv4 addresses of your chosen LLM provider host plus a small base allowlist (GitHub, npm, Docker Hub, OpenClaw, ClawHub). 6 h refresh timer for IP rotation.
+- **Egress firewall (nftables)** — drops everything from `clawuser`'s UID except DNS, loopback, and the IPv4 addresses of your chosen LLM provider host plus a small base allowlist (GitHub, npm/Node, OpenClaw, ClawHub, Ubuntu apt). Periodic refresh timer for IP rotation.
 - **OpenClaw 2026.4.27** — version-pinned, fetched from a SHA-256-pinned `install.sh`, configured `gateway.bind=loopback gateway.port=8787 gateway.mode=local`.
 - **Provider key in DPAPI** — read from Windows Credential Manager, written via `wsl.exe` stdin to `~/.openclaw/auth-profiles.json` mode 600. Never on a command line, never in `.env`.
 - **`SOUL.md`** — safety policy at mode 444 with SHA-256 substituted into the orchestrator prompt; the agent's first turn fails closed if the live hash doesn't match.
 - **Windows Firewall inbound-deny on TCP/8787** — belt-and-suspenders against any future misconfiguration that flips the gateway bind to `0.0.0.0`.
-- **Kill Switch** — Start Menu shortcut that stops the gateway and any agent containers.
+- **Kill Switch** — Start Menu shortcut that stops the gateway and the agent processes.
 - **Four pre-staged agents** — orchestrator, skill-scout, skill-builder, publisher. Each gets a role-specific `agent.md` with its own auth-profile fan-out.
 
 ## System requirements
@@ -41,11 +40,14 @@ Defense in depth — multiple independent layers, each scoped to a different att
 |---|---|
 | API key theft via `.env` grep / process enumeration | Key in DPAPI, piped via stdin to `auth-profiles.json` mode 600. Never on disk in WSL. |
 | Agent exfiltration to arbitrary endpoints | nftables egress firewall on `clawuser`'s UID. Provider host + small base allowlist only. |
-| Prompt injection → lateral movement | WSL `automount=false`, no `/mnt/c/` access. Non-root, no sudo. Rootless Docker. `SOUL.md` hash-pinned. |
+| Prompt injection → lateral movement | WSL `automount=false`, no `/mnt/c/` access. Non-root, no sudo. `SOUL.md` hash-pinned. |
 | LAN-side gateway hijack | `gateway.bind=loopback` + Windows Firewall inbound-deny on TCP/8787. |
 | Supply chain on `install.sh` | SHA-256 pin in `setup.ps1`; install aborts on mismatch. |
 
-Full threat model in [SECURITY.md](SECURITY.md).
+Full threat model in [SECURITY.md](SECURITY.md). Which controls hold against a
+hostile agent (structural) versus only on the gateway path (advisory), plus the
+one accepted residual and its v2 closure, are stated plainly in
+[SECURITY_FINDINGS.md](SECURITY_FINDINGS.md).
 
 ## Smoke test
 
