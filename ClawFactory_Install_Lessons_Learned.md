@@ -517,3 +517,29 @@ produced full, articulate responses. A cold first turn is not an agent failure; 
    SOUL restore), T6.3 (normal proxy turn, real reply), and T1.1a/b (real fetches) all ran in the
    same session -- so the agent demonstrably works and the 4.3/4.4 refusals are discriminating, not a
    broken-everything artifact.
+
+## L18 -- one root behind many blanks: the turn-gate's cold-meter query blocks the first turns
+
+**Discovered:** v1.0.44 confirmation cfv-0717e (2026-07-17). The L17 "warm the agent" fix was NOT
+enough on the agent-CLI path: the warm-up turn AND both retries got `spend_meter_unknown`, yet a
+direct `openclaw gateway usage-cost` returned `$0.08 · 22k tokens` at the same moment and the proxy
+turn-gate read spend fine. Root cause (source): `clawfactory-turn-gate.sh:54` reads the meter via
+`openclaw gateway usage-cost --json --days 400`; when the gateway is cold that 400-day WS query
+returns EMPTY -> the gate fail-safes. This single cold-meter issue is the common root of the 4.2
+cold-blank (cfv-0717d), the T6.1/T6.2 chatCompletions blanks (cfv-0717d), AND this run's 4.2 block.
+Proof it is timing, not a real gap: once WARM (a control turn first), the chatCompletions cap=0 and
+tampered-SOUL cases both return readable, chat-completion-shaped block messages and neither runs the
+model (security intact).
+
+**Rules:**
+1. **A cold-start artifact can outlast a single warm-up turn -- and it points at a PRODUCT issue, not
+   a test one.** A fresh install's first customer turns are fail-safe-blocked until the meter WS
+   warms. Papering it over with a bigger probe warm-up hides a real UX defect; report it.
+2. **Prime the exact query the gate uses, at the end of install.** The gate uses `usage-cost --json
+   --days 400`; prime THAT (not a plain `usage-cost`, which warms differently and misled the
+   diagnosis). Or make the gate retry / shrink `--days` to the governor window / add a generous
+   timeout. Keep the fail-safe.
+3. **Separate "the message is blank" (UX) from "the turn ran" (security).** Check token usage / a
+   sentinel reply: cap=0 and tampered-SOUL both returned 0 tokens and no model output -> blocked. A
+   blank-but-blocked response is a UX bug; a real reply would be the security bug. They need different
+   urgency.
