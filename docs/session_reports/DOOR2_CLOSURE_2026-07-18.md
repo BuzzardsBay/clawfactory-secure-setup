@@ -26,7 +26,7 @@ code changes" constraints).
 It was not attached at session start (absent from repo, scratchpad, Downloads,
 Desktop, Documents), so a placeholder was authored from the record and committed
 first (`23f0990`). Bret then supplied his authored version, which was verified
-against the record and **swapped in** (`<swap commit>`). Every claim held **except
+against the record and **swapped in** (`404651f`). Every claim held **except
 one**, corrected per Task 1.2 (flag, don't silently ship):
 > **Credential protection — "your API key is not stored in plain text."** The key
 > *is* stored plaintext in the sandbox at `~/.openclaw/auth-profiles.json` mode
