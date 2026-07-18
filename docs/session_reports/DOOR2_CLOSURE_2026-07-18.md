@@ -22,14 +22,21 @@ code changes" constraints).
 | **2. Claim-language audit** — no surface presents spend/chat/safety gating as hostile-agent-proof | ✅ **Repo surfaces committed; site/installer/resource delivered below** |
 | **3. v2 roadmap entry** — separate-identity isolation as Door-2's closure | ✅ **Committed** (`v1.1_backlog.md` #25) + cross-referenced from `SECURITY_FINDINGS.md` |
 
-**Comprehension-gate discrepancy (flagged, not silently fixed):**
-`SECURITY_FINDINGS.md` was **not provided** — it did not exist in the repo,
-scratchpad, Downloads, Desktop, or Documents. The prompt said "Bret has authored
-[it] (provided alongside this prompt)," but the file was absent. The verdict's own
-Next Steps say *"write the SECURITY_FINDINGS.md language (Claude authors, this
-session or next)."* I therefore **authored it from the verified record**, exactly
-to Condition 1's spec. **Please review the committed file** — if you had specific
-language in mind, revise it and I'll fold it in.
+**`SECURITY_FINDINGS.md` — supplied late, verified, one claim corrected.**
+It was not attached at session start (absent from repo, scratchpad, Downloads,
+Desktop, Documents), so a placeholder was authored from the record and committed
+first (`23f0990`). Bret then supplied his authored version, which was verified
+against the record and **swapped in** (`<swap commit>`). Every claim held **except
+one**, corrected per Task 1.2 (flag, don't silently ship):
+> **Credential protection — "your API key is not stored in plain text."** The key
+> *is* stored plaintext in the sandbox at `~/.openclaw/auth-profiles.json` mode
+> 600 (SECURITY.md §1, README §14, `reference_openclaw_api_key_location`); DPAPI
+> protects only the Windows-side copy. Same overclaim already fixed on the site
+> ("never plaintext" → "never on a command line or in `.env`"). Corrected the row
+> to what is true and proven: DPAPI on Windows + mode-600 file in the sandbox,
+> never on a command line / in env / in `.env`, with the not-encrypted-at-rest
+> nuance stated. Also added the Task 3.2 cross-reference to backlog #25 (his draft
+> lacked it). All other claims verified below.
 
 ---
 
@@ -47,8 +54,10 @@ direction. It cross-links the v2 roadmap entry.
 
 ### Verification of every factual claim (Task 1.2 — repo is truth)
 
-Because I authored it, it is verified-by-construction against the record; I still
-checked each load-bearing claim:
+Checked each load-bearing claim in Bret's supplied doc against the record (the
+file-isolation vectors were confirmed against `probe-v1039-validation.ps1`
+§4.3–4.4, which drove cfv-0717d — including the `find / -name` filesystem-wide
+search and `/etc/shadow`):
 
 | Claim | Verified against | Result |
 |---|---|---|
@@ -265,7 +274,9 @@ blocker" line, which the committed `SECURITY_FINDINGS.md` satisfies.
 4. **Apply the delivered site/installer/resource edits** (§2.D/E/F) — your action.
 
 ### Flags for Bret (decisions / out-of-scope)
-- **`SECURITY_FINDINGS.md` was authored, not supplied** — review the wording.
+- **`SECURITY_FINDINGS.md`** — Bret's authored version is now committed; one
+  credential claim was corrected on verification (see TL;DR). Confirm the reworded
+  credential row reads the way you want.
 - **"5 agents" / "multi-agent workflows"** on the site is the $149 value prop and
   is fiction (only `main` runs) — positioning/pricing decision; copy rewrite
   proposed, product not touched (per scope).

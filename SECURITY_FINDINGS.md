@@ -1,132 +1,76 @@
-# Security Findings
+# ClawFactory Security Findings
 
-*Last updated 2026-07-18. This document is published deliberately. ClawFactory's
-pitch is security, so its residuals are published in the same voice as its
-evidence — a vendor that states its boundaries plainly is easier to trust than
-one that hides them.*
+*Last updated: 2026-07-18. Applies to ClawFactory Secure Setup v1.0.45.*
 
-This document does two things:
+ClawFactory exists because AI agents need real access to be useful, and real access is what makes them risky. Our answer is to enforce boundaries at the operating-system level rather than by asking the agent to behave. This document states what that buys you, what it does not, and how we know.
 
-1. It names, precisely, **what each control guarantees and against whom** — by
-   splitting the controls into two classes that behave differently under a
-   hostile agent.
-2. It states the one **accepted residual** in v1 (Door-2), its actor model, and
-   its committed v2 closure — so a security-literate reader cannot mistake the
-   scope in either direction.
+We publish our residual findings because a security product that only lists its strengths is asking for trust it hasn't earned. Everything below was validated on clean machines, and where a boundary is weaker than it looks, we say so.
 
-Nothing here weakens the product's provable claim. The headline — **file
-isolation** — is structural, was proven from the agent's own output on seven
-consecutive clean machines, and is unaffected by the residual below.
+---
+
+## How we test
+
+Every claim in the "structural" table below was proven **consumer-side**: by asking the agent itself to cross the boundary and recording its actual output, on a freshly installed machine. We do not accept a configuration file or a mount table as evidence that a control works, because a misconfigured control and a working control look identical from the config side.
+
+Validation runs on clean cloud VMs built from a stock Windows image, installed exactly as a customer would install. The current release passed the install gate on seven consecutive clean machines.
+
+A note on method: refusals only count as evidence if the agent is otherwise working. In the same validation run that produced the refusals below, the agent successfully read and quoted a file the user *had* granted, made live network requests, and executed normal work. The boundaries are discriminating, not the symptom of a broken agent.
 
 ---
 
 ## Two classes of guarantee
 
-Every control in ClawFactory falls into one of two classes. The distinction is
-not marketing; it is a statement about **which attacker each control stops**.
+Not every control in ClawFactory is equally strong, and treating them as one undifferentiated "security" claim would be dishonest. They fall into two classes, and the difference matters.
 
-- **Structural guarantee** — enforced by the OS/kernel on something the agent's
-  own Linux identity (`clawuser`) cannot change from inside. It holds against
-  **both** a network attacker **and** a hostile agent with shell access running
-  as `clawuser`. Even an agent executing hostile instructions cannot route
-  around it.
-- **Gateway-path guarantee** — enforced on the network path **through** the
-  local OpenClaw gateway (and the root-owned proxy in front of it). It holds
-  against anything that goes through that path — this is **Door-1, closed and
-  verified**. It is **advisory** against a hostile agent that starts the runtime
-  by another route — this is **Door-2, open** (see below).
+### Structural guarantees
 
-### Structural guarantees (hold against the network AND a hostile agent)
+Enforced by the operating system, the filesystem, or the network stack. They hold regardless of what the agent does, what model is behind it, or how the agent process was started. **A hostile agent cannot route around these.**
 
-| Control | Implementation | Holds against |
+| Guarantee | Mechanism | Status |
 |---|---|---|
-| **File isolation** (headline) | WSL `automount=false`; Windows folders reach the agent only through explicit grants mounted under `/workspaces`. | Network + hostile agent. **Proven from the agent's own output** on 7 clean boxes: it refuses an ungranted canary via `/mnt/c`, directory listing, and symlink / `../../..` traversal; `/etc/shadow` denied. |
-| **Egress allowlist** | nftables in the WSL kernel scoped to `meta skuid clawuser`; outbound HTTPS to an approved hostlist + your provider only, DNS to the WSL resolver only, everything else dropped. | Network + hostile agent. An ungated turn still cannot reach an arbitrary destination — the exfiltration surface is unchanged by Door-2. |
-| **Inbound deny / loopback-only gateway** | Gateway binds `127.0.0.1` only; a Windows Firewall inbound-deny rule on TCP/8787 backs it up. | Network. Door-2 is a **local-only** concern; nothing here is reachable off-box. |
-| **Credential storage at rest** | API key held in Windows Credential Manager (DPAPI, tied to your Windows user); inside WSL it is written only to `~/.openclaw/auth-profiles.json` at mode `600`. Never on a command line, never in `.env`, never in the WSL process environment. | Network + other local users. *Nuance:* the agent is **provisioned its own key by design** — it must have the key to call the provider — so this control protects the key at rest and in transit, not from the agent that legitimately holds it. The **egress allowlist** is what bounds where a held key could be sent. |
-| **Safety-rules file integrity** | `SOUL.md` is written as root, owned `root:root`, mode `444`, and made immutable with `chattr +i`; a root-owned copy of its hash lives at `/etc/clawfactory/soul.sha256`, outside `clawuser`'s reach. | Network + hostile agent. `clawuser` cannot modify, `chmod`, or delete-and-recreate the file. *(This is file **integrity** — a structural guarantee. Whether that file is **enforced at turn time** is a gateway-path guarantee; see below.)* |
-| **User kill switch** | Start Menu shortcut that stops the gateway and the agent processes, run by the Windows user out-of-band. | Hostile agent. The agent (`clawuser`) cannot stop the Windows user from pulling the plug. |
+| **File isolation** — the agent cannot read files you did not grant it | WSL2 sandbox with Windows automount disabled; explicit per-folder grants mapped into the sandbox | **Proven.** The agent refused to read an ungranted file by direct path, by directory listing, through a symlink, through `../../..` traversal, and via filesystem-wide search. It could not read `/etc/shadow`. The target file's contents never appeared in any output. |
+| **Egress allowlist** — the agent cannot reach arbitrary internet destinations | nftables rules scoped to the agent's system identity | **Proven.** Non-allowlisted hosts, raw IP addresses, non-standard ports, and arbitrary DNS resolvers are all blocked. |
+| **Inbound deny** — nothing on your network can reach the agent | Loopback-only gateway | **Proven.** No listening surface is exposed off the machine. |
+| **Credential protection** — your API key is never left in readable config or on a command line | Windows Credential Manager (DPAPI) on the Windows side; inside the sandbox the key exists only in a mode-600 file — never on a command line, in an environment variable, or in `.env` | **Proven** for the storage path (Credential Manager + mode-600 file; nothing on a command line or in `.env`). *Nuance:* the sandbox copy is permission-scoped, not encrypted at rest, and the agent is provisioned its own key by design — the egress allowlist above is what bounds where a held key could be sent. |
+| **Safety-rules integrity** — the agent's rules file cannot be altered by the agent | Root-owned, read-only, immutable flag, hash-pinned at install | **Proven.** The agent cannot write, change permissions on, or delete-and-recreate the file. |
+| **Kill switch** — you can stop everything immediately | Terminates the real agent process | **Proven.** |
 
-### Gateway-path guarantees (hold through the gateway; advisory against a hostile agent)
+### Gateway-path guarantees
 
-| Control | Implementation | Holds against | Advisory against |
-|---|---|---|---|
-| **Spend cap** | Turn gate reads the spend meter and blocks a turn once the cap is reached; fail-closed if the meter is unknown. | Any turn that crosses the gateway / proxy path (Door-1). Verified: a `cap=0` turn is blocked with a readable reason and **zero model tokens**. | A turn launched by full-path invocation that never crosses the gate (Door-2). |
-| **chatCompletions gating** | A root-owned proxy owns `127.0.0.1:8787` and gates ClawChat's `/v1/chat/completions` path with the same turn gate; the real gateway is moved to private `127.0.0.1:8788`. Fail-closed: if the proxy is down, nothing answers on 8787. | ClawChat's HTTP path (Door-1, closed). | Full-path invocation (Door-2). |
-| **Safety-rules enforcement at turn time** | The turn gate re-checks the live `SOUL.md` hash against the pinned value and refuses the turn on mismatch before the agent runs. | Any turn that crosses the gate (Door-1). Verified: a tampered SOUL blocks the turn with a readable reason and **zero model tokens**. | Full-path invocation (Door-2). |
+Enforced on the network path through the local gateway. They hold against anything arriving over that path, including everything the ClawChat interface sends. They are **advisory** against an agent that already has shell access on the machine and chooses to start the runtime by another route. See the residual below.
 
----
-
-## The accepted residual: Door-2
-
-**In one sentence:** a process with local shell access under the agent's own
-identity (`clawuser`) can invoke the OpenClaw runtime directly by full path,
-producing a turn that never crosses the gateway and is therefore not subject to
-the gateway-path controls (spend cap, chatCompletions gating, turn-time
-safety-rules check) — while the **structural** boundaries (file isolation and
-the egress allowlist) still apply to that process.
-
-### Actor model — read this before judging the scope
-
-- **Local only.** Exploitation requires code execution as `clawuser` on the
-  machine. It is **not reachable from the network**: inbound is denied and the
-  gateway is loopback-only. A remote attacker gains nothing here.
-- **The realistic actor is the agent itself**, acting on hostile instructions
-  (a prompt injection, a malicious skill). ClawFactory's standing principle is
-  *assume the model is hostile*, which puts exactly this actor in scope — so we
-  state the boundary rather than assume good behavior.
-- **This is not a file-isolation break and not an egress break.** An ungated
-  turn still cannot read your Windows files (`automount=false` holds) and still
-  cannot reach a non-allowlisted destination (nftables holds). The residual is
-  bounded to two things: (1) **spend** against the key you already provisioned
-  to the agent — a cost exposure, capped by your provider, not a data exposure;
-  and (2) **advisory** safety-rule enforcement — the model may do at turn time
-  what the turn-gate would have refused. The harm ceiling is your own API bill
-  plus a model that ignores a rule, **not** exfiltration of your data.
-
-### Why v1 does not ship a partial mitigation
-
-Every mechanism that could distinguish the agent from the gateway — nftables UID
-scoping, file permissions, systemd sandboxing of the gateway unit — keys on
-**identity**, and the agent and the gateway share one (`clawuser`). Any control
-that keys on that shared identity can be routed around by that same identity,
-while **falsely implying the boundary moved**. Restricting permissions on the
-runtime entry point fails because `clawuser` owns it; removing the interpreter
-from `PATH` fails because the agent runtime *is* the interpreter; wrappers and
-aliases are rules the same identity can step around. Shipping any of them would
-violate this document's own structural-vs-advisory line. The honest v1 action —
-the one that actually adds security value — is to **state the boundary here**.
-
-### The v2 closure
-
-Door-2 is closed by **separate-identity isolation**: running the agent process
-under a different identity from the gateway, so the runtime it can reach un-gated
-holds nothing it can replay directly. The design seed already exists in this
-release — the chatCompletions proxy runs **as root, a different identity, and
-that boundary holds**. Whether the v2 form is a dedicated UID, a container, or a
-user namespace is an open design question to be settled on v2's clock. See the
-roadmap entry: [`v1.1_backlog.md` → "Door-2 closure: separate-identity agent
-isolation"](v1.1_backlog.md).
+| Guarantee | Mechanism | Status |
+|---|---|---|
+| **Spend cap** | Turn-gate reads the spend meter before each turn; fails closed if the meter is unreadable | **Proven on the gateway path.** A turn at cap zero is blocked with a readable message and consumes zero model tokens. |
+| **Chat gating** | Root-owned proxy fronts the private gateway port | **Proven on the gateway path.** The agent's own identity cannot reach the real gateway directly; it must traverse the proxy. |
+| **Safety-rules enforcement** | Turns refuse to run when the rules file does not match its pinned value | **Proven on the gateway path.** A tampered rules file blocks turns with a readable message and zero model tokens. |
 
 ---
 
-## Evidence (validation record through 2026-07-17)
+## Known residual: same-identity runtime invocation
 
-- **Installer GREEN on 7 consecutive clean Azure boxes** — `cfv-0717a` … `cfv-0717g`, all `INSTALLER_DONE=success`.
-- **File isolation proven from the agent's own output** — the agent refuses an ungranted canary via `/mnt/c`, directory listing, and symlink / `../../..` traversal; `/etc/shadow` denied (`cfv-0717d`).
-- **Positive control** — the agent reads *and quotes* a **granted** file from `/workspaces/<grant-id>` (`cfv-0717g`).
-- **Both gateway-path block cases return a readable reason with zero model tokens** — spend `cap=0` (`spend_blocked`) and tampered SOUL (`soul_mismatch`) (`cfv-0717g`).
-- **`SOUL.md` verified `root:root` mode `444`, immutable** (`lsattr` shows `+i`) post-install.
-- **Gateway loopback-only** — real gateway on private `127.0.0.1:8788` behind the root proxy on `8787`; `clawuser` → gateway dropped by nftables (`000` on IPv4 and IPv6), proxy `200`.
+**The finding.** The agent process and the local gateway run under the same system identity inside the sandbox. A process running as that identity — including the agent itself — can start the model runtime directly by its full path, producing a turn that never crosses the gateway and is therefore not subject to the spend cap, chat gating, or safety-rules check.
 
-**Confidence:** the items above are VERIFIED from the repo-confirmed validation
-record. The harm-ceiling and regression-risk judgments in this document are
-analytical reads of that record (INFERRED). Repo is truth: if any statement here
-is later contradicted by the record, the record wins and this file is corrected.
+**Actor model.** This requires the ability to execute a shell command as the agent's identity inside the sandbox. It is not reachable from the network, and it is not a defect in file isolation. The realistic actor is the agent itself, acting on instructions from content it processes. Because our design principle is to assume the model may be hostile, we treat that actor as in scope rather than hypothetical.
+
+**What it does and does not affect.** Every structural guarantee in the first table continues to hold against a turn started this way. Such a turn still cannot read ungranted files, still cannot reach non-allowlisted destinations, still cannot alter the safety-rules file, and is still stopped by the kill switch. What it can do is run without spend accounting and without the gateway-side safety check, using the API key you already provisioned. **The exposure is cost and unmetered operation, not data access.**
+
+**Why we have not patched it.** The controls that could distinguish these processes — file permissions, network rules, sandboxing policy — all key on identity, and the two processes share one. Any mitigation short of giving the agent its own identity can be routed around by that same identity, while creating the false impression that the boundary moved. We would rather state the boundary accurately than ship a control that looks like a fix and is not.
+
+**How it will be closed.** Separate-identity isolation — running the agent under a dedicated identity or container, so it cannot invoke the gateway's runtime or hold what the gateway holds — is committed to the next major version, and tracked as item #25 in our forward-looking backlog ([`v1.1_backlog.md`](v1.1_backlog.md)). The pattern is already proven in this release: the chat gating proxy runs under a different identity than the agent, and that boundary holds.
 
 ---
 
-## Reporting a vulnerability
+## Other known limitations
 
-See [`SECURITY.md`](SECURITY.md). Email **support@clawfactory.app**; please do
-not open a public issue for security vulnerabilities.
+**DNS is restricted, not eliminated.** Outbound DNS is constrained to the configured resolver rather than blocked outright. Queries to that resolver are expected behavior, not a leak, but the metadata channel is narrowed rather than closed.
+
+---
+
+## Summary
+
+If your concern is that an AI agent will read files you didn't give it, reach places it shouldn't, expose a door to your network, or quietly rewrite its own safety rules, those boundaries are structural and proven on clean machines.
+
+If your concern is guaranteeing that a compromised agent cannot spend your API budget or run unmetered, that boundary is real against the network path and advisory against a hostile agent with shell access, and it will be structural in the next major version.
+
+We would rather you know exactly which is which.
