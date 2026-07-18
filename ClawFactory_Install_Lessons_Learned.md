@@ -543,3 +543,26 @@ model (security intact).
    sentinel reply: cap=0 and tampered-SOUL both returned 0 tokens and no model output -> blocked. A
    blank-but-blocked response is a UX bug; a real reply would be the security bug. They need different
    urgency.
+
+## L19 -- fix the meter at the source, and make sure the probe reads the granted mount
+
+**Discovered:** v1.0.45 cfv-0717f -> cfv-0717g (2026-07-17). The L18 diagnosis was acted on two ways
+in v1.0.45: (a) `clawfactory-turn-gate.sh` now wraps the `usage-cost --days 400` read in a bounded
+retry (10x/~10s, fail-closed preserved), and (b) `setup.ps1` PRIMES that exact query as `clawuser`
+after the health gate so the meter is warm before the first customer turn. That fixed the product
+side -- but cfv-0717f's 4.2 positive control STILL failed with "project-note.txt does not exist."
+The cause was the PROBE, not the meter: it read the home workspace (`/home/clawuser/.openclaw/
+workspace/`), where nothing was granted, instead of the grant's mount. Fixed the probe (`b14f7bc`)
+to read `/workspaces/<grant-id>/project-note.txt` and warm with a throwaway-turn loop first;
+cfv-0717g then PASSED -- the agent read and quoted `GRANTED-FILE-<rand>` on warm-up attempt 2.
+
+**Rules:**
+1. **Prime the meter, don't just retry the gate.** Doing both (retry in the gate + prime at end of
+   install) is belt-and-suspenders and cheap; the prime is what makes the FIRST turn work, the retry
+   is what makes it robust on a slow box. Keep the fail-safe on both.
+2. **A positive control must exercise the exact path the claim is about.** The headline is "the agent
+   can read a GRANTED path" -- so the probe must open the *grant's mount* (`/workspaces/<grant-id>/`),
+   not the home workspace. A green meter with the probe pointed at the wrong directory reads as a
+   product FAIL when the product is fine. Verify the path the test opens before blaming the meter.
+3. **Warm-up loop, not a single warm-up turn.** cfv-0717g went hot on warm-up attempt 2, not 1 -- a
+   loop that retries the throwaway turn until non-empty is more reliable than one-and-done (see L17).
