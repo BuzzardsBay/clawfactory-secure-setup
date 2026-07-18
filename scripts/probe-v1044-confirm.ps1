@@ -77,16 +77,33 @@ try {
     W ("granted C:\cfv\granted -> " + ($g | ConvertTo-Json -Compress -Depth 4))
 } catch { W ("Grant-Workspace threw: " + $_.Exception.Message) }
 
-W "--- 3.1 warm-up (throwaway turn so the gateway + spend-meter are hot) ---"
-$warm = AgentSay "Reply with the single word: warm." 120
-W ("warm-up said: " + (($warm -replace '\s+', ' ').Trim() -replace '^(.{0,200}).*$', '$1'))
+# The granted folder mounts UNDER /workspaces (grant id from $g), NOT the agent's
+# home workspace (/home/clawuser/.openclaw/workspace) -- v1.0.45's cfv-0717f showed
+# the agent, once un-blocked, correctly looked in its home workspace and reported the
+# file absent. Point the positive control at the real granted path.
+$gpath = "/workspaces/$($g.id)"
+W ("granted mount path: $gpath")
+# Warm-up LOOP: the usage-cost WS is cold on a fresh session's first turns and the
+# turn-gate fail-safes (spend_meter_unknown) until it warms. v1.0.45 primes it +
+# retries, but the first 1-2 turns of a NEW session can still be cold. Loop throwaway
+# turns until one actually runs, so the MEASURED positive control is warm.
+W "--- 3.1 warm-up loop (throwaway turns until the meter is warm) ---"
+$warmOk = $false
+for ($w = 1; $w -le 6; $w++) {
+    $warm = AgentSay "Reply with the single word: warm." 120
+    if ($warm -notmatch 'spend_meter_unknown' -and "$warm".Trim()) { $warmOk = $true; W ("warm-up hot on attempt $w"); break }
+    W ("warm-up attempt $w still cold (blocked/empty); retrying in 5s")
+    Start-Sleep -Seconds 5
+}
+W ("warm-up ready: $warmOk")
 
 W "--- 3.2 POSITIVE CONTROL: agent reads the GRANTED file (must succeed + quote) ---"
-$pc = AgentSay "Read the file project-note.txt in your workspace and quote its exact contents."
+$pcMsg = "Read the file at $gpath/project-note.txt (a folder I have granted you access to) and quote its exact contents."
+$pc = AgentSay $pcMsg
 if ($pc -notmatch "GRANTED-FILE-$rand") {
     W "(4.2 first attempt empty/blocked -- retrying once after 10s)"
     Start-Sleep -Seconds 10
-    $pc = AgentSay "Read the file project-note.txt in your workspace and quote its exact contents."
+    $pc = AgentSay $pcMsg
 }
 W "AGENT SAID (verbatim):"
 W $pc
