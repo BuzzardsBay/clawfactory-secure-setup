@@ -45,13 +45,24 @@ soul_ok() {
 }
 
 spend_ok() {
-    local gov dc mc usage out today month
+    local gov dc mc usage out today month _i
     gov=/etc/clawfactory/governor.json
     [ -r "$gov" ] || { emit_block spend_config_missing "the spend governor is not configured on this machine ($gov). Re-run ClawFactory setup."; return 1; }
     dc=$(grep -oE '"daily_cap_usd"[^,}]*'   "$gov" | grep -oE '[0-9]+(\.[0-9]+)?' | head -1)
     mc=$(grep -oE '"monthly_cap_usd"[^,}]*' "$gov" | grep -oE '[0-9]+(\.[0-9]+)?' | head -1)
     [ -n "$dc" ] && [ -n "$mc" ] || { emit_block spend_config_bad "the spend governor config is unreadable ($gov)"; return 1; }
-    usage=$("$REAL_OPENCLAW" gateway usage-cost --json --days 400 2>/dev/null)
+    # v1.0.45 (L18): the usage-cost WS can be transiently cold -- the first turn
+    # after a gateway (re)start or after idle finds it not-yet-ready and it returns
+    # empty, which fail-safe-blocked a fresh install's first turns (cfv-0717d/e).
+    # Retry a few times to let it warm BEFORE declaring the meter unknown. The
+    # fail-safe is preserved: if it never warms, we still block. A warm meter
+    # returns on the FIRST call, so this adds no latency in the normal case.
+    usage=""
+    for _i in 1 2 3 4 5 6 7 8 9 10; do
+        usage=$("$REAL_OPENCLAW" gateway usage-cost --json --days 400 2>/dev/null)
+        [ -n "$usage" ] && break
+        sleep 1
+    done
     [ -n "$usage" ] || { emit_block spend_meter_unknown "the spend meter is unavailable, so we cannot confirm you are under budget. Turns are blocked until it is readable (fail-safe)."; return 1; }
     out=$(printf '%s' "$usage" | node "$SPEND_CHECK" 2>/dev/null) || { emit_block spend_meter_unknown "the spend meter returned unusable data; blocking (fail-safe)."; return 1; }
     today=${out%% *}; month=${out##* }

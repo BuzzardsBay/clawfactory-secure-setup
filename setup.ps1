@@ -2922,6 +2922,26 @@ if (-not $healthy) {
     throw 'Final gateway health gate failed: in-WSL curl http://127.0.0.1:8787/status did not return 200 within 120 seconds. Diagnose with: wsl -d Ubuntu -u clawuser -- journalctl --user -u openclaw-gateway -n 100, then `cat ~/.openclaw/logs/gateway.log`. After the underlying issue is fixed, re-run setup.ps1 (the 15 install steps will skip via checkpoints; only the final gate re-runs).'
 }
 
+# v1.0.45: PRIME THE SPEND METER (L18). The turn-gate reads spend via
+# `openclaw gateway usage-cost --json --days 400`; that WS endpoint is NOT ready
+# for ~1-2 min after the gateway's final (port-move) restart, even though /status
+# is already 200. So a fresh install's FIRST customer turn was fail-safe-blocked
+# (spend_meter_unknown) until the meter warmed (cfv-0717d/e). Warm the EXACT query
+# the turn-gate uses now, as clawuser (dials the proxy on 8787), so the first turn
+# is not blocked. NON-FATAL: the turn-gate's own retry + fail-safe still protect if
+# this never warms -- so `|| true` semantics; never throw here.
+Write-Log INFO 'Priming the spend meter (usage-cost) so the first turn is not fail-safe-blocked...'
+$spendPrime = @'
+for i in $(seq 1 40); do
+    u="$(openclaw gateway usage-cost --json --days 400 2>/dev/null)"
+    if [ -n "$u" ]; then echo "[spend-prime] meter warm on attempt $i"; exit 0; fi
+    sleep 3
+done
+echo "[spend-prime] WARNING: meter not readable after ~120s; the turn-gate retry + fail-safe will cover it" >&2
+exit 0
+'@
+try { $null = Invoke-WslBash -Script $spendPrime -User 'clawuser' } catch { Write-Log WARN "Spend-meter prime hit an error (non-fatal): $($_.Exception.Message)" }
+
 # v1.0.2: register the WSL Host keep-alive task only after the gateway has
 # been proven healthy. If the health gate above throws, this never runs and
 # we don't leave a dangling task pointing at a broken install. Outside the
