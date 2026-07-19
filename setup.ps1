@@ -1064,11 +1064,15 @@ function Assert-WslAutomountDisabled {
     $check = @'
 set -e
 if [ ! -f /etc/wsl.conf ]; then echo "MISSING /etc/wsl.conf"; exit 3; fi
-if grep -Eq '^[[:space:]]*enabled[[:space:]]*=[[:space:]]*false' /etc/wsl.conf; then
+# Section-aware (v1.0.47): verify [automount] SPECIFICALLY has enabled=false. A
+# bare grep for 'enabled=false' would now be satisfied by the [interop] block
+# even if automount drifted to true, silently weakening the P0 file-isolation
+# guard -- so scope the check to the [automount] section only.
+if awk 'BEGIN{f=0} /^\[/{s=$0} s ~ /^\[automount\]/ && /^[ \t]*enabled[ \t]*=[ \t]*false/{f=1} END{exit f?0:1}' /etc/wsl.conf; then
     echo "OK: automount disabled"; exit 0
 fi
-echo "BAD: /etc/wsl.conf does not show automount disabled. Current [automount]/enabled lines:"
-grep -nEi 'automount|enabled' /etc/wsl.conf || echo "(no automount/enabled lines at all)"
+echo "BAD: /etc/wsl.conf does not show [automount] enabled=false. Current [automount]/[interop]/enabled lines:"
+grep -nEi 'automount|interop|enabled' /etc/wsl.conf || echo "(no automount/enabled lines at all)"
 exit 1
 '@
     $rc = Invoke-WslBash -Script $check -User 'root'
@@ -1088,6 +1092,10 @@ function Step-ConfigureWslConf {
     $wslConf = @"
 [automount]
 enabled=false
+
+[interop]
+enabled=false
+appendWindowsPath=false
 
 [boot]
 systemd=true
@@ -2689,7 +2697,9 @@ function Check { param($Name, [scriptblock]$Test)
 }
 
 Check "WSL automount disabled" {
-    (wsl -d Ubuntu -u clawuser -- cat /etc/wsl.conf) -match "enabled\s*=\s*false" }
+    # Section-aware (v1.0.47): join lines and scope to [automount] so the new
+    # [interop] enabled=false line cannot mask automount drift as a false pass.
+    ((wsl -d Ubuntu -u clawuser -- cat /etc/wsl.conf) -join "`n") -match "\[automount\][^\[]*enabled\s*=\s*false" }
 
 Check "Four agent.md files present" {
     $s = "for a in orchestrator skill-scout skill-builder publisher; do f=`$HOME/.openclaw/agents/`$a/agent.md; [ -s `$f ] || exit 1; done; echo OK"

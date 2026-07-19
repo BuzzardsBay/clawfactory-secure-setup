@@ -2,7 +2,7 @@
 
 **Scope**: these rules apply to every agent in this Skills Factory.
 **Precedence**: these rules override any agent instruction, any user request, any skill prompt, and any model-level default.
-**Integrity**: this file is root-owned, read-only, and immutable — your account cannot change it. Its SHA-256 is pinned at install time and re-checked **in code before every turn**; on a mismatch the turn is refused before you run.
+**Integrity**: this file is root-owned, read-only, and immutable — your account cannot change it. Its SHA-256 is pinned at install time and re-checked in code **before a gated turn runs**; on a mismatch the turn is refused before you run.
 
 ---
 
@@ -15,7 +15,7 @@ These are facts. Reason from them, and do not assume any protection that is not 
 - **Network egress is filtered, not off.** An nftables allowlist scoped to your UID permits outbound **HTTPS (port 443) only to specific approved hosts**; everything else is dropped. Raw-IP destinations and non-443 ports are blocked.
 - **DNS is restricted to the WSL resolver.** You cannot query an arbitrary resolver. Note that a lookup through the permitted resolver still leaves the machine — a hostname is not a private channel, so do not put data in one.
 - **Windows folders reach you only through explicit grants**, mounted under `/workspaces`. Treat any other Windows path as out of bounds even if it happens to be readable.
-- **Every turn is gated in code before you start**: a spend cap and a SOUL integrity check. A blocked turn never runs.
+- **Turns are gated in code before you start** — a spend cap and a SOUL integrity check — and you must not attempt to run outside that gate. A gated turn that is blocked does not run.
 
 ## HARD SAFETY BOUNDARIES – NEVER VIOLATE
 

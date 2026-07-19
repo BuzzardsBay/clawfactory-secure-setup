@@ -3,7 +3,7 @@
 ; Compile with: "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ClawFactory-Secure-Setup.iss
 
 #define MyAppName      "ClawFactory Secure Setup"
-#define MyAppVersion   "1.0.46"
+#define MyAppVersion   "1.0.47"
 #define MyAppPublisher "Frontier Automation Systems LLC"
 #define MyAppURL       "https://openclaw.ai"
 
@@ -110,7 +110,7 @@ Name: "{group}\ClawFactory Kill Switch"; \
   Filename: "powershell.exe"; \
   Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\resources\clawfactory-stop.ps1"""; \
   WorkingDir: "{app}"; \
-  Comment: "Emergency stop: kills all ClawFactory agent containers"
+  Comment: "Emergency stop: stops the OpenClaw gateway and agent processes"
 Name: "{group}\ClawFactory Dashboard"; \
   Filename: "{sys}\cmd.exe"; \
   Parameters: "/c start http://127.0.0.1:8787"; \
@@ -598,7 +598,7 @@ begin
     '  - Outbound network is an allowlist: HTTPS to approved hosts only.' + #13#10 +
     '  - OpenClaw gateway binds to 127.0.0.1 only.' + #13#10 +
     '  - WSL automount is disabled (no access to your Windows files).' + #13#10 +
-    '  - Safety rules are immutable; every turn is spend- and integrity-gated.' + #13#10 + #13#10 +
+    '  - Safety rules are immutable; turns through the gateway are spend- and integrity-gated.' + #13#10 + #13#10 +
     'WARNING: AI agents will execute code inside this WSL2 environment.' + #13#10 +
     'You must personally review every skill before publishing.' + #13#10 +
     'Install takes 10-20 minutes and needs admin rights + internet.');
@@ -716,7 +716,7 @@ begin
     'Your key is yours. It bills to your own provider account, and ClawFactory ' +
     'never sends it anywhere except to the provider you chose. On this PC it is ' +
     'kept in Windows Credential Manager (DPAPI-protected); in the sandbox it lives ' +
-    'only in a locked-down file, never in plain text.' + #13#10 + #13#10 +
+    'only in a locked-down file (mode 600), never on a command line or in .env.' + #13#10 + #13#10 +
     'A configurable spend cap stops turns once you reach your limit - a strong ' +
     'guardrail on the gateway path, not an absolute ceiling (see SECURITY.md). ' +
     'You can also set a hard spending limit in your provider account.';
@@ -726,7 +726,8 @@ begin
     'Enter your API key',
     'Paste the key you just copied.',
     'It is stored in Windows Credential Manager (DPAPI-protected) and is never ' + #13#10 +
-    'written to a log, a temp file, or a plain-text file inside the sandbox.' + #13#10 + #13#10 +
+    'written to a log, a temp file, a command line, or .env. In the sandbox it is ' + #13#10 +
+    'kept in a locked-down file (mode 600), readable only by the agent user.' + #13#10 + #13#10 +
     'Not ready yet? Tick the box below - you can add your key later from the Start ' + #13#10 +
     'Menu (ClawFactory > Switch AI Provider), which walks you through it.');
   ApiKeyPage.Add('API key:', True);
@@ -767,8 +768,9 @@ begin
     'Please confirm you understand what you are about to install.',
     'Tick the box below to continue. Installation is blocked until you do.',
     False, False);
-  AckPage.Add('I understand agents execute code in isolated containers and I will ' +
-              'personally review every skill before publishing.');
+  AckPage.Add('I understand agents execute code inside a hardened WSL2 environment ' +
+              '(non-root, network-restricted) and I will personally review every ' +
+              'skill before publishing.');
 end;
 
 procedure CurPageChanged(CurPageID: Integer);

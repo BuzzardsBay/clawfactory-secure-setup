@@ -6,6 +6,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). This project a
 
 ---
 
+## [1.0.47] - 2026-07-19
+
+### Security
+
+- **Interop hardening.** `/etc/wsl.conf` now sets `[interop] enabled=false` and `appendWindowsPath=false` in addition to `[automount] enabled=false`. Previously the agent's inability to execute a Windows binary (and thus reach `wsl.exe`/the grant path) depended *entirely* on automount being off — a single drift of `automount` to `true` would expose the Windows filesystem **and** hand the agent a reachable Windows PATH at once. These are now decoupled so neither failure alone is sufficient. Verified no install step, runtime feature, or validation harness depends on WSL→Windows interop.
+- **Section-aware automount verification.** The fail-loud automount readback (`Assert-WslAutomountDisabled`) and the smoke check now scope specifically to the `[automount]` section, so the new `[interop] enabled=false` line cannot mask automount drift as a false pass.
+
+### Fixed
+
+- **Product-truth installer copy.** Corrected five user-visible claims that overstated reality:
+  - The **mandatory** security acknowledgement no longer requires the user to attest that "agents execute code in isolated containers" (there are no containers — Docker was removed); it now describes the hardened, non-root, network-restricted WSL2 environment accurately.
+  - The API-key wizard's credential copy no longer claims the key is "never in plain text" / never in "a plain-text file inside the sandbox." In the sandbox the key lives in a mode-600 file; the accurate protection (DPAPI on Windows; never on a command line or in `.env`) is stated instead.
+  - The kill-switch shortcut comment no longer references "agent containers."
+  - The welcome guardrail no longer states "every turn is spend- and integrity-gated" as absolute; it is scoped to turns through the gateway, consistent with the wizard's own spend-cap wording.
+
+### Changed
+
+- **Safety-rules (SOUL) wording.** The agent-recited safety rules no longer state the spend/integrity gate as an absolute guarantee; the file-integrity guarantee (root-owned, read-only, immutable) is kept strong. The pinned SOUL hash recomputes from the file at install as before.
+
 ## [1.0.46] - 2026-07-19
 
 ### Added
