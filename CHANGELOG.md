@@ -6,6 +6,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). This project a
 
 ---
 
+## [1.0.46] - 2026-07-19
+
+### Added
+
+- **In-installer API Key Wizard (interactive installs only).** A non-technical buyer can now go from purchase to a working agent without guessing where to get a key or touching a terminal:
+  - A new **"Get your <Provider> API key"** guidance page walks the user through obtaining a key in plain numbered steps, with a button that opens the correct provider console, the exact key prefix to expect (e.g. `sk-ant-`), a plain statement that the key is theirs / bills to their own provider account / is never sent anywhere except to that provider, and a calibrated note about the configurable gateway-path spend cap (not overstated — see `SECURITY.md`).
+  - The key-entry page gains a **show/hide toggle**, **paste trimming** (strips the trailing newline that is the most common failure), **provider-specific format validation** with a named error, and an **optional live authentication check** (a free, no-token model-list call) that never blocks the install — any network/timeout/rate-limit offers "continue anyway", and even a rejected key can be forced through.
+  - Deferral ("I'll add my API key later") completes the install cleanly and points to the Start-Menu **Switch AI Provider** helper rather than a terminal command.
+- The key is still stored only through the existing mechanism (Windows Credential Manager → `Step-WireProviderKey`); it is never written to the install log, the Inno log, or a temp file.
+
+### Unchanged (verified)
+
+- `/SILENT` behavior is untouched: the wizard never displays, the key is read from Credential Manager exactly as before, and the `/PROVIDER=`, `/LICENSE=`, and credential-target contracts the Azure validation harness depends on are unchanged.
+
 ## [1.0.37] - 2026-06-30
 
 ### Fixed

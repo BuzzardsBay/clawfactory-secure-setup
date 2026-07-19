@@ -3,7 +3,7 @@
 ; Compile with: "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ClawFactory-Secure-Setup.iss
 
 #define MyAppName      "ClawFactory Secure Setup"
-#define MyAppVersion   "1.0.45"
+#define MyAppVersion   "1.0.46"
 #define MyAppPublisher "Frontier Automation Systems LLC"
 #define MyAppURL       "https://openclaw.ai"
 
@@ -139,13 +139,20 @@ var
   WelcomePage:    TOutputMsgWizardPage;
   LicensePage:    TInputQueryWizardPage;
   ProviderPage:   TInputOptionWizardPage;
+  KeyGuidePage:   TWizardPage;      { v1.0.46: how-to-get-your-key guidance }
+  KeyGuideSteps:  TNewStaticText;   { numbered steps, per provider }
+  KeyGuideFormat: TNewStaticText;   { "a valid key starts with ..." }
+  KeyGuideSafety: TNewStaticText;   { key-is-yours + spend-cap note }
+  OpenConsoleBtn: TNewButton;       { opens the provider console }
   ApiKeyPage:     TInputQueryWizardPage;
   ApiKeyLaterChk: TNewCheckBox;
+  ApiKeyShowChk:  TNewCheckBox;     { v1.0.46: show/hide the masked key }
   GetKeyButton:   TNewButton;
   BuyButton:      TNewButton;
   AckPage:        TInputOptionWizardPage;
   IsResumeRun:    Boolean;
   ResumeProvider: string;
+  KeyChangeGuard: Boolean;          { re-entrancy guard for the trim-on-change }
   ValidatedLicenseKey: string;  { populated after successful /activate response }
 
 function ResumeFlagPath: string;
@@ -282,6 +289,84 @@ begin
   end;
 end;
 
+{ v1.0.46: expected key prefix per provider, for format validation before we
+  bother the provider with a live call. Verified against each provider's live
+  console/docs (2026-07): Anthropic sk-ant-, OpenAI sk- (modern sk-proj-,
+  legacy sk-), xAI xai-, Google AI Studio AIza. }
+function ProviderKeyPrefix: string;
+begin
+  case ProviderPage.SelectedValueIndex of
+    0: Result := 'xai-';
+    1: Result := 'sk-';
+    2: Result := 'sk-ant-';
+    3: Result := 'AIza';
+  else
+    Result := '';
+  end;
+end;
+
+{ A masked, illustrative example so a first-time buyer recognises a well-formed
+  key. Not a real key - the X's stand in for the secret part. }
+function ProviderKeyExample: string;
+begin
+  case ProviderPage.SelectedValueIndex of
+    0: Result := 'xai-XXXXXXXXXXXXXXXXXXXXXXXX';
+    1: Result := 'sk-proj-XXXXXXXXXXXXXXXXXXXX';
+    2: Result := 'sk-ant-api03-XXXXXXXXXXXXXX';
+    3: Result := 'AIzaXXXXXXXXXXXXXXXXXXXXXXXX';
+  else
+    Result := '';
+  end;
+end;
+
+{ Provider "list models" endpoint - a free, no-token GET used to confirm a key
+  actually authenticates. Never a completions call, which would cost tokens. }
+function ProviderModelsUrl: string;
+begin
+  case ProviderPage.SelectedValueIndex of
+    0: Result := 'https://api.x.ai/v1/models';
+    1: Result := 'https://api.openai.com/v1/models';
+    2: Result := 'https://api.anthropic.com/v1/models';
+    3: Result := 'https://generativelanguage.googleapis.com/v1beta/models';
+  else
+    Result := '';
+  end;
+end;
+
+{ Plain, numbered steps for obtaining a key. Short and calm for a non-developer.
+  Console URLs match the button target (ProviderApiKeyUrl) and were verified
+  live 2026-07. }
+function ProviderStepsText: string;
+begin
+  case ProviderPage.SelectedValueIndex of
+    0: Result :=
+      '1.  Click the button below to open the xAI console (console.x.ai).' + #13#10 +
+      '2.  Sign in, or create an account if this is your first time.' + #13#10 +
+      '3.  Add a payment method under Billing - xAI needs one to issue a key.' + #13#10 +
+      '4.  Open "API Keys", click "Create API Key", and give it any name.' + #13#10 +
+      '5.  Copy the key it shows you (shown only once), then click Next below.';
+    1: Result :=
+      '1.  Click the button below to open the OpenAI platform (platform.openai.com).' + #13#10 +
+      '2.  Sign in, or create an account if this is your first time.' + #13#10 +
+      '3.  Add a little credit under Billing - a few dollars is plenty to start.' + #13#10 +
+      '4.  On the API keys page, click "Create new secret key" and name it.' + #13#10 +
+      '5.  Copy the key it shows you (shown only once), then click Next below.';
+    2: Result :=
+      '1.  Click the button below to open the Anthropic console (console.anthropic.com).' + #13#10 +
+      '2.  Sign in, or create an account if this is your first time.' + #13#10 +
+      '3.  Add a payment method and a little credit under Plans & Billing.' + #13#10 +
+      '4.  Go to Settings then API keys, click "Create Key", and name it.' + #13#10 +
+      '5.  Copy the key it shows you (shown only once), then click Next below.';
+    3: Result :=
+      '1.  Click the button below to open Google AI Studio (aistudio.google.com).' + #13#10 +
+      '2.  Sign in with a Google account and accept the terms.' + #13#10 +
+      '3.  Click "Create API key" - a free tier is available to start.' + #13#10 +
+      '4.  Copy the key it shows you, then click Next below.';
+  else
+    Result := '';
+  end;
+end;
+
 procedure GetKeyButtonClick(Sender: TObject);
 var
   URL: string;
@@ -297,6 +382,37 @@ var
   ResultCode: Integer;
 begin
   ShellExec('open', 'https://clawfactory.app', '', '', SW_SHOWNORMAL, ewNoWait, ResultCode);
+end;
+
+{ v1.0.46: show/hide toggle for the masked key field. TPasswordEdit.Password
+  True = masked, False = revealed. }
+procedure ApiKeyShowChkClick(Sender: TObject);
+begin
+  ApiKeyPage.Edits[0].Password := not ApiKeyShowChk.Checked;
+end;
+
+{ v1.0.46: strip stray CR/LF/TAB and surrounding spaces as the key is typed or
+  pasted. A trailing newline from a copy is the single most common failure, so
+  we clean it the moment it lands rather than only at submit. Guarded against
+  the re-entrant OnChange that setting .Text triggers. }
+procedure ApiKeyEditChange(Sender: TObject);
+var
+  Cur, Clean: string;
+  i: Integer;
+begin
+  if KeyChangeGuard then exit;
+  Cur := ApiKeyPage.Edits[0].Text;
+  Clean := '';
+  for i := 1 to Length(Cur) do
+    if (Cur[i] <> #13) and (Cur[i] <> #10) and (Cur[i] <> #9) then
+      Clean := Clean + Cur[i];
+  Clean := Trim(Clean);
+  if Clean <> Cur then
+  begin
+    KeyChangeGuard := True;
+    ApiKeyPage.Edits[0].Text := Clean;
+    KeyChangeGuard := False;
+  end;
 end;
 
 { v1.0.30: aggressively strip everything except A-Z, 0-9, and dashes from a
@@ -376,6 +492,57 @@ begin
     end;
   except
     Result := False;
+  end;
+end;
+
+{ v1.0.46: minimal, no-cost authentication probe. GETs the provider's model
+  list with the supplied key and classifies the HTTP status. Model listing
+  spends zero tokens. The key is sent ONLY to the provider the user chose, over
+  HTTPS, and is never logged or written to disk here. 8s timeouts so a slow
+  network cannot stall the install; the caller treats anything but a clean
+  200/401/403/429 as "could not verify" and lets the user continue.
+
+  Returns: 0 = valid, 1 = rejected (401/403), 2 = rate-limited (429),
+           3 = could not determine (network, timeout, or any other status). }
+function LiveCheckKey(Key: string): Integer;
+var
+  WinHTTP: Variant;
+  Url: string;
+  Status: Integer;
+begin
+  Result := 3;
+  Url := ProviderModelsUrl;
+  if Url = '' then exit;
+  try
+    WinHTTP := CreateOleObject('WinHttp.WinHttpRequest.5.1');
+    WinHTTP.Open('GET', Url, False);
+    { Auth header per provider. Gemini takes the key in x-goog-api-key (a header,
+      never the URL); Anthropic uses x-api-key + a version header; the OpenAI-
+      compatible providers (OpenAI, xAI) use a Bearer token. }
+    case ProviderPage.SelectedValueIndex of
+      2:
+        begin
+          WinHTTP.SetRequestHeader('x-api-key', Key);
+          WinHTTP.SetRequestHeader('anthropic-version', '2023-06-01');
+        end;
+      3:
+        WinHTTP.SetRequestHeader('x-goog-api-key', Key);
+    else
+      WinHTTP.SetRequestHeader('Authorization', 'Bearer ' + Key);
+    end;
+    WinHTTP.SetTimeouts(8000, 8000, 8000, 8000);
+    WinHTTP.Send('');
+    Status := WinHTTP.Status;
+    if Status = 200 then
+      Result := 0
+    else if (Status = 401) or (Status = 403) then
+      Result := 1
+    else if Status = 429 then
+      Result := 2
+    else
+      Result := 3;
+  except
+    Result := 3;
   end;
 end;
 
@@ -505,26 +672,85 @@ begin
     end;
   end;
 
-  { --- Page 3: API key (skipped for Ollama / Later via ShouldSkipPage) [R5] --- }
-  ApiKeyPage := CreateInputQueryPage(ProviderPage.ID,
-    'API Key',
-    'Paste the API key for your selected provider.',
-    'The key is stored in Windows Credential Manager (DPAPI-protected, tied to your' + #13#10 +
-    'Windows user). It is NEVER written to a file inside WSL.' + #13#10 + #13#10 +
-    'Rotate later from a terminal with cmdkey (see README).');
-  ApiKeyPage.Add('API key:', True);
+  { --- Page 4: How to get your API key (guidance) [v1.0.46] ------------------
+    The point of the wizard: walk a non-developer from "I bought this" to a
+    working key without ever touching a terminal. Content is provider-specific
+    and filled in / laid out by CurPageChanged (label heights aren't known until
+    their captions are set). Skipped for Ollama / "later" / silent / resume via
+    ShouldSkipPage. }
+  KeyGuidePage := CreateCustomPage(ProviderPage.ID,
+    'Get your API key',
+    'A one-time setup step. It usually takes only a few minutes.');
 
-  { "Get your <Provider> API key" button - opens the provider's key page in
-    the default browser. Caption + visibility are updated in CurPageChanged
-    based on the provider selected on the previous page. Hidden for Ollama
-    (no key needed) and "configure later". }
+  KeyGuideSteps := TNewStaticText.Create(KeyGuidePage);
+  KeyGuideSteps.Parent   := KeyGuidePage.Surface;
+  KeyGuideSteps.Left     := 0;
+  KeyGuideSteps.Width    := KeyGuidePage.SurfaceWidth;
+  KeyGuideSteps.WordWrap := True;
+  KeyGuideSteps.AutoSize := True;
+  KeyGuideSteps.Caption  := '';
+
+  OpenConsoleBtn := TNewButton.Create(KeyGuidePage);
+  OpenConsoleBtn.Parent  := KeyGuidePage.Surface;
+  OpenConsoleBtn.Left    := 0;
+  OpenConsoleBtn.Width   := ScaleX(260);
+  OpenConsoleBtn.Height  := ScaleY(26);
+  OpenConsoleBtn.Caption := 'Open the provider console';
+  OpenConsoleBtn.OnClick := @GetKeyButtonClick;
+
+  KeyGuideFormat := TNewStaticText.Create(KeyGuidePage);
+  KeyGuideFormat.Parent   := KeyGuidePage.Surface;
+  KeyGuideFormat.Left     := 0;
+  KeyGuideFormat.Width    := KeyGuidePage.SurfaceWidth;
+  KeyGuideFormat.WordWrap := True;
+  KeyGuideFormat.AutoSize := True;
+  KeyGuideFormat.Caption  := '';
+
+  KeyGuideSafety := TNewStaticText.Create(KeyGuidePage);
+  KeyGuideSafety.Parent   := KeyGuidePage.Surface;
+  KeyGuideSafety.Left     := 0;
+  KeyGuideSafety.Width    := KeyGuidePage.SurfaceWidth;
+  KeyGuideSafety.WordWrap := True;
+  KeyGuideSafety.AutoSize := True;
+  KeyGuideSafety.Caption  :=
+    'Your key is yours. It bills to your own provider account, and ClawFactory ' +
+    'never sends it anywhere except to the provider you chose. On this PC it is ' +
+    'kept in Windows Credential Manager (DPAPI-protected); in the sandbox it lives ' +
+    'only in a locked-down file, never in plain text.' + #13#10 + #13#10 +
+    'A configurable spend cap stops turns once you reach your limit - a strong ' +
+    'guardrail on the gateway path, not an absolute ceiling (see SECURITY.md). ' +
+    'You can also set a hard spending limit in your provider account.';
+
+  { --- Page 5: API key entry (skipped for Ollama / Later via ShouldSkipPage) [R5] --- }
+  ApiKeyPage := CreateInputQueryPage(KeyGuidePage.ID,
+    'Enter your API key',
+    'Paste the key you just copied.',
+    'It is stored in Windows Credential Manager (DPAPI-protected) and is never ' + #13#10 +
+    'written to a log, a temp file, or a plain-text file inside the sandbox.' + #13#10 + #13#10 +
+    'Not ready yet? Tick the box below - you can add your key later from the Start ' + #13#10 +
+    'Menu (ClawFactory > Switch AI Provider), which walks you through it.');
+  ApiKeyPage.Add('API key:', True);
+  ApiKeyPage.Edits[0].OnChange := @ApiKeyEditChange;
+
+  { Show/hide toggle for the masked field, directly under it. }
+  ApiKeyShowChk := TNewCheckBox.Create(ApiKeyPage);
+  ApiKeyShowChk.Parent  := ApiKeyPage.Surface;
+  ApiKeyShowChk.Left    := ApiKeyPage.Edits[0].Left;
+  ApiKeyShowChk.Top     := ApiKeyPage.Edits[0].Top + ApiKeyPage.Edits[0].Height + ScaleY(6);
+  ApiKeyShowChk.Width   := ScaleX(160);
+  ApiKeyShowChk.Height  := ScaleY(18);
+  ApiKeyShowChk.Caption := 'Show key';
+  ApiKeyShowChk.OnClick := @ApiKeyShowChkClick;
+
+  { "Get your <Provider> API key" button - a second chance to open the console
+    from the entry page. Caption + visibility are set in CurPageChanged. }
   GetKeyButton := TNewButton.Create(ApiKeyPage);
   GetKeyButton.Parent := ApiKeyPage.Surface;
-  GetKeyButton.Top    := ApiKeyPage.Edits[0].Top + ApiKeyPage.Edits[0].Height + ScaleY(12);
+  GetKeyButton.Top    := ApiKeyShowChk.Top + ApiKeyShowChk.Height + ScaleY(12);
   GetKeyButton.Left   := ApiKeyPage.Edits[0].Left;
-  GetKeyButton.Width  := ScaleX(220);
+  GetKeyButton.Width  := ScaleX(240);
   GetKeyButton.Height := ScaleY(24);
-  GetKeyButton.Caption := 'Get your API key →';
+  GetKeyButton.Caption := 'Get your API key';
   GetKeyButton.OnClick := @GetKeyButtonClick;
 
   ApiKeyLaterChk := TNewCheckBox.Create(ApiKeyPage);
@@ -535,7 +761,7 @@ begin
   ApiKeyLaterChk.Height  := ScaleY(20);
   ApiKeyLaterChk.Caption := 'I''ll add my API key later (agents will not run until I do)';
 
-  { --- Page 4: Security acknowledgement (mandatory) --- }
+  { --- Page 6: Security acknowledgement (mandatory) --- }
   AckPage := CreateInputOptionPage(ApiKeyPage.ID,
     'Security Acknowledgement',
     'Please confirm you understand what you are about to install.',
@@ -549,18 +775,42 @@ procedure CurPageChanged(CurPageID: Integer);
 var
   ShortName: string;
 begin
-  { When the API key page becomes active, set the "Get your API key" button
-    label and visibility based on the provider chosen on the previous page. }
+  ShortName := ProviderShortName;
+
+  { Guidance page: fill in provider-specific copy and stack the controls. Label
+    heights are only known once their captions are set, so both the text and the
+    vertical layout happen here rather than in InitializeWizard. }
+  if CurPageID = KeyGuidePage.ID then
+  begin
+    KeyGuidePage.Caption := 'Get your ' + ShortName + ' API key';
+
+    KeyGuideSteps.Top     := ScaleY(4);
+    KeyGuideSteps.Caption := ProviderStepsText;
+
+    OpenConsoleBtn.Top     := KeyGuideSteps.Top + KeyGuideSteps.Height + ScaleY(14);
+    OpenConsoleBtn.Caption := 'Open the ' + ShortName + ' console';
+
+    KeyGuideFormat.Top     := OpenConsoleBtn.Top + OpenConsoleBtn.Height + ScaleY(16);
+    KeyGuideFormat.Caption := 'A valid ' + ShortName + ' key starts with "' +
+      ProviderKeyPrefix + '" (for example ' + ProviderKeyExample + '). ' +
+      'If what you copied does not start that way, you have the wrong value.';
+
+    KeyGuideSafety.Top := KeyGuideFormat.Top + KeyGuideFormat.Height + ScaleY(16);
+  end;
+
+  { Entry page: label + visibility of the "Get your key" button, and reset the
+    show toggle so a re-entry never leaves the key revealed. }
   if CurPageID = ApiKeyPage.ID then
   begin
-    ShortName := ProviderShortName;
+    ApiKeyShowChk.Checked := False;
+    ApiKeyPage.Edits[0].Password := True;
     if ShortName = '' then
     begin
       GetKeyButton.Visible := False;
     end
     else
     begin
-      GetKeyButton.Caption := 'Get your ' + ShortName + ' API key →';
+      GetKeyButton.Caption := 'Get your ' + ShortName + ' API key';
       GetKeyButton.Visible := True;
     end;
   end;
@@ -576,8 +826,8 @@ begin
   if IsResumeRun then
   begin
     if (PageID = WelcomePage.ID) or (PageID = LicensePage.ID) or
-       (PageID = ProviderPage.ID) or (PageID = ApiKeyPage.ID) or
-       (PageID = AckPage.ID) then
+       (PageID = ProviderPage.ID) or (PageID = KeyGuidePage.ID) or
+       (PageID = ApiKeyPage.ID) or (PageID = AckPage.ID) then
     begin
       Result := True;
       exit;
@@ -587,15 +837,19 @@ begin
   begin
     { LicensePage is also skipped under /SILENT - the /LICENSE=<key> CLI
       arg was validated up front in InitializeWizard. If validation failed
-      InitializeWizard called Abort, so reaching here means license is OK. }
+      InitializeWizard called Abort, so reaching here means license is OK.
+      KeyGuidePage / ApiKeyPage never show under /SILENT: the key is seeded
+      into Credential Manager machine-to-machine before setup runs. }
     if (PageID = LicensePage.ID) or (PageID = ProviderPage.ID) or
-       (PageID = ApiKeyPage.ID) or (PageID = AckPage.ID) then
+       (PageID = KeyGuidePage.ID) or (PageID = ApiKeyPage.ID) or
+       (PageID = AckPage.ID) then
     begin
       Result := True;
       exit;
     end;
   end;
-  if PageID = ApiKeyPage.ID then
+  { Ollama / "configure later" need no key, so skip both key pages. }
+  if (PageID = KeyGuidePage.ID) or (PageID = ApiKeyPage.ID) then
     Result := not ProviderNeedsApiKey;
 end;
 
@@ -641,21 +895,82 @@ begin
   if CurPageID = ApiKeyPage.ID then
   begin
     Key := Trim(ApiKeyPage.Values[0]);
-    if (not WizardSilent()) and (Key = '') and (not ApiKeyLaterChk.Checked) then
+
+    { Deferral: an empty key with "add later" ticked is allowed - the install
+      finishes with the agent unconfigured. An empty key without it is a stop. }
+    if Key = '' then
     begin
-      MsgBox('Enter your API key, or tick "I''ll add my API key later".',
+      if (not WizardSilent()) and (not ApiKeyLaterChk.Checked) then
+      begin
+        MsgBox('Enter your API key, or tick "I''ll add my API key later".',
+               mbError, MB_OK);
+        Result := False;
+      end;
+      exit;   { nothing to store }
+    end;
+
+    { Format check (interactive only): catch a wrong-value paste with a specific,
+      named message before we bother the provider. }
+    if (not WizardSilent()) and (ProviderKeyPrefix <> '') and
+       (Pos(ProviderKeyPrefix, Key) <> 1) then
+    begin
+      MsgBox('That does not look like a valid ' + ProviderShortName + ' API key.' + #13#10 + #13#10 +
+             ProviderShortName + ' keys start with "' + ProviderKeyPrefix + '" ' +
+             '(for example ' + ProviderKeyExample + ').' + #13#10 + #13#10 +
+             'Double-check you copied the whole key from the ' + ProviderShortName +
+             ' console, with no extra characters.',
              mbError, MB_OK);
       Result := False;
       exit;
     end;
-    if Key <> '' then
+
+    { Live check (interactive only): confirm the key actually authenticates.
+      This NEVER blocks the install by itself - a rejected key can still be
+      forced through, and any network problem or timeout just offers to
+      continue. See LiveCheckKey for the return codes. }
+    if not WizardSilent() then
     begin
-      CredTarget := ProviderCredentialTarget;
-      Exec('cmdkey.exe',
-           '/generic:' + CredTarget + ' /user:clawuser /pass:' + Key,
-           '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-      ApiKeyPage.Values[0] := '';
+      case LiveCheckKey(Key) of
+        1:
+          begin
+            if MsgBox(ProviderShortName + ' rejected this key.' + #13#10 + #13#10 +
+                 'It may be mistyped, revoked, or not active yet - a brand-new key ' +
+                 'can need a payment method on file and a minute to start working.' + #13#10 + #13#10 +
+                 'Fix the key now?  (Choose No to use it as-is anyway.)',
+                 mbError, MB_YESNO) = IDYES then
+            begin
+              Result := False;
+              exit;
+            end;
+          end;
+        2:
+          MsgBox('Could not verify the key right now - ' + ProviderShortName +
+                 ' is rate-limiting requests.' + #13#10 + #13#10 +
+                 'Your key was not rejected. The install will continue and you can ' +
+                 'test it once things settle.',
+                 mbInformation, MB_OK);
+        3:
+          begin
+            if MsgBox('Could not reach ' + ProviderShortName + ' to verify the key ' +
+                 '(no network, a firewall, or the provider is briefly down).' + #13#10 + #13#10 +
+                 'Continue without verifying?  (Choose No to try again.)',
+                 mbConfirmation, MB_YESNO) = IDNO then
+            begin
+              Result := False;
+              exit;
+            end;
+          end;
+      end;
     end;
+
+    { Store via the existing mechanism: Windows Credential Manager. setup.ps1's
+      Step-WireProviderKey reads it back from here. Not written to any log, temp
+      file, or the Inno log (the scripting Exec does not log its parameters). }
+    CredTarget := ProviderCredentialTarget;
+    Exec('cmdkey.exe',
+         '/generic:' + CredTarget + ' /user:clawuser /pass:' + Key,
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    ApiKeyPage.Values[0] := '';
   end
   else if CurPageID = AckPage.ID then
   begin
