@@ -82,16 +82,21 @@ design question — Task 3.1/3.2 satisfied.
 
 ---
 
-## Card sync — could not be performed from this session
+## Card sync — performed
 
-`C:/Projects/FrontierAI/scripts/dispatch_card.py` requires `DISPATCH_URL` / `DISPATCH_SECRET`.
-The Secure-Setup repo's `.env` carries **only the Azure signing credentials** — no Dispatch
-config — so the helper is a **logged no-op** here (by its own design, exit 0). Consequently
-this session **could not fetch card #130 comments and could not move the card's status**.
+`dispatch_card.py` loads Dispatch creds from **its own repo root**
+(`C:/Projects/FrontierAI/.env`), not from Secure-Setup's `.env` (which carries only the Azure
+signing credentials). A direct query against Secure-Setup's `.env` therefore reports the env
+as unset — but the helper itself reaches Dispatch fine. Sync **was performed** this session:
 
-**Action for Bret:** if the board still shows #130 as `in_progress`, move it to `done` from a
-Dispatch-enabled session, or confirm the 2026-07-18 session already synced it. The *work* is
-complete regardless of board state.
+- **Card #130 moved to `done`** (`dispatch_card.py status … done` → `STATUS card id=130 -> done`).
+- **Reconciliation comment posted** to #130 (re-run summary + this record's commit hash).
+- **Comments fetched:** the board (`GET /api/cards`) reports `comment_count: 1` for #130, but
+  the Dispatch API exposes no readable comment endpoint (every `…/comments` path returns the
+  SPA HTML shell); `/api/agent/update` is write-only. The single pre-existing comment is not
+  machine-readable and predates this re-run — most plausibly the 2026-07-18 session's own
+  close-out note. **Flagged, not assumed:** if it carried a scope change from Bret, it is not
+  visible via the API and he should resurface it here.
 
 ---
 
@@ -121,8 +126,9 @@ None of these block the "Door-2 stops being a blocker" line, which the committed
 
 - **Task accounting:** Comprehension gate met. All three conditions confirmed
   already-committed and independently re-verified against the record. Card #130 work =
-  **done**; board sync **not reachable** from this repo (flagged above). One new file this
-  session: this reconciliation record.
+  **done**; board synced (**#130 → `done`**, reconciliation comment posted; 1 pre-existing
+  comment not API-readable, flagged above). One new file this session: this reconciliation
+  record.
 - **Resource ledger:** **no Azure resources this session** (documentation only — no VM, no
   validation run). Live ledger unchanged; nothing to tear down.
 - **Delta security sweep:** **no security control was changed.** `git status` clean at start;
