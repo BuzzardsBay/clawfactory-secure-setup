@@ -6,6 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). This project a
 
 ---
 
+## [1.0.48] - 2026-07-19
+
+### Security
+
+- **Structural `browser` tool denial.** The gateway config now sets `tools.deny=["browser"]` (`setup.ps1` Step 9a), so the OpenClaw `browser` tool is unavailable to the agent regardless of model or prompt — making the previously prompt-level "browser denied" claim structural, and shrinking the tool surface. Deliberately narrow: `exec` (shell) is **not** denied (the agent needs it to work, and SOUL permits it gated by "GO"); network reach remains bounded by the nftables egress firewall.
+
+### Verified (no change — documented)
+
+- **OpenClaw version is pinned to `2026.4.27`, not `latest`.** This was already true in source (`setup.ps1:65` `$OpenClawNpmVersion='2026.4.27'` → `setup.ps1:1595` passed as `OPENCLAW_VERSION`, honored by the bundled `openclaw-install.sh` which skips its `latest` fallbacks for a pinned version). A prior discovery note that read the bundled script's `:-latest` default and concluded "we ship latest" was wrong; this release verifies the pinned version off a clean-box runtime and adds `docs/reference/OPENCLAW_VERSION_POLICY.md` (pin + deliberate-bump process).
+
 ## [1.0.47] - 2026-07-19
 
 ### Security

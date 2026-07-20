@@ -2152,13 +2152,23 @@ function Step-ConfigureOpenClaw {
     # (pre-gateway-start, no #47133 risk) is the load-bearing fix; the env
     # var drop-in stays as a forward-compat hedge for newer OpenClaw versions
     # where the env var IS honored.
+    # Step 9a (v1.0.48): structural tool policy. Deny the `browser` tool at the
+    # gateway config level so it is unavailable regardless of model or prompt --
+    # this makes the orchestrator-prompt "browser denied" claim structural instead
+    # of advisory, and shrinks the tool surface (defense-in-depth for unattended
+    # runs). Deliberately NARROW: `exec` is NOT denied -- the agent needs shell to
+    # do any file/code work, and SOUL permits it gated by "GO"; denying it would
+    # break the product. `net.fetch`/`web_fetch` is left to the nftables egress
+    # firewall (the real, already-structural network control). Failure mode of a
+    # denied tool is proven consumer-side in validation, not assumed here.
     $script9a = @'
 set -e
 openclaw config set gateway.bind loopback >/dev/null
 openclaw config set gateway.port 8787 --json >/dev/null
 openclaw config set gateway.mode local >/dev/null
 openclaw config set plugins.entries.bonjour.enabled false --json >/dev/null
-echo "gateway configured (bonjour disabled at plugins.entries.bonjour.enabled)"
+openclaw config set tools.deny --strict-json '["browser"]' >/dev/null
+echo "gateway configured (bonjour disabled; tools.deny=[browser])"
 '@
     $rc = Invoke-WslBash -Script $script9a -User $WslUser
     if ($rc -ne 0) { throw "Failed to configure gateway (exit=$rc)" }
