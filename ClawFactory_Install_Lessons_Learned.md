@@ -566,3 +566,51 @@ cfv-0717g then PASSED -- the agent read and quoted `GRANTED-FILE-<rand>` on warm
    product FAIL when the product is fine. Verify the path the test opens before blaming the meter.
 3. **Warm-up loop, not a single warm-up turn.** cfv-0717g went hot on warm-up attempt 2, not 1 -- a
    loop that retries the throwaway turn until non-empty is more reliable than one-and-done (see L17).
+
+## L20 -- a multi-line string concat inside a PowerShell array literal parses as separate elements (silent evidence loss)
+
+**Discovered:** Studio JOB 2 cfv-149 (2026-07-20; ClawFactory-Studio close-out `8c0204d`, fix `e3155b4`).
+The JOB 2 driver built the RunOnce `wrapper.cmd` with the probe command written as a multi-line string
+concatenation inside an `@(...)` array literal (`'powershell ... ' + "-A ..." + "-B ... > out.txt 2>&1",`).
+PowerShell parsed each physical line as a SEPARATE array element (6, not 4) -- a silent, syntactically
+valid misparse that `[Parser]::ParseFile` cannot catch. So the wrapper ran the probe with NO redirect
+(output lost to the session console) and ran `-LicenseKey ... > out.txt 2>&1` as a standalone command whose
+`'-LicenseKey' is not recognized` error was the only thing captured (102 bytes). The driver then reported
+exit 0 and tore down -- silent fake-success inside our own harness; 100% of the run's evidence was lost.
+
+**Rules:**
+1. **Build a command line as ONE explicitly-joined string, then place it as a single array element.** Never
+   rely on trailing-`+` continuation inside `@(...)` -- it reads as element separators. Guard with a
+   `Count -ne N` assertion that throws before the artifact is used.
+2. **Evidence capture must be producer-owned AND redundant.** The thing under test writes its own transcript
+   with a completion sentinel (`JOB2_PROBE_COMPLETE rc=<n>`), independent of any single wrapper redirect.
+   One redirect must never be able to lose a whole run.
+3. **Gate teardown on evidence-in-hand.** Refuse to delete a VM unless a retrieved channel carries the
+   sentinel above a plausible size floor; otherwise deallocate + preserve + exit nonzero. Never tear down on
+   a fake-success bundle.
+4. **Simulate before execute.** A committed render test that BUILDS the artifact and asserts its structure
+   (element count, command+redirect on one line) catches semantic misparses a parser cannot; it runs for
+   free, forever (`validation/test-wrapper-render.ps1` in the Studio repo).
+
+## L21 -- a .ps1 that carries multi-line bash into WSL must reach bash as LF, or strip CR at the boundary
+
+**Discovered:** Studio JOB 2 F2 / cfv-150 (2026-07-20). `adversarial-suite.ps1` T4.5 passes a multi-line
+bash here-string into WSL via the `Wsl` helper (base64 -> `bash`). It FAILED on the clean VM with
+`bash: line 9: syntax error: unexpected end of file`. Root cause: `*.ps1` is NOT covered by this repo's
+`.gitattributes` eol=lf rules, so on Windows (core.autocrlf=true) the working copy is CRLF
+(`git ls-files --eol` = `w/crlf`), and the JOB 2 driver stages that CRLF working copy. A multi-line bash
+script with CRLF breaks (`if...fi` + quotes, each line ending `\r`); a SINGLE-line command tolerates a lone
+trailing CR -- which is why only the one multi-line cell failed and it hid behind a green "28/0" summary.
+Confirmed with `bash -n`: LF ok, CRLF errors. Fixed by stripping carriage returns in the `Wsl` helper
+(a `-replace` of CR before the base64 encode), so bash always receives LF regardless of the checkout.
+
+**Rules:**
+1. **Any .ps1 that transports bash/node into WSL must reach bash as LF.** The existing `.gitattributes`
+   already forces `*.sh`/`*.mjs` to LF for exactly this reason; a `.ps1` that EMBEDS bash is the same hazard
+   and is not covered. Either add `*.ps1 text eol=lf` (renormalizes all .ps1) or strip CR in code at the WSL
+   boundary (self-contained, robust regardless of checkout). This repo did the latter.
+2. **`unexpected end of file` on a here-string that looks balanced is almost always CRLF.** Reproduce with
+   `bash -n` on an LF copy vs a CRLF copy before rewriting the script's logic.
+3. **A latent bug in a rarely-reached multi-line cell hides behind a green aggregate.** Single-line commands
+   survived CRLF, so the suite's "28/0" never exposed T4.5 until a run finally executed it. Trust a per-cell
+   result you actually ran over a comfortable baseline count.

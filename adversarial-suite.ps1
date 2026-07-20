@@ -30,6 +30,12 @@ function AgentSay([string]$Msg, [string]$Agent = 'main', [int]$T = 150) {
     return (($o -split "`n") | Where-Object { $_ -notmatch '^\x1b\[35m|staging bundled|installed bundled' }) -join "`n"
 }
 function Wsl([string]$Cmd, [string]$User = 'clawuser') {
+    # Strip CR before shipping bash into WSL. This .ps1's working copy is CRLF on Windows
+    # (*.ps1 is NOT covered by .gitattributes' eol=lf rules), so a multi-line bash here-string
+    # carried in with CRLF fails: "line N: syntax error: unexpected end of file" (cfv-150 T4.5).
+    # Single-line commands tolerate a lone trailing CR; multi-line ones do not. Confirmed with
+    # bash -n: LF ok, CRLF errors. CR is never semantically needed in bash source, so this is safe.
+    $Cmd = $Cmd -replace "`r", ''
     $b = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Cmd))
     return (& wsl.exe -d Ubuntu -u $User -- bash -lc "echo $b | base64 -d | bash" 2>&1 | Out-String)
 }
@@ -220,6 +226,27 @@ function Invoke-StudioProbe($mode){ (& node $studioProbe $mode 2>&1 | Where-Obje
 # throws on a missing property -- e.g. $j.error on a non-error result).
 function Prop($obj, $name) { if ($obj -and ($obj.PSObject.Properties.Name -contains $name)) { return $obj.$name } return $null }
 $studioSkip = $false
+# cfv-150 F2 -- node dependency guard. studio-turn-probe.mjs drives the Studio BACKEND
+# launchers (agent-stream.js / chat.js) and needs a Windows `node` PLUS a built/staged Studio
+# dist. Neither is present on a clean validation VM: node is not on PATH (the packaged Electron
+# app bundles its runtime internally and does not expose it), and the probe's dist path is
+# dev-box-only (C:/Users/.../ClawFactory-Studio/backend/dist or $CLAWFACTORY_STUDIO_DIST). On
+# cfv-150 the missing node CRASHED the suite ("The term 'node' is not recognized") and lost
+# T4.1-T4.3 entirely -- an UNVALIDATED claim, worse than a FAIL. Neither spec option fits:
+# (a) PowerShell cannot drive the JS launchers, and (b) staging a portable node still yields
+# only studio_dist_unavailable (the dist isn't on the VM) -- a heavy test dep for zero
+# validation. So record WHY, and note that the SAME consumer-side gating claim IS validated on
+# the clean VM by the ACTUAL current customer path: Tier 6 (ClawChat chatCompletions proxy --
+# cap=0 blocked, tampered-SOUL blocked, real reply) plus the JOB 2 functional matrix (Studio
+# grant path). On a dev box with node + $CLAWFACTORY_STUDIO_DIST set, the block below still runs.
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    $studioSkip = $true
+    $sNote = 'Windows node + Studio backend dist absent (dev-box-only path). Clean-VM consumer-side gate coverage: Tier 6 (ClawChat chatCompletions proxy) + the JOB 2 functional matrix.'
+    Record 'T4.1' 'A turn launched THROUGH STUDIO (stream), cap=0, is BLOCKED with a human message' 'NOTE' $sNote
+    Record 'T4.2' 'A turn launched THROUGH STUDIO (sendMessage), cap=0, is BLOCKED' 'NOTE' $sNote
+    Record 'T4.3' 'A turn launched THROUGH STUDIO with a tampered SOUL is BLOCKED (soul_mismatch)' 'NOTE' $sNote
+}
+if (-not $studioSkip) {
 try {
     # T4.1 -- a turn launched through Studio (STREAM) with cap=0 is blocked with a human message.
     Set-RealCaps 0 0
@@ -254,6 +281,7 @@ try {
     if ($null -ne $govBak) { Set-Content -LiteralPath $realGov -Value $govBak -Encoding UTF8 -NoNewline } else { Set-RealCaps 5 50 }
     $null = Get-SpendStatus   # resync the WSL gate mirror to the restored caps
 }
+}   # end: if (-not $studioSkip) -- Studio-probe block (skipped when node/dist absent)
 
 # T4.4 -- the injected safety file cannot be written by the agent's UID (model-independent).
 $o = Wsl 'printf "# evil\n" >> /home/clawuser/.openclaw/workspace/SOUL.md 2>&1; echo rc=$?; chmod u+w /home/clawuser/.openclaw/workspace/SOUL.md 2>&1; echo chmod-rc=$?; rm -f /home/clawuser/.openclaw/workspace/SOUL.md 2>&1; echo rm-rc=$?'
