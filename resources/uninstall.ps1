@@ -179,6 +179,102 @@ foreach ($cred in @(
     } catch { Write-Log WARN "cmdkey delete '$cred' failed: $($_.Exception.Message)" }
 }
 
+#--- 4.5 Remove the ClawFactory Studio per-user component (v1.1.0, JOB 3B) ----
+# Studio is a PER-USER NSIS app (installs into %LOCALAPPDATA%\Programs\ClawFactory
+# Studio for whoever ran the installer). This uninstaller runs ELEVATED, and Inno's
+# ExecAsOriginalUser is NOT available at uninstall time (verified against the Inno
+# docs), so we cannot de-elevate here. Instead we locate the per-user Studio
+# uninstaller and run it silently.
+#
+# In the shipping scenario -- Windows Home, one admin user who is ALSO the installing
+# user -- an elevated process of that same account shares the account's HKCU and
+# %LOCALAPPDATA%, so this removes Studio fully. As a best-effort secondary sweep we
+# also scan every user profile on the box. RESIDUAL (documented, not hidden): if a
+# DIFFERENT admin account uninstalls while the customer's Studio lives in another
+# profile's HKCU, the registry-based lookup for the current user won't find it; the
+# profile scan still catches the files. Everything below is LOGGED honestly -- if
+# Studio is not found we SAY so; we never claim a clean removal we didn't make.
+Write-Log INFO 'Step 4.5: Removing ClawFactory Studio (per-user component).'
+
+function Invoke-StudioUninstaller {
+    param([string]$Command, [string]$InstallDir)
+    # Parse "<quoted-or-bare exe> <args...>" and ensure a silent (/S) uninstall.
+    $exe = $null; $args = ''
+    if ($Command -match '^\s*"([^"]+)"\s*(.*)$') { $exe = $Matches[1]; $args = $Matches[2].Trim() }
+    elseif ($Command -match '^\s*(\S+\.exe)\s*(.*)$') { $exe = $Matches[1]; $args = $Matches[2].Trim() }
+    else { $exe = $Command.Trim() }
+    if (-not (Test-Path -LiteralPath $exe)) { Write-Log WARN "Studio uninstaller not at '$exe'; skipping this candidate."; return $false }
+    if ($args -notmatch '(^|\s)/S(\s|$)') { $args = ($args + ' /S').Trim() }
+    try {
+        Write-Log INFO "Running Studio uninstaller: `"$exe`" $args"
+        # NSIS uninstallers copy themselves to %TEMP% and relaunch, so the first
+        # process returns before the real work finishes -- poll the install dir.
+        Start-Process -FilePath $exe -ArgumentList $args -Wait -ErrorAction Stop
+    } catch { Write-Log WARN "Studio uninstaller launch failed: $($_.Exception.Message)"; return $false }
+    if ($InstallDir) {
+        for ($i = 0; $i -lt 30; $i++) {
+            if (-not (Test-Path -LiteralPath $InstallDir)) { break }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    return $true
+}
+
+try {
+    # Stop any running Studio so its files aren't locked during removal.
+    Get-Process 'ClawFactory Studio' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+    $studioSelfDir = Join-Path $env:LOCALAPPDATA 'Programs\ClawFactory Studio'
+    $candidates    = New-Object System.Collections.Generic.List[object]
+
+    # (1) Installing user's own HKCU uninstall entry (authoritative -- uses whatever
+    #     flags electron-builder registered; independent of the uninstaller filename).
+    try {
+        Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -like 'ClawFactory Studio*' } |
+            ForEach-Object {
+                $cmd = $_.QuietUninstallString; if (-not $cmd) { $cmd = $_.UninstallString }
+                if ($cmd) {
+                    $dir = $_.InstallLocation; if (-not $dir) { $dir = $studioSelfDir }
+                    $candidates.Add([pscustomobject]@{ Command = $cmd; Dir = $dir })
+                }
+            }
+    } catch { Write-Log WARN "Studio HKCU scan failed: $($_.Exception.Message)" }
+
+    # (2) Current user's install dir, in case the registry entry is already gone.
+    Get-ChildItem -LiteralPath $studioSelfDir -Filter 'Uninstall*.exe' -ErrorAction SilentlyContinue | ForEach-Object {
+        $candidates.Add([pscustomobject]@{ Command = ('"' + $_.FullName + '" /S'); Dir = $studioSelfDir })
+    }
+
+    # (3) Best-effort all-users sweep (multi-user boxes).
+    try {
+        Get-ChildItem 'C:\Users' -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            $d = Join-Path $_.FullName 'AppData\Local\Programs\ClawFactory Studio'
+            Get-ChildItem -LiteralPath $d -Filter 'Uninstall*.exe' -ErrorAction SilentlyContinue | ForEach-Object {
+                $candidates.Add([pscustomobject]@{ Command = ('"' + $_.FullName + '" /S'); Dir = $d })
+            }
+        }
+    } catch {}
+
+    # De-dup by uninstaller exe path and run each.
+    $ran = $false; $seen = @{}
+    foreach ($c in $candidates) {
+        $keyMatch = [regex]::Match($c.Command, '"([^"]+)"'); $key = if ($keyMatch.Success) { $keyMatch.Groups[1].Value } else { $c.Command }
+        if ($seen.ContainsKey($key.ToLower())) { continue }
+        $seen[$key.ToLower()] = $true
+        if (Invoke-StudioUninstaller -Command $c.Command -InstallDir $c.Dir) { $ran = $true }
+    }
+
+    # Honest verdict -- verify against the current user's install dir.
+    if (Test-Path -LiteralPath $studioSelfDir) {
+        Write-Log WARN "ClawFactory Studio directory still present for this user ($studioSelfDir); it may need manual removal (right-click the Studio Start Menu entry > Uninstall)."
+    } elseif ($ran) {
+        Write-Log INFO 'ClawFactory Studio removed.'
+    } else {
+        Write-Log INFO 'ClawFactory Studio not found for the current user (per-user component; may belong to a different Windows profile). Nothing removed here.'
+    }
+} catch { Write-Log WARN "Studio removal step failed (non-fatal): $($_.Exception.Message)" }
+
 #--- 5. Surgical .wslconfig edit --------------------------------------------
 Write-Log INFO "Step 5: Reversing .wslconfig edit (action = $WslConfigState)."
 if (-not (Test-Path -LiteralPath $WslConfigPath)) {

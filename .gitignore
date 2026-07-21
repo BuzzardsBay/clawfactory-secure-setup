@@ -4,6 +4,10 @@ Output/
 # Bundled Ubuntu rootfs (sourced separately, too large for git)
 resources/ubuntu-rootfs.tar.gz
 
+# Embedded ClawFactory Studio installer (v1.1.0 combined build). Sourced from the
+# Studio repo's release dir at build time and verified by sha256; too large for git.
+resources/ClawFactory-Studio-Setup-*.exe
+
 # Inno Setup compiler artifacts
 *.~is
 

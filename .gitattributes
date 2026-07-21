@@ -4,3 +4,13 @@
 *.sh   text eol=lf
 *.mjs  text eol=lf
 resources/clawfactory-spend-check.js text eol=lf
+
+# v1.1.0 (JOB 3B): structural defense-in-depth so no future multi-line bash carried
+# into WSL from a .ps1 (e.g. a probe's Wsl helper, the adversarial suite) can regress
+# on CRLF ("unexpected end of file"). The runtime CR-strip in those helpers stays as
+# belt-and-suspenders; this makes LF the stored + checked-out form. See F2 L20/L21.
+*.ps1  text eol=lf
+# EXCEPTION: setup.ps1 contains a literal NUL byte (inside a comment about NUL bytes),
+# so git auto-detects it as binary and ships it that way. It is UNTOUCHABLE product
+# logic -- keep it binary so no EOL renormalization ever rewrites its bytes.
+setup.ps1 binary

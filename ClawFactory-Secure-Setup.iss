@@ -3,9 +3,14 @@
 ; Compile with: "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ClawFactory-Secure-Setup.iss
 
 #define MyAppName      "ClawFactory Secure Setup"
-#define MyAppVersion   "1.0.48"
+#define MyAppVersion   "1.1.0"
 #define MyAppPublisher "Frontier Automation Systems LLC"
 #define MyAppURL       "https://openclaw.ai"
+; v1.1.0 (JOB 3B): the combined installer also bundles ClawFactory Studio, whose
+; signed per-user NSIS installer is embedded and run de-elevated after the core
+; sandbox install (see [Files] + the InstallStudioComponent procedure in [Code]).
+; DRY: this filename is referenced by both the [Files] entry and the [Code] launch.
+#define StudioInstaller "ClawFactory-Studio-Setup-1.1.0.exe"
 
 [Setup]
 ; [R1] Fixed AppId for stable upgrade/uninstall identity. Do not regenerate.
@@ -76,6 +81,16 @@ Source: "resources\clawfactory-proxy.js";      DestDir: "{app}\resources";  Flag
 Source: "resources\clawfactory-proxy.service"; DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\install-chat-proxy.sh";     DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\gateway-wait.sh";           DestDir: "{app}\resources";  Flags: ignoreversion
+; --- v1.1.0 (JOB 3B): embedded ClawFactory Studio (the visual workbench) --------
+; The SIGNED per-user Studio installer (~100 MB), sourced from the Studio repo's
+; release dir at build time (gitignored, verified by sha256 before compile). It is
+; staged to {app}\stage rather than {tmp} on purpose: this Setup runs elevated, so
+; {tmp} is the elevating admin's temp -- unreadable to a DIFFERENT original user.
+; {app} (Program Files) is world Read+Execute, so the de-elevated original user that
+; InstallStudioComponent runs it as can read+execute it (the kitchen-table case).
+; NOT deleteafterinstall: InstallStudioComponent consumes it in ssPostInstall (whose
+; timing vs deleteafterinstall is undocumented) and deletes it itself right after.
+Source: "resources\{#StudioInstaller}";        DestDir: "{app}\stage";      Flags: ignoreversion
 
 [Run]
 ; [R5] No API key on the command line - setup.ps1 reads from Windows Credential Manager.
@@ -983,6 +998,97 @@ begin
       Result := False;
     end;
   end;
+end;
+
+// v1.1.0 (JOB 3B): install the embedded ClawFactory Studio component.
+//
+// (Comment uses // lines on purpose: Inno brace-comments do not nest and end at the
+//  FIRST '}', so a {app}/{tmp}/{commonappdata} token in the prose would close the
+//  comment early -- the same reason CurUninstallStepChanged below uses // lines.)
+//
+// ORDER -- core first, Studio last. Inno processes the [Run] section (where
+// setup.ps1 does the whole sandbox/gateway/firewall/SOUL build) BEFORE it fires
+// CurStepChanged(ssPostInstall) (verified against the Inno docs, not assumed). So
+// by the time this runs, the core install has already finished -- exactly the
+// required ordering, with no change to setup.ps1 or its reboot/resume [Run] entry.
+//
+// ELEVATION RULE -- the bug that passes on a dev box and fails at a kitchen table.
+// This Setup runs elevated (PrivilegesRequired=admin). Studio's NSIS installer is
+// PER-USER (installs into %LOCALAPPDATA%\Programs). If we launched it in the
+// inherited elevated token it would land in the ADMIN's profile, invisible to the
+// customer who logs in as a standard user. ExecAsOriginalUser runs it as the
+// (normally non-elevated) user who started Setup, so Studio lands in the customer's
+// own profile. The staged .exe lives under the app dir\stage (Program Files, world
+// Read+Execute) so that de-elevated user can actually read+execute it.
+//
+// FAILURE HONESTY -- a nonzero Studio exit, or a failure to even launch it,
+// RaiseException's. Inno then shows the message and rolls back: the customer gets a
+// clean, reportable failure, never a silent "finished with warnings" half-product.
+//
+// REBOOT SAFETY -- on a fresh box the core install reboots once for WSL2 and
+// resumes via RunOnce (/resume). We gate on install-result.txt = 'success' (the
+// honest verdict setup.ps1 writes only when the whole core build completes), so on
+// a pre-reboot pass we simply skip and let the resumed final pass install Studio.
+// If the core did not succeed, its own failure reporting stands -- we do not stack a
+// second Studio error on top of it.
+procedure InstallStudioComponent;
+var
+  StudioSetup, StageDir, ResultFile: string;
+  CoreResult: AnsiString;
+  ResultCode: Integer;
+begin
+  ResultFile := ExpandConstant('{commonappdata}\ClawFactory\install-result.txt');
+  if not LoadStringFromFile(ResultFile, CoreResult) then
+  begin
+    Log('Studio: core install-result.txt not present yet (mid-install / pre-resume pass); skipping Studio install this pass.');
+    exit;
+  end;
+  if Pos('success', Lowercase(string(CoreResult))) = 0 then
+  begin
+    Log('Studio: core install did not report success ("' + Trim(string(CoreResult)) + '"); NOT installing Studio -- core failure reporting stands.');
+    exit;
+  end;
+
+  StageDir    := ExpandConstant('{app}\stage');
+  StudioSetup := StageDir + '\{#StudioInstaller}';
+  if not FileExists(StudioSetup) then
+    RaiseException('The ClawFactory Studio installer is missing from the package (' +
+      StudioSetup + '). The combined installer is incomplete -- stopping rather than ' +
+      'delivering only half of ClawFactory. Please re-download and run the installer again.');
+
+  // Plain-language progress for the customer.
+  if Assigned(WizardForm) then
+  begin
+    WizardForm.StatusLabel.Caption := 'Installing ClawFactory Studio (your visual workbench)...';
+    WizardForm.StatusLabel.Update;
+  end;
+
+  Log('Studio: launching per-user installer as the ORIGINAL (de-elevated) user: "' + StudioSetup + '" /S');
+  if not ExecAsOriginalUser(StudioSetup, '/S', StageDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    RaiseException('Could not start the ClawFactory Studio installer. ClawFactory''s core ' +
+      'is installed but Studio is not -- stopping so you get a clean failure to report ' +
+      'rather than a half-installed product. Re-running the installer will try again.');
+
+  if ResultCode <> 0 then
+    RaiseException('ClawFactory Studio did not install successfully (installer exit code ' +
+      IntToStr(ResultCode) + '). ClawFactory''s core is installed but Studio is not -- ' +
+      'stopping so you can re-run the installer for a clean result.');
+
+  Log('Studio: per-user install completed (exit 0). Landed in the original user''s profile.');
+
+  // We consumed the staged installer; remove it (and the now-empty stage dir) so the
+  // 100 MB payload does not linger in Program Files. Best-effort -- a leftover here is
+  // cosmetic, and Inno's uninstaller would remove the stage dir anyway.
+  if not DeleteFile(StudioSetup) then
+    Log('Studio: could not delete staged installer ' + StudioSetup + ' (will be removed at uninstall).')
+  else
+    RemoveDir(StageDir);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    InstallStudioComponent;
 end;
 
 // v1.0.34: invoke uninstall.ps1 at UNINSTALL time. The v1.0.33 approach used an
