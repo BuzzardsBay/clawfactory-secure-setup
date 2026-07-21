@@ -10,20 +10,52 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
-    --bg: #0a0a0a;
-    --bg-elev: #111111;
-    --bg-row: #0e0e0e;
-    --border: #1f1f1f;
-    --border-strong: #2a2a2a;
-    --text: #f2f2f2;
-    --text-muted: #8a8a8a;
-    --text-dim: #5a5a5a;
-    --accent: #d4a35a;
-    --accent-hover: #e8b86a;
-    --accent-press: #b8893f;
+    /* Evergreen palette — dark (default; site was dark-only, kept dark-first) */
+    --bg: #171C13;
+    --bg-elev: #22291C;
+    --bg-row: #1C2317;
+    --border: #313A29;
+    --border-strong: #3E4834;
+    --text: #EAF0E2;
+    --text-muted: #98A68B;
+    --text-dim: #85937A;
+    --accent: #97C459;
+    --accent-hover: #A9D06B;
+    --accent-press: #7FB33F;
+    --on-accent: #12240A;
+    --verified: #7FB33F;
+    --alert: #E46962;
+    --nav-bg: rgba(23, 28, 19, 0.85);
+    --thead-bg: #12160F;
+    --code-bg: #12160F;
+    --mascot-glow: rgba(151, 196, 89, 0.18);
     --font-head: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Menlo, monospace;
     --font-body: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     --max-w: 1080px;
+}
+
+@media (prefers-color-scheme: light) {
+    :root {
+        /* Evergreen palette — light */
+        --bg: #F4F6F0;
+        --bg-elev: #FFFFFF;
+        --bg-row: #E9EEE1;
+        --border: #DAE1CF;
+        --border-strong: #C7D2B6;
+        --text: #1E2A17;
+        --text-muted: #5F6E54;
+        --text-dim: #5F6E54;      /* = muted: a dimmer light tier can't clear 4.5:1 on the rail */
+        --accent: #3B6D11;
+        --accent-hover: #4A831A;
+        --accent-press: #2E560D;
+        --on-accent: #FFFFFF;
+        --verified: #2C5A0C;
+        --alert: #B3261E;
+        --nav-bg: rgba(244, 246, 240, 0.85);
+        --thead-bg: #E9EEE1;
+        --code-bg: #E9EEE1;
+        --mascot-glow: rgba(59, 109, 17, 0.15);
+    }
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -57,7 +89,7 @@ nav {
     left: 0;
     right: 0;
     z-index: 100;
-    background: rgba(10, 10, 10, 0.85);
+    background: var(--nav-bg);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     border-bottom: 1px solid transparent;
@@ -93,7 +125,7 @@ nav.scrolled { border-bottom-color: var(--border); }
     font-family: var(--font-head);
     font-size: 13px;
     font-weight: 500;
-    color: var(--bg);
+    color: var(--on-accent);
     background: var(--accent);
     padding: 9px 16px;
     border-radius: 4px;
@@ -101,7 +133,7 @@ nav.scrolled { border-bottom-color: var(--border); }
     white-space: nowrap;
 }
 
-.nav-cta:hover { background: var(--accent-hover); color: var(--bg); }
+.nav-cta:hover { background: var(--accent-hover); color: var(--on-accent); }
 
 /* HERO */
 .hero {
@@ -145,8 +177,13 @@ nav.scrolled { border-bottom-color: var(--border); }
     width: 100%;
     height: auto;
     display: block;
-    filter: drop-shadow(0 12px 40px rgba(212, 163, 90, 0.18));
+    filter: drop-shadow(0 12px 40px var(--mascot-glow));
 }
+
+/* Mascot recolored to the Evergreen accent, theme-aware (body = accent, face = on-accent) */
+.hero-mascot svg .m-body { fill: var(--accent); }
+.hero-mascot svg .m-face { fill: var(--on-accent); }
+.hero-mascot svg .m-mouth { stroke: var(--on-accent); fill: none; }
 
 .hero h1 {
     font-family: var(--font-head);
@@ -174,7 +211,7 @@ nav.scrolled { border-bottom-color: var(--border); }
     font-family: var(--font-head);
     font-size: 16px;
     font-weight: 600;
-    color: var(--bg);
+    color: var(--on-accent);
     background: var(--accent);
     padding: 16px 28px;
     border-radius: 4px;
@@ -184,7 +221,7 @@ nav.scrolled { border-bottom-color: var(--border); }
     letter-spacing: -0.01em;
 }
 
-.cta-button:hover { background: var(--accent-hover); color: var(--bg); }
+.cta-button:hover { background: var(--accent-hover); color: var(--on-accent); }
 .cta-button:active { background: var(--accent-press); transform: translateY(1px); }
 
 .cta-group {
@@ -209,8 +246,8 @@ nav.scrolled { border-bottom-color: var(--border); }
     letter-spacing: -0.01em;
 }
 
-.cta-button-ghost:hover { background: var(--accent); color: #0c0c0b; }
-.cta-button-ghost:active { background: var(--accent-press); border-color: var(--accent-press); color: #0c0c0b; transform: translateY(1px); }
+.cta-button-ghost:hover { background: var(--accent); color: var(--on-accent); }
+.cta-button-ghost:active { background: var(--accent-press); border-color: var(--accent-press); color: var(--on-accent); transform: translateY(1px); }
 
 .cta-tier-note {
     margin-top: 14px;
@@ -270,7 +307,7 @@ section {
 .controls-table thead th {
     text-align: left;
     padding: 14px 20px;
-    background: #050505;
+    background: var(--thead-bg);
     color: var(--text-dim);
     font-weight: 500;
     text-transform: uppercase;
@@ -349,7 +386,7 @@ section {
 
 .step code {
     font-family: var(--font-head);
-    background: #050505;
+    background: var(--code-bg);
     padding: 2px 6px;
     border-radius: 3px;
     color: var(--text);
@@ -414,8 +451,8 @@ footer {
 }
 
 .product-card {
-    background: #111110;
-    border: 0.5px solid #2a2a26;
+    background: var(--bg-elev);
+    border: 0.5px solid var(--border-strong);
     border-radius: 6px;
     padding: 24px;
     position: relative;
@@ -424,7 +461,7 @@ footer {
 }
 
 .product-card-recommended {
-    border: 1px solid #d4a35a;
+    border: 1px solid var(--accent);
 }
 
 .product-recommended-tag {
@@ -436,7 +473,7 @@ footer {
     font-weight: 600;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: #0c0c0b;
+    color: var(--on-accent);
     background: var(--accent);
     padding: 3px 8px;
     border-radius: 3px;
@@ -478,7 +515,7 @@ footer {
     font-family: var(--font-head);
     font-size: 13.5px;
     padding: 7px 0;
-    border-bottom: 1px solid #1a1a18;
+    border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     gap: 10px;
@@ -489,18 +526,18 @@ footer {
 
 .feature-check::before {
     content: "✓";
-    color: #d4a35a;
+    color: var(--verified);
     font-weight: 700;
     flex-shrink: 0;
 }
 
 .feature-cross {
-    color: #444440;
+    color: var(--text-dim);
 }
 
 .feature-cross::before {
     content: "✗";
-    color: #444440;
+    color: var(--text-dim);
     font-weight: 700;
     flex-shrink: 0;
 }
@@ -510,7 +547,7 @@ footer {
     font-family: var(--font-head);
     font-size: 14px;
     font-weight: 600;
-    color: var(--bg);
+    color: var(--on-accent);
     background: var(--accent);
     padding: 13px 20px;
     border-radius: 4px;
@@ -519,7 +556,7 @@ footer {
     margin-bottom: 12px;
 }
 
-.product-cta:hover { background: var(--accent-hover); color: var(--bg); }
+.product-cta:hover { background: var(--accent-hover); color: var(--on-accent); }
 
 .product-cta-ghost {
     display: block;
@@ -536,7 +573,7 @@ footer {
     margin-bottom: 12px;
 }
 
-.product-cta-ghost:hover { background: var(--accent); color: #0c0c0b; }
+.product-cta-ghost:hover { background: var(--accent); color: var(--on-accent); }
 
 .product-github-link {
     display: block;
@@ -555,8 +592,8 @@ footer {
     max-width: 760px;
     margin: 0 auto;
 }
-.faq-item { border-bottom: 0.5px solid #1e1e1a; }
-.faq-item:first-child { border-top: 0.5px solid #1e1e1a; }
+.faq-item { border-bottom: 0.5px solid var(--border); }
+.faq-item:first-child { border-top: 0.5px solid var(--border); }
 .faq-question {
     width: 100%;
     background: none;
@@ -654,7 +691,7 @@ footer {
     .cta-button { font-size: 15px; padding: 14px 22px; }
 }
 </style>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 52 52'><rect x='12' y='10' width='28' height='28' rx='5' fill='%23d4a35a'/><circle cx='21' cy='22' r='3' fill='%230c0c0b'/><circle cx='31' cy='22' r='3' fill='%230c0c0b'/><path d='M20 30 Q26 35 32 30' stroke='%230c0c0b' stroke-width='2' fill='none' stroke-linecap='round'/><rect x='4' y='24' width='10' height='6' rx='2' fill='%23d4a35a'/><rect x='2' y='18' width='6' height='8' rx='2' fill='%23d4a35a'/><rect x='2' y='29' width='6' height='7' rx='2' fill='%23d4a35a'/><rect x='38' y='24' width='10' height='6' rx='2' fill='%23d4a35a'/><rect x='44' y='18' width='6' height='8' rx='2' fill='%23d4a35a'/><rect x='44' y='29' width='6' height='7' rx='2' fill='%23d4a35a'/><rect x='17' y='36' width='5' height='9' rx='2' fill='%23d4a35a'/><rect x='30' y='36' width='5' height='9' rx='2' fill='%23d4a35a'/><rect x='15' y='43' width='4' height='4' rx='2' fill='%23d4a35a'/><rect x='20' y='44' width='3' height='3' rx='2' fill='%23d4a35a'/><rect x='28' y='43' width='4' height='4' rx='2' fill='%23d4a35a'/><rect x='33' y='44' width='3' height='3' rx='2' fill='%23d4a35a'/></svg>">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 52 52'><rect x='12' y='10' width='28' height='28' rx='5' fill='%2397C459'/><circle cx='21' cy='22' r='3' fill='%2312240A'/><circle cx='31' cy='22' r='3' fill='%2312240A'/><path d='M20 30 Q26 35 32 30' stroke='%2312240A' stroke-width='2' fill='none' stroke-linecap='round'/><rect x='4' y='24' width='10' height='6' rx='2' fill='%2397C459'/><rect x='2' y='18' width='6' height='8' rx='2' fill='%2397C459'/><rect x='2' y='29' width='6' height='7' rx='2' fill='%2397C459'/><rect x='38' y='24' width='10' height='6' rx='2' fill='%2397C459'/><rect x='44' y='18' width='6' height='8' rx='2' fill='%2397C459'/><rect x='44' y='29' width='6' height='7' rx='2' fill='%2397C459'/><rect x='17' y='36' width='5' height='9' rx='2' fill='%2397C459'/><rect x='30' y='36' width='5' height='9' rx='2' fill='%2397C459'/><rect x='15' y='43' width='4' height='4' rx='2' fill='%2397C459'/><rect x='20' y='44' width='3' height='3' rx='2' fill='%2397C459'/><rect x='28' y='43' width='4' height='4' rx='2' fill='%2397C459'/><rect x='33' y='44' width='3' height='3' rx='2' fill='%2397C459'/></svg>">
 </head>
 <body>
 
@@ -674,29 +711,29 @@ footer {
                 <a class="cta-button" href="https://buy.stripe.com/6oU4gzcNb74EeAI7zJ8g002">Buy ClawFactory &mdash; $149 &rarr;</a>
                 <a class="cta-button-ghost" href="https://buy.stripe.com/dRmdR95kJ1KkfEM5rB8g000">Get ClawAgent &mdash; $49 &rarr;</a>
             </div>
-            <p class="cta-tier-note">ClawAgent: single agent, 5 min setup &middot; ClawFactory: full security substrate, 5 agents, kill switch</p>
+            <p class="cta-tier-note">ClawAgent: single agent, 5 min setup &middot; ClawFactory: full security substrate, Studio management app, kill switch</p>
             <div class="hero-meta">
                 <span>Windows 10/11</span> &nbsp;&middot;&nbsp; <span>ClawAgent $49</span> &nbsp;&middot;&nbsp; <span>ClawFactory $149</span>
             </div>
         </div>
         <div class="hero-mascot" aria-hidden="true">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
-                <rect x="12" y="10" width="28" height="28" rx="5" fill="#d4a35a"/>
-                <circle cx="21" cy="22" r="3" fill="#0c0c0b"/>
-                <circle cx="31" cy="22" r="3" fill="#0c0c0b"/>
-                <path d="M20 30 Q26 35 32 30" stroke="#0c0c0b" stroke-width="2" fill="none" stroke-linecap="round"/>
-                <rect x="4"  y="24" width="10" height="6" rx="2" fill="#d4a35a"/>
-                <rect x="2"  y="18" width="6"  height="8" rx="2" fill="#d4a35a"/>
-                <rect x="2"  y="29" width="6"  height="7" rx="2" fill="#d4a35a"/>
-                <rect x="38" y="24" width="10" height="6" rx="2" fill="#d4a35a"/>
-                <rect x="44" y="18" width="6"  height="8" rx="2" fill="#d4a35a"/>
-                <rect x="44" y="29" width="6"  height="7" rx="2" fill="#d4a35a"/>
-                <rect x="17" y="36" width="5"  height="9" rx="2" fill="#d4a35a"/>
-                <rect x="30" y="36" width="5"  height="9" rx="2" fill="#d4a35a"/>
-                <rect x="15" y="43" width="4"  height="4" rx="2" fill="#d4a35a"/>
-                <rect x="20" y="44" width="3"  height="3" rx="2" fill="#d4a35a"/>
-                <rect x="28" y="43" width="4"  height="4" rx="2" fill="#d4a35a"/>
-                <rect x="33" y="44" width="3"  height="3" rx="2" fill="#d4a35a"/>
+                <rect class="m-body" x="12" y="10" width="28" height="28" rx="5"/>
+                <circle class="m-face" cx="21" cy="22" r="3"/>
+                <circle class="m-face" cx="31" cy="22" r="3"/>
+                <path class="m-mouth" d="M20 30 Q26 35 32 30" stroke-width="2" stroke-linecap="round"/>
+                <rect class="m-body" x="4"  y="24" width="10" height="6" rx="2"/>
+                <rect class="m-body" x="2"  y="18" width="6"  height="8" rx="2"/>
+                <rect class="m-body" x="2"  y="29" width="6"  height="7" rx="2"/>
+                <rect class="m-body" x="38" y="24" width="10" height="6" rx="2"/>
+                <rect class="m-body" x="44" y="18" width="6"  height="8" rx="2"/>
+                <rect class="m-body" x="44" y="29" width="6"  height="7" rx="2"/>
+                <rect class="m-body" x="17" y="36" width="5"  height="9" rx="2"/>
+                <rect class="m-body" x="30" y="36" width="5"  height="9" rx="2"/>
+                <rect class="m-body" x="15" y="43" width="4"  height="4" rx="2"/>
+                <rect class="m-body" x="20" y="44" width="3"  height="3" rx="2"/>
+                <rect class="m-body" x="28" y="43" width="4"  height="4" rx="2"/>
+                <rect class="m-body" x="33" y="44" width="3"  height="3" rx="2"/>
             </svg>
         </div>
     </div>
@@ -719,10 +756,6 @@ footer {
                     <td class="control-desc">Agent runtime isolated from Windows filesystem</td>
                 </tr>
                 <tr>
-                    <td class="control-name">Rootless Docker</td>
-                    <td class="control-desc">No root access inside the container</td>
-                </tr>
-                <tr>
                     <td class="control-name">nftables egress firewall</td>
                     <td class="control-desc">Outbound traffic scoped to clawuser UID only</td>
                 </tr>
@@ -740,7 +773,7 @@ footer {
                 </tr>
                 <tr>
                     <td class="control-name">DPAPI key storage</td>
-                    <td class="control-desc">API key in Windows Credential Manager, never plaintext</td>
+                    <td class="control-desc">API key stored in Windows Credential Manager, encrypted at rest (DPAPI) under your Windows account</td>
                 </tr>
                 <tr>
                     <td class="control-name">Kill Switch</td>
@@ -785,7 +818,7 @@ footer {
                     <span class="faq-chevron">&rsaquo;</span>
                 </button>
                 <div class="faq-answer">
-                    <div class="faq-answer-inner">ClawFactory is a Windows installer that packages OpenClaw &mdash; a local AI agent runtime &mdash; inside a hardened security sandbox. When you run the installer, it sets up a WSL2 Linux environment, installs the OpenClaw runtime inside it, configures a firewall that restricts what the agent can reach on the internet, and wires everything so the agent runs locally on your machine. You interact with it through ClawChat, the desktop app that's included with your install. Your conversations stay on your machine. Nothing is sent to a central server.</div>
+                    <div class="faq-answer-inner">ClawFactory is a Windows installer that packages OpenClaw &mdash; a local AI agent runtime &mdash; inside a hardened security sandbox. When you run the installer, it sets up a WSL2 Linux environment, installs the OpenClaw runtime inside it, configures a firewall that restricts what the agent can reach on the internet, and wires everything so the agent runs locally on your machine. You interact with it through ClawChat, the desktop chat app included with your install; the installer also sets up <strong>ClawFactory Studio</strong>, a visual workbench for managing setup and granting the agent access to specific project folders. Your conversations stay on your machine. Nothing is sent to a central server.</div>
                 </div>
             </div>
 
@@ -795,7 +828,7 @@ footer {
                     <span class="faq-chevron">&rsaquo;</span>
                 </button>
                 <div class="faq-answer">
-                    <div class="faq-answer-inner">Your conversations are stored locally in <strong>%APPDATA%\ClawChat\conversations\</strong> on your Windows machine. The only outbound traffic allowed by the egress firewall is the API call to your AI provider (Grok by default) &mdash; that's the request that generates the response to your message. No telemetry, no analytics, no conversation logging to any server we control. The firewall enforces this at the network level, not just by policy.</div>
+                    <div class="faq-answer-inner">Your conversations are stored locally in <strong>%APPDATA%\ClawChat\conversations\</strong> on your Windows machine. The egress firewall blocks the open internet and permits outbound traffic only to an allowlist &mdash; your chosen AI provider's API (the call that generates each response) plus the update sources the runtime needs (for example GitHub, npm, and Ubuntu package mirrors). No telemetry, no analytics, no conversation logging to any server we control. The firewall enforces this at the network level, not just by policy.</div>
                 </div>
             </div>
 
@@ -805,7 +838,7 @@ footer {
                     <span class="faq-chevron">&rsaquo;</span>
                 </button>
                 <div class="faq-answer">
-                    <div class="faq-answer-inner">Almost nothing outside its own sandbox. By default the agent runs inside WSL2 with automount disabled &mdash; your Windows filesystem (C: drive, Documents, Downloads, everything) is invisible to it. The egress firewall restricts outbound network calls to your AI provider only. It cannot read your files, access other applications, or make arbitrary internet requests.</div>
+                    <div class="faq-answer-inner">Almost nothing outside its own sandbox. By default the agent runs inside WSL2 with automount disabled &mdash; your Windows filesystem (C: drive, Documents, Downloads, everything) is invisible to it. The egress firewall restricts outbound network calls to an allowlist &mdash; your AI provider's API and the update sources the runtime needs &mdash; not the open internet. It cannot read your files, access other applications, or make arbitrary internet requests.</div>
                 </div>
             </div>
 
@@ -815,7 +848,7 @@ footer {
                     <span class="faq-chevron">&rsaquo;</span>
                 </button>
                 <div class="faq-answer">
-                    <div class="faq-answer-inner">The following are blocked by default at install:<br>&mdash; <strong>Windows filesystem:</strong> invisible to the agent (automount=false)<br>&mdash; <strong>Inbound network connections</strong> to port 8787 from other devices on your network (Windows Firewall rule)<br>&mdash; <strong>Outbound network traffic</strong> except to your configured AI provider (nftables egress firewall scoped to the agent's Linux user)<br>&mdash; The gateway only binds to 127.0.0.1 &mdash; not accessible from other machines on your network<br><br><strong>A note on how these controls work:</strong> every restriction listed above is enforced at the OS or network level &mdash; not by instructing the agent to behave a certain way. The egress firewall is an nftables rule in the Linux kernel scoped to the agent's user ID. The gateway binding is a network socket configuration. <code>automount=false</code> is a WSL2 kernel parameter. None of these can be overridden by the agent itself, regardless of what instructions it receives. This is the difference between a security control and a security suggestion.</div>
+                    <div class="faq-answer-inner">The following are blocked by default at install:<br>&mdash; <strong>Windows filesystem:</strong> invisible to the agent (automount=false)<br>&mdash; <strong>Inbound network connections</strong> to port 8787 from other devices on your network (Windows Firewall rule)<br>&mdash; <strong>Outbound network traffic</strong> except to an allowlist &mdash; your configured AI provider's API plus the update sources the runtime needs (nftables egress firewall scoped to the agent's Linux user)<br>&mdash; The gateway only binds to 127.0.0.1 &mdash; not accessible from other machines on your network<br><br><strong>A note on how these controls work:</strong> every restriction listed above is enforced at the OS or network level &mdash; not by instructing the agent to behave a certain way. The egress firewall is an nftables rule in the Linux kernel scoped to the agent's user ID. The gateway binding is a network socket configuration. <code>automount=false</code> is a WSL2 kernel parameter. None of these can be overridden by the agent itself, regardless of what instructions it receives. This is the difference between a security control and a security suggestion.</div>
                 </div>
             </div>
 
@@ -845,7 +878,7 @@ footer {
                     <span class="faq-chevron">&rsaquo;</span>
                 </button>
                 <div class="faq-answer">
-                    <div class="faq-answer-inner">ClawFactory ships pre-configured for Grok (xAI) &mdash; you provide your Grok API key during install and it's stored securely in Windows Credential Manager. Support for switching providers (OpenAI, Anthropic, and others) is in active development and will be available in an upcoming release. If provider flexibility is important to your use case, ClawAgent ($49) is a lighter option worth considering while the full provider-switching feature is completed.</div>
+                    <div class="faq-answer-inner">During install you choose your AI provider &mdash; <strong>Grok (xAI)</strong>, <strong>OpenAI</strong>, <strong>Anthropic Claude</strong>, <strong>Google Gemini</strong>, or a local <strong>Ollama</strong> model &mdash; with Grok pre-selected as the default. You supply that provider's API key, which is stored in Windows Credential Manager (DPAPI). You can change providers at any time from the <strong>Switch AI Provider</strong> tool in the Start Menu &mdash; it updates the stored key, adjusts the firewall allowlist, and restarts the local gateway.</div>
                 </div>
             </div>
 
@@ -855,7 +888,7 @@ footer {
                     <span class="faq-chevron">&rsaquo;</span>
                 </button>
                 <div class="faq-answer">
-                    <div class="faq-answer-inner">Same security substrate &mdash; both include the WSL2 sandbox, egress firewall, DPAPI key storage, loopback-only gateway, and Kill Switch. The difference is scope: <strong>ClawFactory ($149)</strong> includes 5 agent profiles and factory orchestration scaffolding for multi-agent workflows. <strong>ClawAgent ($49)</strong> is a single-agent install &mdash; faster setup, same security, designed for straightforward use cases.</div>
+                    <div class="faq-answer-inner">Same security substrate &mdash; both include the WSL2 sandbox, egress firewall, DPAPI key storage, loopback-only gateway, and Kill Switch. The difference is scope: <strong>ClawFactory ($149)</strong> adds <strong>ClawFactory Studio</strong> &mdash; a visual workbench for managing setup and granting the agent access to specific project folders &mdash; plus the orchestration scaffolding for multi-agent workflows. <strong>ClawAgent ($49)</strong> is a single-agent install &mdash; faster setup, same security, designed for straightforward use cases.</div>
                 </div>
             </div>
 
@@ -875,7 +908,7 @@ footer {
                     <span class="faq-chevron">&rsaquo;</span>
                 </button>
                 <div class="faq-answer">
-                    <div class="faq-answer-inner">The ClawFactory installer is not yet code-signed with a commercial certificate. Windows SmartScreen shows a warning for unsigned executables from unknown publishers. This is expected. To proceed: click <strong>"More info"</strong> on the SmartScreen dialog, then <strong>"Run anyway."</strong> We are working toward obtaining a code signing certificate. In the meantime, you can verify the installer's SHA-256 hash against the value published on the GitHub Releases page before running it.</div>
+                    <div class="faq-answer-inner">The ClawFactory installer is code-signed (Azure Trusted Signing) and RFC 3161 timestamped, so it shows a verified publisher instead of an "unknown publisher" warning. Because the signing certificate is new, Windows SmartScreen may still show a first-run reputation prompt until the installer builds reputation &mdash; if you see it, click <strong>"More info"</strong> then <strong>"Run anyway."</strong> You can confirm the signature under the file's <strong>Properties &rarr; Digital Signatures</strong> tab, or verify its SHA-256 hash against the value published on the GitHub Releases page.</div>
                 </div>
             </div>
 
@@ -933,8 +966,8 @@ footer {
                     <li class="feature-check">Loopback gateway</li>
                     <li class="feature-check">DPAPI key storage</li>
                     <li class="feature-check">Kill Switch</li>
-                    <li class="feature-cross">Multi-agent support</li>
-                    <li class="feature-cross">Factory orchestration</li>
+                    <li class="feature-cross">Studio management app</li>
+                    <li class="feature-cross">Factory orchestration scaffolding</li>
                 </ul>
                 <a class="product-cta-ghost" href="https://buy.stripe.com/dRmdR95kJ1KkfEM5rB8g000">Buy ClawAgent &mdash; $49 &rarr;</a>
                 <a class="product-github-link" href="https://github.com/BuzzardsBay/clawagent-setup/releases/latest">Download from GitHub &rarr;</a>
@@ -950,8 +983,8 @@ footer {
                     <li class="feature-check">Loopback gateway</li>
                     <li class="feature-check">DPAPI key storage</li>
                     <li class="feature-check">Kill Switch</li>
-                    <li class="feature-check">Multi-agent support (5 agents)</li>
-                    <li class="feature-check">Factory orchestration</li>
+                    <li class="feature-check">Studio management app</li>
+                    <li class="feature-check">Factory orchestration scaffolding</li>
                 </ul>
                 <a class="product-cta" href="https://buy.stripe.com/6oU4gzcNb74EeAI7zJ8g002">Buy ClawFactory &mdash; $149 &rarr;</a>
                 <a class="product-github-link" href="https://github.com/BuzzardsBay/ClawFactory-Secure-Setup/releases/latest">Download from GitHub &rarr;</a>
