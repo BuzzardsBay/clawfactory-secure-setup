@@ -2,6 +2,8 @@
 
 [![v1.0.45](https://img.shields.io/badge/release-v1.0.45-green)](../../releases/tag/v1.0.45) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Windows 11](https://img.shields.io/badge/Windows-10%202004%2B%20%2F%2011-0078D6?logo=windows)](#system-requirements)
 
+> The public site (clawfactory.app) is published from [BuzzardsBay/clawfactory-site](https://github.com/BuzzardsBay/clawfactory-site) — `docs/` in this repo is no longer the published source.
+
 A Windows installer that drops a hardened OpenClaw runtime onto a fresh Windows machine in 10–20 minutes, with every default flipped to the secure side. WSL2 with Windows automount disabled, a non-sudo `clawuser`, an nftables egress firewall scoped to that user's UID, the OpenClaw gateway bound only to `127.0.0.1`, a Windows Firewall inbound-deny on port 8787, the API key stored in DPAPI Credential Manager, and a `SOUL.md` safety policy hash-pinned at file mode 444. One installer, fifteen steps, no telemetry, fully auditable PowerShell.
 
 ## What's inside
