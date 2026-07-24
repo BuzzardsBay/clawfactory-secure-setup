@@ -1,6 +1,6 @@
 # ClawFactory Secure Setup
 
-[![v1.0.45](https://img.shields.io/badge/release-v1.0.45-green)](../../releases/tag/v1.0.45) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Windows 11](https://img.shields.io/badge/Windows-10%202004%2B%20%2F%2011-0078D6?logo=windows)](#system-requirements)
+[![v1.0.45](https://img.shields.io/badge/release-v1.0.45-green)](../../releases/tag/v1.0.45) [![License: PolyForm Perimeter 1.0.0](https://img.shields.io/badge/License-PolyForm%20Perimeter%201.0.0-blue.svg)](LICENSE) [![Windows 11](https://img.shields.io/badge/Windows-10%202004%2B%20%2F%2011-0078D6?logo=windows)](#system-requirements)
 
 > The public site (clawfactory.app) is published from [BuzzardsBay/clawfactory-site](https://github.com/BuzzardsBay/clawfactory-site) — `docs/` in this repo is no longer the published source.
 
@@ -129,7 +129,7 @@ Profile Signer** role on the `clawfactory-signing` account. Signing fails loudly
 
 ## License
 
-[MIT](LICENSE). Copyright © 2026 Frontier Automation Systems LLC.
+[PolyForm Perimeter 1.0.0](LICENSE) — source-available; any use is permitted except providing a competing product. Copyright © 2026 Frontier Automation Systems LLC.
 
 ## Security disclosure
 

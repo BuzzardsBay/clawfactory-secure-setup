@@ -61,7 +61,7 @@ Twelve persona-specific briefs grounded in the actual `setup.ps1` steps. The ins
 
 **PERSONA:** Mid-career ops manager at a mid-market 3PL or shipper, running Windows on a corporate laptop, stuck between EDI feeds, vendor portals, and Excel.
 **THE NEED:** Vendor contracts forbid uploading shipment data to third-party services; their team's reconciliation work is screaming for automation but every cloud AI tool fails the contract review.
-**WHAT THIS INSTALLER SOLVES FOR THEM:** Local-first runtime (especially Ollama) means EDI payloads never leave the machine; egress allowlist gives Procurement a one-page artifact for the vendor risk file; SHA-256 pin on the upstream installer and MIT license remove the "is this software trustworthy" objection.
+**WHAT THIS INSTALLER SOLVES FOR THEM:** Local-first runtime (especially Ollama) means EDI payloads never leave the machine; egress allowlist gives Procurement a one-page artifact for the vendor risk file; SHA-256 pin on the upstream installer and a source-available (PolyForm Perimeter) license remove the "is this software trustworthy" objection.
 **THE HOOK:** Vendor contracts blocked every cloud AI tool I tried — built a local agent runtime in a weekend, started by killing thirty hours a week of EDI reconciliation.
 **DISTRIBUTION TARGET:** r/supplychain.
 **GAP:** Severe. This audience is mostly non-technical, and the installer drops you at a `wsl` prompt with no UI and no agents. Realistically, this persona is reachable only via a managed-service partner.
@@ -82,7 +82,7 @@ Twelve persona-specific briefs grounded in the actual `setup.ps1` steps. The ins
 
 **PERSONA:** Pentester, red-teamer, or AI-safety researcher studying agent behavior, prompt injection, and lateral movement.
 **THE NEED:** They need a deliberately air-gapped, instrumented agent runtime to probe — and most "local AI" stacks are ad-hoc enough that any finding is dismissed as a config bug.
-**WHAT THIS INSTALLER SOLVES FOR THEM:** Pretty much purpose-built — UID-scoped nftables egress rule, loopback-only gateway, hash-pinned upstream installer, hash-pinned `SOUL.md` (mode 444), no-sudo non-root user, rootless Docker, MIT license, idempotent + rollback, every step logged to `%ProgramData%\ClawFactory\install.log`. They can fork the `.ps1` and audit every line.
+**WHAT THIS INSTALLER SOLVES FOR THEM:** Pretty much purpose-built — UID-scoped nftables egress rule, loopback-only gateway, hash-pinned upstream installer, hash-pinned `SOUL.md` (mode 444), no-sudo non-root user, rootless Docker, PolyForm Perimeter license, idempotent + rollback, every step logged to `%ProgramData%\ClawFactory\install.log`. They can fork the `.ps1` and audit every line.
 **THE HOOK:** Built a deliberately constrained OpenClaw box for prompt-injection research — UID-scoped egress to one IP, loopback gateway, SOUL hash-pinned, full setup.ps1 on the GitHub.
 **DISTRIBUTION TARGET:** r/netsec and r/AskNetsec.
 
@@ -113,7 +113,7 @@ Twelve persona-specific briefs grounded in the actual `setup.ps1` steps. The ins
 
 **PERSONA:** Director-of-IT or principal engineer whose CISO just asked "can we deploy AI agents safely?"
 **THE NEED:** They need a working, opinionated reference implementation to point internal AppSec at — something concrete enough to argue *with* instead of arguing *about*.
-**WHAT THIS INSTALLER SOLVES FOR THEM:** Every default in `setup.ps1` is the kind of control a security review wants and a vendor pitch deck never delivers — UID-scoped nftables egress, loopback-bound gateway, Windows Firewall inbound-deny on `8787`, no-sudo user, rootless Docker, hash-pinned upstream script, hash-pinned safety policy, Kill Switch shortcut, MIT license (no procurement). It's a reference architecture in 932 lines of PowerShell.
+**WHAT THIS INSTALLER SOLVES FOR THEM:** Every default in `setup.ps1` is the kind of control a security review wants and a vendor pitch deck never delivers — UID-scoped nftables egress, loopback-bound gateway, Windows Firewall inbound-deny on `8787`, no-sudo user, rootless Docker, hash-pinned upstream script, hash-pinned safety policy, Kill Switch shortcut, source-available (PolyForm Perimeter) license so their team can fork and audit internally. It's a reference architecture in 932 lines of PowerShell.
 **THE HOOK:** CISO wanted a baseline for AI agent rollout — pointed them at a 900-line setup.ps1 with literal nftables rules and a kill switch, two-week argument turned into a thirty-minute meeting.
 **DISTRIBUTION TARGET:** r/sysadmin and r/cybersecurity; secondarily a CISO-channel Slack like Cyber-IT-ISAC.
 **GAP:** Real but expected. This is a single-machine reference, not enterprise-deployable as-is. The pitch is "use this to anchor your internal standard," not "ship this to 5,000 endpoints."
@@ -124,7 +124,7 @@ Twelve persona-specific briefs grounded in the actual `setup.ps1` steps. The ins
 
 **PERSONA:** CS or quantitative-major student who wants to learn agent development without paying $200/mo for Claude Pro and without their student visa or financial-aid status getting tangled up in a foreign-API audit.
 **THE NEED:** They need real hands-on agent-development practice on a $400 laptop with no recurring cost.
-**WHAT THIS INSTALLER SOLVES FOR THEM:** Ollama option = `$0` and runs `llama3.1:8b` on consumer hardware; the hardened defaults — non-sudo `clawuser`, rootless Docker, egress firewall, loopback gateway — teach what production-grade isolation actually looks like; MIT license means they can fork the `.ps1` for their thesis.
+**WHAT THIS INSTALLER SOLVES FOR THEM:** Ollama option = `$0` and runs `llama3.1:8b` on consumer hardware; the hardened defaults — non-sudo `clawuser`, rootless Docker, egress firewall, loopback gateway — teach what production-grade isolation actually looks like; the PolyForm Perimeter license permits non-commercial use like forking the `.ps1` for their thesis.
 **THE HOOK:** Couldn't justify $20/mo for ChatGPT Plus — got llama3.1 running in a sandboxed WSL setup where the agent can't reach the internet, learning more about systems hardening than my OS class taught.
 **DISTRIBUTION TARGET:** r/learnprogramming, r/cscareerquestions, r/MachineLearning.
 

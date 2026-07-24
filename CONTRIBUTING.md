@@ -1,6 +1,6 @@
 # Contributing to ClawFactory Secure Setup
 
-ClawFactory Secure Setup is a commercial product developed by **Frontier Automation Systems LLC**. The repository is open under the MIT license, but the release process — code signing, build artifacts, and distribution — is internal.
+ClawFactory Secure Setup is a commercial product developed by **Frontier Automation Systems LLC**. The source is available under the PolyForm Perimeter 1.0.0 license, but the release process — code signing, build artifacts, and distribution — is internal.
 
 ## What we accept
 
@@ -39,4 +39,4 @@ The expected loop on every non-trivial change:
 
 ## License
 
-By contributing, you agree that your contributions are licensed under the MIT License (the same as the project).
+By contributing, you agree that your contributions are licensed under the same terms as the project (PolyForm Perimeter 1.0.0).

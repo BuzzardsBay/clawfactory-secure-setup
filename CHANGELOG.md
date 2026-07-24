@@ -6,6 +6,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). This project a
 
 ---
 
+## [1.1.1] - 2026-07-22
+
+### Changed
+
+- **License swap: MIT -> PolyForm Perimeter 1.0.0.** MIT permitted anyone, including a competitor, to take this installer's source and resell it (or a rebrand of it) for free with no obligation back to the project. `LICENSE` now carries the verbatim PolyForm Perimeter 1.0.0 text (fetched from polyformproject.org), which permits any use -- personal, academic, internal, forking, auditing -- except providing a competing product built on the software. Updated everywhere the old license was asserted as current fact: `README.md` (badge + License section), `CONTRIBUTING.md`, `SUPPORT_MATRIX.md`, `PERSONAS.md`, and the unpublished `docs/index.html` footer (matching the already-updated public site). Historical session-report close-outs that recorded "MIT" as a past-tense fact were left untouched -- they are records, not claims.
+- **Orchestrator-prompt tool-policy claim corrected.** `resources/orchestrator-prompt.md`'s "Tool allowlist/denylist (enforced by gateway)" section asserted a structural gateway enforcement that never existed for most of the listed names (`github`, `clawhub`, `fs.readLimited`, `shell`, `net.fetch`, `system.run` are not real OpenClaw tool names; a `tools.deny` of them would be a no-op). Replaced with the wording proposed and reasoned through in the v1.0.48 session (`docs/session_reports/2026-07-19_version_pin_tool_policy.md`) but not applied at the time: `exec` is available and gated behaviorally by "GO", not by a code gate; the `browser` tool is structurally denied via `tools.deny`; network reach is bounded by the nftables egress allowlist, not a tool policy. This prompt ships to `resources/` and `~/.openclaw/agents/orchestrator/agent.md`; the orchestrator agent itself is not invoked in normal operation (the customer-facing agent is `main`, governed by SOUL.md), so the corrected claim was not customer-recited before this fix either -- it is an accuracy fix, not a behavior change. No SOUL.md / hash-pinning content was touched: the SOUL hash pin is computed live at install time from `resources/safety-rules.md` (untouched this release), never a static value in this file.
+- **Version bump to 1.1.1** (`ClawFactory-Secure-Setup.iss`) for this license + prompt-copy batch. The embedded Studio installer is unchanged (`ClawFactory-Studio-Setup-1.1.0.exe`, re-verified byte-for-byte against the v1.1.0/JOB-3B pin before this build, not rebuilt).
+
 ## [1.0.48] - 2026-07-19
 
 ### Security

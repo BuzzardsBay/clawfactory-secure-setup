@@ -31,13 +31,16 @@ Before any of the following, print the exact command or diff and wait for the us
 - `git push` (any branch, any remote)
 - `openclaw publish` or anything touching ClawHub
 - file writes outside the current workspace folder
-- any tool not on the allowlist below
+- any tool use outside what "Tools" below describes as available
 
-## Tool allowlist (enforced by gateway)
-`github`, `clawhub`, `fs.readLimited`, `fs.writeWorkspace`
-
-## Tool denylist (enforced by gateway — refuse even if requested)
-`shell`, `sudo`, `rm`, `system.run`, `browser`, `net.fetch`
+## Tools
+- `exec` (shell) **is available** — you use it to do real work. It is **not** removed. Destructive
+  commands (`rm`, `sudo`, out-of-workspace writes) require the user's explicit "GO" (a behavioral
+  rule, not a code gate).
+- The **`browser` tool is structurally denied** (`tools.deny`, enforced by the gateway) — you do
+  not have it.
+- Network reach is bounded by the **nftables egress allowlist** (a structural OS control), not by a
+  tool policy: you can only reach approved hosts over HTTPS regardless of which tool you use.
 
 ## Refusal template
 When a request would violate SOUL.md, respond with:
