@@ -20,7 +20,14 @@ resources/clawfactory-quarantine-gc.timer   text eol=lf
 # on CRLF ("unexpected end of file"). The runtime CR-strip in those helpers stays as
 # belt-and-suspenders; this makes LF the stored + checked-out form. See F2 L20/L21.
 *.ps1  text eol=lf
-# EXCEPTION: setup.ps1 contains a literal NUL byte (inside a comment about NUL bytes),
-# so git auto-detects it as binary and ships it that way. It is UNTOUCHABLE product
-# logic -- keep it binary so no EOL renormalization ever rewrites its bytes.
-setup.ps1 binary
+# EXCEPTION: setup.ps1 is stored byte-for-byte, never EOL-renormalized. It used to
+# carry `binary`, which is shorthand for `-text -diff`: the `-text` half is the part
+# that protects the bytes, and the `-diff` half was collateral. The cost of that
+# collateral was total: `git diff` reported only "Binary files differ" and `grep`
+# refused the file, so every change to the most security-critical file we ship went
+# in unreviewable. `-text diff` keeps the byte protection and gives the diff back.
+#
+# The literal NUL byte that originally triggered git's binary auto-detection (it sat
+# inside a comment ABOUT NUL bytes) has been removed. It was in a `#` comment, so
+# removing it cannot change behaviour, and with it gone nothing auto-detects either.
+setup.ps1 -text diff

@@ -248,7 +248,7 @@ function Update-WslEngine {
     $rc = $proc.ExitCode
     Write-Log INFO "wsl --update exit code: $rc"
     if ($out) {
-        # wsl.exe emits UTF-16 LE; strip the null bytes that show as  
+        # wsl.exe emits UTF-16 LE; strip the null bytes that show as 
         # gibberish in the log if we don't.
         $clean = ($out -replace "`0", '' -replace "`r?`n+", ' | ').Trim(' |')
         if ($clean) { Write-Log INFO "wsl --update output: $clean" }
@@ -1269,11 +1269,25 @@ function Step-EgressFirewall {
         # v1.0.3: Ubuntu apt repos. apt-as-root currently bypasses the firewall
         # (clawuser-scoped), but listed here as defense-in-depth in case install.sh
         # or a future skill drops privileges before running apt.
-        'archive.ubuntu.com','security.ubuntu.com','ports.ubuntu.com','esm.ubuntu.com','ppa.launchpad.net',
-        # v1.0.33: Google APIs (Gmail watcher + OAuth flow). v1.0.32 diagnostic
-        # showed gmail.googleapis.com / accounts.google.com timing out at the
-        # nft drop rule because they were never in $baseHosts.
-        'gmail.googleapis.com','oauth2.googleapis.com','accounts.google.com','www.googleapis.com','people.googleapis.com'
+        'archive.ubuntu.com','security.ubuntu.com','ports.ubuntu.com','esm.ubuntu.com','ppa.launchpad.net'
+        # v1 Guard 2: the five Google API hosts that used to sit here are GONE.
+        # They were added in v1.0.33 for the Gmail PubSub watcher, and
+        # gmail.googleapis.com is the host that serves users.messages.send. On a
+        # uid-1000 allowlist that is a live outbound mail route for the agent:
+        # recon confirmed clawuser reaching /gmail/v1/users/me/profile and
+        # getting a 401, i.e. the request arrived at Google and only the absent
+        # credential stopped it.
+        #
+        # Nothing is lost. The watcher cannot run here at all -- it needs the
+        # gcloud CLI, the `gog` binary and a Tailscale Funnel endpoint, none of
+        # which ClawFactory ships. Gemini as a MODEL provider uses
+        # generativelanguage.googleapis.com, which is added per-provider from
+        # $ThisProvider.AllowlistHosts and is unaffected.
+        #
+        # THE INVARIANT: no send path may ever run as uid 1000. If Google mail
+        # is ever wanted, it goes behind the root broker, which is exempt from
+        # this chain by `meta skuid != clawuser return`. Putting a send host
+        # back on this list is forbidden, not merely discouraged.
     )
     $providerHosts = @($ThisProvider.AllowlistHosts)
     $allHosts      = ($baseHosts + $providerHosts) | Where-Object { $_ } | Sort-Object -Unique
@@ -1787,8 +1801,25 @@ fi
 # the iptables-legacy chain exists). Both backends get the same auxiliary
 # host list (auth endpoints, registry mirrors, etc.) so OpenClaw's first-run
 # auth flows succeed regardless of which firewall is active.
+# v1 Guard 2: generativelanguage.googleapis.com and aiplatform.googleapis.com
+# were REMOVED from this list. They resolve to the same Google front-end IPs as
+# gmail.googleapis.com (measured: both are 172.217.112.4 through 172.217.119.4),
+# so pre-allowlisting them on EVERY install silently re-opened the agent's route
+# to users.messages.send. Proved by execution: after the five Gmail hostnames
+# were taken off the base list and their IPs deleted, clawuser was blocked; one
+# run of this refresh script put the same IPs straight back and clawuser reached
+# the Gmail API again.
+#
+# Nothing is lost for non-Google installs. A customer who selects or switches to
+# Gemini still gets generativelanguage.googleapis.com from the per-provider
+# allowlist at install, and from PROVIDER_HOST in switch-provider.ps1 on switch.
+#
+# RESIDUAL, STATED PLAINLY: for a Gemini customer that per-provider entry
+# re-allowlists the shared IPs, so the Gmail API becomes reachable again.
+# IP-based allowlisting cannot separate two hostnames served by one front-end.
+# Closing that needs a root-owned outbound injector so clawuser needs no Google
+# IP at all. Do not "fix" it by dropping the shared IPs -- that breaks Gemini.
 AUX_HOSTS="api.anthropic.com console.anthropic.com api.openai.com auth.openai.com api.x.ai \
-generativelanguage.googleapis.com aiplatform.googleapis.com \
 clawhub.ai api.github.com raw.githubusercontent.com objects.githubusercontent.com \
 registry.npmjs.org"
 if nft list table inet clawfactory >/dev/null 2>&1; then
@@ -1852,8 +1883,25 @@ cat > /usr/local/sbin/clawfactory-allow-providers.sh <<'REFRESH'
 # firewall. Routes to nftables or iptables-legacy based on the backend
 # persisted by Step-EgressFirewall. Runs every 5h via the systemd timer.
 set -e
+# v1 Guard 2: generativelanguage.googleapis.com and aiplatform.googleapis.com
+# were REMOVED from this list. They resolve to the same Google front-end IPs as
+# gmail.googleapis.com (measured: both are 172.217.112.4 through 172.217.119.4),
+# so pre-allowlisting them on EVERY install silently re-opened the agent's route
+# to users.messages.send. Proved by execution: after the five Gmail hostnames
+# were taken off the base list and their IPs deleted, clawuser was blocked; one
+# run of this refresh script put the same IPs straight back and clawuser reached
+# the Gmail API again.
+#
+# Nothing is lost for non-Google installs. A customer who selects or switches to
+# Gemini still gets generativelanguage.googleapis.com from the per-provider
+# allowlist at install, and from PROVIDER_HOST in switch-provider.ps1 on switch.
+#
+# RESIDUAL, STATED PLAINLY: for a Gemini customer that per-provider entry
+# re-allowlists the shared IPs, so the Gmail API becomes reachable again.
+# IP-based allowlisting cannot separate two hostnames served by one front-end.
+# Closing that needs a root-owned outbound injector so clawuser needs no Google
+# IP at all. Do not "fix" it by dropping the shared IPs -- that breaks Gemini.
 AUX_HOSTS="api.anthropic.com console.anthropic.com api.openai.com auth.openai.com api.x.ai \
-generativelanguage.googleapis.com aiplatform.googleapis.com \
 clawhub.ai api.github.com raw.githubusercontent.com objects.githubusercontent.com \
 registry.npmjs.org"
 BACKEND="$(cat /etc/clawfactory/fw-backend 2>/dev/null || echo nftables)"
