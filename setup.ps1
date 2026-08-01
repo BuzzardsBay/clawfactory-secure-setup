@@ -659,7 +659,11 @@ function Step-Preflight {
         'safety-rules.md', 'openclaw-shim.sh', 'clawfactory-turn-gate.sh',
         'clawfactory-spend-check.js', 'install-turn-gate.sh', 'freeze-injected-soul.sh',
         'clawfactory-proxy.js', 'clawfactory-proxy.service', 'install-chat-proxy.sh',
-        'gateway-wait.sh'
+        'gateway-wait.sh',
+        'quarantine-lib.js', 'clawfactory-quarantined.js', 'clawfactory-quarantinectl.js',
+        'clawfactory-quarantine-rm.js', 'clawfactory-quarantine.service',
+        'clawfactory-quarantine-gc.service', 'clawfactory-quarantine-gc.timer',
+        'install-quarantine.sh'
     )
     $resDir  = Join-Path $PSScriptRoot 'resources'
     $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $resDir $_)) })
@@ -2404,6 +2408,71 @@ rm -f /tmp/freeze-injected-soul.sh
     Save-Checkpoint 'FreezeInjectedSoul'
 }
 
+function Step-InstallQuarantine {
+    # v1 Guard 1: recoverable deletes. Two halves, and they are NOT equally strong
+    # -- the close-out and the customer copy both have to keep saying so:
+    #
+    #   STRUCTURAL: a quarantined file is chowned to root inside a root:root 0700
+    #   store. clawuser cannot list it, restore it or purge it. Once held, held.
+    #
+    #   ADVISORY:  routing the delete into the store. There is no delete TOOL in
+    #   OpenClaw to deny (group:fs is read/write/edit/apply_patch); deletion is
+    #   just `rm` under the `exec` tool, and exec is the product. So we put a
+    #   wrapper at the front of the exec PATH -- which catches `rm <path>`, the
+    #   form a delete essentially always takes -- and accept that /bin/rm,
+    #   unlink, find -delete and fs.rmSync still go straight through.
+    #
+    # The broker runs as ROOT because only root can chown a payload out of the
+    # agent's reach. It is not a new capability: before every move it re-derives
+    # POSIX unlink permission AS clawuser and refuses anything the caller could
+    # not have deleted itself (VERIFIED: a root-owned file in a non-writable
+    # granted folder comes back EACCES, and a symlink out of the grant resolves
+    # out of scope rather than escaping).
+    Write-Log INFO 'Step 15e [Guard 1]: Installing the delete quarantine (broker + retention timer + rm wrapper).'
+    $resourceDir = Join-Path $PSScriptRoot 'resources'
+    $lfB64 = { param($p) [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(([IO.File]::ReadAllText($p)).Replace("`r`n","`n").Replace("`r","`n"))) }
+    $libB64   = & $lfB64 (Join-Path $resourceDir 'quarantine-lib.js')
+    $dmnB64   = & $lfB64 (Join-Path $resourceDir 'clawfactory-quarantined.js')
+    $ctlB64   = & $lfB64 (Join-Path $resourceDir 'clawfactory-quarantinectl.js')
+    $rmB64    = & $lfB64 (Join-Path $resourceDir 'clawfactory-quarantine-rm.js')
+    $svcB64   = & $lfB64 (Join-Path $resourceDir 'clawfactory-quarantine.service')
+    $gcSvcB64 = & $lfB64 (Join-Path $resourceDir 'clawfactory-quarantine-gc.service')
+    $gcTmrB64 = & $lfB64 (Join-Path $resourceDir 'clawfactory-quarantine-gc.timer')
+    $instB64  = & $lfB64 (Join-Path $resourceDir 'install-quarantine.sh')
+    $drop = @"
+set -e
+mkdir -p /usr/local/sbin /usr/local/lib/clawfactory/execbin
+echo '$libB64'   | base64 -d > /usr/local/lib/clawfactory/quarantine-lib.js
+echo '$dmnB64'   | base64 -d > /usr/local/sbin/clawfactory-quarantined.js
+echo '$ctlB64'   | base64 -d > /usr/local/sbin/clawfactory-quarantinectl.js
+echo '$rmB64'    | base64 -d > /usr/local/lib/clawfactory/execbin/rm
+echo '$svcB64'   | base64 -d > /tmp/clawfactory-quarantine.service
+echo '$gcSvcB64' | base64 -d > /tmp/clawfactory-quarantine-gc.service
+echo '$gcTmrB64' | base64 -d > /tmp/clawfactory-quarantine-gc.timer
+echo '$instB64'  | base64 -d > /tmp/install-quarantine.sh
+bash /tmp/install-quarantine.sh
+rm -f /tmp/install-quarantine.sh
+"@
+    $rc = Invoke-WslBash -Script $drop -User 'root'
+    if ($rc -ne 0) { throw 'Failed to install the delete quarantine (Guard 1). Deletes would be permanent while the product says they are recoverable - do not ship this install.' }
+
+    # Put the wrapper on the FRONT of the exec tool's PATH. tools.exec.pathPrepend
+    # is a gateway-side setting and OpenClaw REJECTS agent-supplied env.PATH
+    # overrides for host execution, so the agent cannot shove the wrapper off its
+    # own PATH from inside a turn. Runs as clawuser (config is per-account) and
+    # BEFORE Step-InstallChatProxy, whose gateway restart picks the value up.
+    $pathScript = @'
+set -e
+openclaw config set tools.exec.pathPrepend --strict-json '["/usr/local/lib/clawfactory/execbin"]' >/dev/null
+openclaw config get tools.exec.pathPrepend
+'@
+    $rc2 = Invoke-WslBash -Script $pathScript -User $WslUser
+    if ($rc2 -ne 0) {
+        throw 'Quarantine broker installed but tools.exec.pathPrepend could not be set: the agent would still reach the raw rm. Refusing to report a guard that is not wired.'
+    }
+    Save-Checkpoint 'InstallQuarantine'
+}
+
 function Step-InstallChatProxy {
     # Blocker 1 (CHATCOMPLETIONS_PROXY): ClawChat -- the bundled desktop app --
     # sends every turn to POST 127.0.0.1:8787/v1/chat/completions, which never
@@ -2905,6 +2974,7 @@ Invoke-WithRollback {
     Step-ConfigureAgents         # step 15: stage agent.md prompts via bootstrap.ps1
     Step-InstallTurnGate         # Defect 3: gated openclaw shim (SOUL + spend on every turn, all callers)
     Step-FreezeInjectedSoul      # Defect 4: deliver + freeze the factory safety rules into the injected SOUL
+    Step-InstallQuarantine       # Guard 1: recoverable deletes. Before the proxy step, whose gateway restart picks up pathPrepend
     Step-InstallChatProxy        # Blocker 1: gate ClawChat's HTTP path; real gateway -> private 8788
 }
 

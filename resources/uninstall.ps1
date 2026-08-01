@@ -388,6 +388,17 @@ sudo -u clawuser XDG_RUNTIME_DIR=/run/user/1000 systemctl --user daemon-reload 2
 # Remove the ClawFactory turn-gate shim + helper scripts (Defect 3). Removing
 # /usr/bin/openclaw below drops the shim; the real .mjs is removed too.
 rm -f /usr/local/sbin/clawfactory-turn-gate.sh /usr/local/sbin/clawfactory-spend-check.js /usr/local/sbin/clawfactory-dns-resolvers.sh /usr/local/sbin/clawfactory-fw-apply.sh 2>/dev/null
+# Guard 1: delete quarantine. Say how many held files go with it -- these are the
+# user's own files, and removing them silently during an uninstall is exactly the
+# surprise this guard exists to prevent.
+if [ -f /var/lib/clawfactory/quarantine/index.json ]; then
+    HELD=$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync("/var/lib/clawfactory/quarantine/index.json")).length)}catch{console.log(0)}' 2>/dev/null || echo 0)
+    echo "[uninstall] removing the delete quarantine and the $HELD file(s) still held in it"
+fi
+systemctl disable --now clawfactory-quarantine.service clawfactory-quarantine-gc.timer 2>/dev/null
+rm -f /etc/systemd/system/clawfactory-quarantine.service /etc/systemd/system/clawfactory-quarantine-gc.service /etc/systemd/system/clawfactory-quarantine-gc.timer 2>/dev/null
+rm -f /usr/local/sbin/clawfactory-quarantined.js /usr/local/sbin/clawfactory-quarantinectl.js 2>/dev/null
+rm -rf /usr/local/lib/clawfactory /var/lib/clawfactory 2>/dev/null
 rm -rf /etc/clawfactory 2>/dev/null
 # Remove the openclaw global install
 rm -rf /usr/lib/node_modules/openclaw 2>/dev/null

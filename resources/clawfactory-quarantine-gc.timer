@@ -1,0 +1,17 @@
+[Unit]
+Description=ClawFactory quarantine retention cleanup (daily, catches up on boot)
+
+[Timer]
+# The catch-up the spec asks for. A WSL distro starts when the user first
+# touches it, so OnBootSec is effectively "shortly after logon": a box that was
+# off for a fortnight reaps on its next start instead of waiting for a missed
+# wall-clock slot. OnUnitActiveSec then keeps it daily while the box stays up.
+# (Persistent= is deliberately not used: it depends on a stable
+# /var/lib/systemd/timers stamp across WSL restarts, and OnBootSec gives the
+# same catch-up without that dependency.)
+OnBootSec=5min
+OnUnitActiveSec=24h
+Unit=clawfactory-quarantine-gc.service
+
+[Install]
+WantedBy=timers.target

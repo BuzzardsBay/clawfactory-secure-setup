@@ -1,0 +1,23 @@
+[Unit]
+# ClawFactory delete quarantine broker. Owns /run/clawfactory/quarantine.sock.
+#
+# Runs as ROOT deliberately, for one reason: only root can chown a held payload
+# away from clawuser, and a payload the agent still owns is not a safety net.
+# The broker refuses any request the CALLING account could not have performed
+# itself (it re-derives POSIX unlink permission as clawuser before every move),
+# so root here is a custodian, not a new capability. See the header of
+# clawfactory-quarantined.js.
+Description=ClawFactory delete quarantine broker (holds agent deletes for recovery)
+After=local-fs.target
+
+[Service]
+Type=simple
+# /run is tmpfs: systemd recreates the socket directory on every boot.
+RuntimeDirectory=clawfactory
+RuntimeDirectoryMode=0755
+ExecStart=__NODE__ /usr/local/sbin/clawfactory-quarantined.js
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+[Unit]
+# Retention cleanup for the delete quarantine. This unit is the ONLY thing in
+# ClawFactory that permanently removes a quarantined file, and it only ever
+# touches entries already past the retention window (default 30 days,
+# /etc/clawfactory/quarantine.json).
+Description=ClawFactory quarantine retention cleanup
+
+[Service]
+Type=oneshot
+ExecStart=__NODE__ /usr/local/sbin/clawfactory-quarantinectl.js gc

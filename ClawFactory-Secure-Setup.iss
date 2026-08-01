@@ -81,6 +81,16 @@ Source: "resources\clawfactory-proxy.js";      DestDir: "{app}\resources";  Flag
 Source: "resources\clawfactory-proxy.service"; DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\install-chat-proxy.sh";     DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\gateway-wait.sh";           DestDir: "{app}\resources";  Flags: ignoreversion
+; --- v1 Guard 1: delete quarantine (recoverable deletes). Step-InstallQuarantine
+; streams all eight into WSL; Step-Preflight refuses to install without them.
+Source: "resources\quarantine-lib.js";                 DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\clawfactory-quarantined.js";        DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\clawfactory-quarantinectl.js";      DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\clawfactory-quarantine-rm.js";      DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\clawfactory-quarantine.service";    DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\clawfactory-quarantine-gc.service"; DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\clawfactory-quarantine-gc.timer";   DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\install-quarantine.sh";             DestDir: "{app}\resources"; Flags: ignoreversion
 ; --- v1.1.0 (JOB 3B): embedded ClawFactory Studio (the visual workbench) --------
 ; The SIGNED per-user Studio installer (~100 MB), sourced from the Studio repo's
 ; release dir at build time (gitignored, verified by sha256 before compile). It is

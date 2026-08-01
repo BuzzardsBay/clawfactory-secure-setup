@@ -7,6 +7,7 @@
 #   Workspace (Task 1.2): Grant-Workspace, Revoke-Workspace, Test-Grants
 #   Replay/Kill (Task 1.3): Invoke-GrantReplay, Invoke-GrantKillUnmount
 #   Governor (Task 1.4): Get-SpendStatus, Test-TurnAllowed, Invoke-GatedAgentTurn
+#   Quarantine (v1 Guard 1): Get-QuarantineItems, Restore-QuarantineItem
 #
 # One ledger (C:\ProgramData\ClawFactory\grants.json) covers all three grant
 # types (workspace | skill | domain). Only `workspace` is USED in v1.1; the
@@ -764,4 +765,79 @@ function Invoke-GatedAgentTurn {
     $enc = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Message))
     $r = Invoke-ClawWslBash -User $script:CF_WslUser -Script "openclaw agent --agent '$Agent' --json --message `"`$(echo '$enc' | base64 -d)`""
     return [pscustomobject]@{ blocked = $false; state = $gate.state; message = 'ok'; output = $r.StdOut; exit = $r.ExitCode }
+}
+
+#--- Quarantine (v1 Guard 1: recoverable deletes) ----------------------------
+# Read + restore for the delete quarantine. The store is root:root 0700 inside
+# WSL and the agent has no route to it; these functions reach it the same way
+# every other privileged operation in this module does -- `wsl -u root` from the
+# Windows side, driven by Studio through its Electron IPC bridge.
+#
+# The heavy lifting lives in clawfactory-quarantinectl.js (installed to
+# /usr/local/sbin) rather than being reimplemented here: the daemon, the
+# retention timer and this read path then share one definition of the index
+# format. These wrappers only marshal and validate.
+#
+# NOTE ON SCOPE: there is deliberately NO purge/delete function. The retention
+# timer is the only thing that permanently removes a held item, which is what
+# lets the product say "kept for 30 days" without an asterisk.
+
+$script:CF_QuarantineCtl = '/usr/local/sbin/clawfactory-quarantinectl.js'
+
+function Invoke-QuarantineCtl {
+    # Run one quarantinectl subcommand as root and parse its single JSON line.
+    # Returns a PSCustomObject with at least .ok; on any transport failure it
+    # returns a synthesised { ok = $false; error } rather than throwing, so the
+    # Studio IPC layer always has something printable.
+    param(
+        [Parameter(Mandatory)][string]$Command
+    )
+    $r = Invoke-ClawWslBash -User 'root' -Script "node $script:CF_QuarantineCtl $Command 2>/dev/null"
+    $out = $r.StdOut.Trim()
+    if (-not $out) {
+        $detail = $r.StdErr.Trim()
+        if (-not $detail) { $detail = "exit=$($r.ExitCode)" }
+        return [pscustomobject]@{ ok = $false; error = "quarantine service did not respond ($detail)" }
+    }
+    try {
+        # The ctl prints exactly one JSON line; take the last non-empty one so a
+        # stray login-shell banner cannot break parsing.
+        $line = ($out -split "`n" | Where-Object { $_.Trim() } | Select-Object -Last 1)
+        return ($line | ConvertFrom-Json)
+    } catch {
+        return [pscustomobject]@{ ok = $false; error = "unreadable quarantine response: $($_.Exception.Message)" }
+    }
+}
+
+function Get-QuarantineItems {
+    # Every held item, newest first. Each item carries originalPath, name, type,
+    # sizeBytes, sha256 (files only), deletedAt, expiresAt, taskId and `present`
+    # (whether the held copy is actually still on disk).
+    $res = Invoke-QuarantineCtl -Command 'list'
+    if (-not $res.ok) {
+        Write-GrantAudit -Event 'quarantine.list_failed' -Data @{ error = $res.error }
+        return $res
+    }
+    return $res
+}
+
+function Restore-QuarantineItem {
+    # Put one held item back at its original path. If that path is occupied the
+    # ctl restores alongside it as "<name> (restored).<ext>" and reports
+    # renamed=$true -- it never overwrites what is there now.
+    param(
+        [Parameter(Mandatory)][string]$Id
+    )
+    # The id is interpolated into a bash command line, so constrain it to the
+    # shape the daemon actually generates before it gets anywhere near a shell.
+    if ($Id -notmatch '^[A-Za-z0-9:.\-]+$') {
+        return [pscustomobject]@{ ok = $false; error = 'invalid quarantine id' }
+    }
+    $res = Invoke-QuarantineCtl -Command "restore '$Id'"
+    if ($res.ok) {
+        Write-GrantAudit -Event 'quarantine.restored' -Data @{ id = $Id; restoredTo = $res.restoredTo; renamed = $res.renamed }
+    } else {
+        Write-GrantAudit -Event 'quarantine.restore_failed' -Data @{ id = $Id; error = $res.error }
+    }
+    return $res
 }

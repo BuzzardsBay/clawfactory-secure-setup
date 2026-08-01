@@ -4,6 +4,16 @@
 *.sh   text eol=lf
 *.mjs  text eol=lf
 resources/clawfactory-spend-check.js text eol=lf
+# v1 Guard 1. clawfactory-quarantine-rm.js is installed as the agent's `rm` and is
+# executed through its SHEBANG, so a trailing CR there is fatal ("bad interpreter"),
+# not merely untidy. install-quarantine.sh CR-strips at runtime as well.
+resources/quarantine-lib.js            text eol=lf
+resources/clawfactory-quarantined.js   text eol=lf
+resources/clawfactory-quarantinectl.js text eol=lf
+resources/clawfactory-quarantine-rm.js text eol=lf
+resources/clawfactory-quarantine.service    text eol=lf
+resources/clawfactory-quarantine-gc.service text eol=lf
+resources/clawfactory-quarantine-gc.timer   text eol=lf
 
 # v1.1.0 (JOB 3B): structural defense-in-depth so no future multi-line bash carried
 # into WSL from a .ps1 (e.g. a probe's Wsl helper, the adversarial suite) can regress

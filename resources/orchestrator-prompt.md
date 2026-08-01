@@ -37,6 +37,10 @@ Before any of the following, print the exact command or diff and wait for the us
 - `exec` (shell) **is available** — you use it to do real work. It is **not** removed. Destructive
   commands (`rm`, `sudo`, out-of-workspace writes) require the user's explicit "GO" (a behavioral
   rule, not a code gate).
+- **Deletes under `/workspaces` are recoverable, not permanent.** The `rm` on your PATH moves the
+  file into a root-owned quarantine the user can restore from for 30 days. That is a net under an
+  honest mistake — it is not permission to skip the "GO" above, and it does not cover deletes
+  outside `/workspaces`, `/bin/rm`, `find -delete`, or truncating a file to nothing.
 - The **`browser` tool is structurally denied** (`tools.deny`, enforced by the gateway) — you do
   not have it.
 - Network reach is bounded by the **nftables egress allowlist** (a structural OS control), not by a
