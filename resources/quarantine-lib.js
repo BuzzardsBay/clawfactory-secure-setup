@@ -33,6 +33,20 @@ const DEFAULTS = {
   // `rm -rf` of a huge tree fills /var/lib and takes the box down. Refusing
   // loudly is better than a silent disk-fill.
   maxEntryBytes: 2 * 1024 * 1024 * 1024,
+  // Aggregate ceiling on everything held at once. maxEntryBytes alone does not
+  // bound the store: thirty days of ordinary deletes, or an agent quarantining
+  // in a loop, fills /var/lib one under-cap entry at a time.
+  //
+  // On overflow the broker REFUSES LOUD. It does not evict (that would silently
+  // break the 30-day promise) and it does not fall through to the real rm (that
+  // would silently destroy the file). Both failure modes are worse than a
+  // delete that does not happen.
+  maxStoreBytes: 10 * 1024 * 1024 * 1024,
+  // Floor on free space for the filesystem the store sits on, checked after
+  // accounting for the incoming payload. This is the backstop that actually
+  // protects the host: maxStoreBytes bounds what WE hold, this bounds what is
+  // left for everything else on the disk.
+  minFreeBytes: 2 * 1024 * 1024 * 1024,
   // ONLY paths under these roots are quarantined. Everything else passes
   // through to the real rm. /workspaces is the granted-folder mount root --
   // i.e. exactly "the user's files", which is the whole promise. Agent scratch
@@ -61,12 +75,20 @@ const indexPath = (cfg) => path.join(cfg.store, 'index.json');
 const lockPath = (cfg) => path.join(cfg.store, '.index.lock');
 const entryDir = (cfg, id) => path.join(cfg.store, id);
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
  * Take the index mutex, run fn, release. O_EXCL create is the mutex; a lock
  * older than 30s is considered stale (a killed daemon must not wedge deletes
  * forever) and is broken.
+ *
+ * ASYNC ON PURPOSE. This used to back off with Atomics.wait, which blocks the
+ * whole event loop. That was harmless while the only caller was a broker that
+ * handles one rare request at a time, but this shape is being cloned for the
+ * send broker, where a blocked loop would stall in-flight approvals. Await the
+ * backoff so the process stays responsive under contention.
  */
-function withIndexLock(cfg, fn) {
+async function withIndexLock(cfg, fn) {
   const lp = lockPath(cfg);
   const deadline = Date.now() + 10_000;
   let fd = null;
@@ -76,22 +98,26 @@ function withIndexLock(cfg, fn) {
       break;
     } catch (e) {
       if (e.code !== 'EEXIST') throw e;
-      try {
-        if (Date.now() - fs.statSync(lp).mtimeMs > 30_000) {
-          fs.unlinkSync(lp);
-          continue;
-        }
-      } catch {
-        continue; // lock vanished under us; retry the create
-      }
       if (Date.now() > deadline) throw new Error('quarantine index is locked');
-      // Node has no sleep; a short blocking wait is fine here (deletes are rare
-      // and this process has nothing else to do).
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+      let stale = false;
+      try {
+        stale = Date.now() - fs.statSync(lp).mtimeMs > 30_000;
+      } catch {
+        // Lock vanished under us; retry the create straight away.
+      }
+      if (stale) {
+        try {
+          fs.unlinkSync(lp);
+        } catch {
+          /* someone else broke it first */
+        }
+      }
+      // Yield even on the fast path so a wedged lock cannot spin the CPU.
+      await sleep(stale ? 0 : 50);
     }
   }
   try {
-    return fn();
+    return await fn();
   } finally {
     try {
       fs.closeSync(fd);
@@ -142,6 +168,87 @@ function pathSize(p) {
     }
   }
   return total;
+}
+
+/**
+ * Bytes currently held, summed from the index rather than measured on disk.
+ *
+ * Measuring the real tree would mean walking up to maxStoreBytes of files on
+ * every single delete. The index sum is what the 30-day promise is actually
+ * made of, and it is exact for every entry the store admits to holding. The
+ * thing it can miss is an orphaned payload whose index write was lost -- rare,
+ * reaped by the gc sweep, and covered anyway by the free-space floor below,
+ * which measures the filesystem for real.
+ */
+function storeUsedBytes(records) {
+  return records.reduce((n, r) => n + (Number.isFinite(r.sizeBytes) ? r.sizeBytes : 0), 0);
+}
+
+/** Free bytes on the filesystem holding the store, or null if unmeasurable. */
+function storeFreeBytes(cfg) {
+  try {
+    const st = fs.statfsSync(cfg.store);
+    return st.bsize * st.bavail;
+  } catch {
+    return null;
+  }
+}
+
+/** Human sizes for user-facing refusals. One decimal place, no false precision. */
+function humanBytes(n) {
+  if (!Number.isFinite(n)) return 'unknown';
+  const mb = 1024 * 1024;
+  const gb = 1024 * mb;
+  const tb = 1024 * gb;
+  if (n >= tb) return `${(n / tb).toFixed(1)} TB`;
+  if (n >= gb) return `${(n / gb).toFixed(1)} GB`;
+  if (n >= mb) return `${Math.round(n / mb)} MB`;
+  return `${n} bytes`;
+}
+
+/**
+ * Would admitting `incomingBytes` breach either ceiling? Returns null when the
+ * move may proceed, or a { code, error } the caller returns verbatim.
+ *
+ * Deliberately has no eviction path and no soft mode. See maxStoreBytes.
+ */
+function capacityRefusal(cfg, records, incomingBytes) {
+  const used = storeUsedBytes(records);
+  const max = Number.isFinite(cfg.maxStoreBytes) ? cfg.maxStoreBytes : DEFAULTS.maxStoreBytes;
+  if (used + incomingBytes > max) {
+    return {
+      code: 'ENOSPC',
+      error:
+        `the ClawFactory quarantine store is full (${humanBytes(used)} held of a ` +
+        `${humanBytes(max)} limit, and this needs ${humanBytes(incomingBytes)}). ` +
+        `Nothing was deleted. Open Studio > Recently deleted and restore or clear ` +
+        `items, then try again.`,
+    };
+  }
+
+  const free = storeFreeBytes(cfg);
+  const floor = Number.isFinite(cfg.minFreeBytes) ? cfg.minFreeBytes : DEFAULTS.minFreeBytes;
+  // Unmeasurable free space is not a licence to proceed: refuse rather than
+  // risk filling the disk the whole box runs on.
+  if (free === null) {
+    return {
+      code: 'ENOSPC',
+      error:
+        `cannot measure free space on the ClawFactory quarantine store. ` +
+        `Nothing was deleted. Check disk health, then try again.`,
+    };
+  }
+  if (free - incomingBytes < floor) {
+    return {
+      code: 'ENOSPC',
+      error:
+        `only ${humanBytes(free)} free on the ClawFactory quarantine disk, and holding ` +
+        `this needs ${humanBytes(incomingBytes)} with a ${humanBytes(floor)} reserve kept ` +
+        `for the rest of the system. Nothing was deleted. Free up disk space, or open ` +
+        `Studio > Recently deleted and clear items, then try again.`,
+    };
+  }
+  return null;
 }
 
 /**
@@ -198,6 +305,10 @@ module.exports = {
   writeIndex,
   sha256File,
   pathSize,
+  storeUsedBytes,
+  storeFreeBytes,
+  humanBytes,
+  capacityRefusal,
   copyPreservingLinks,
   chownRootRecursive,
   isUnder,

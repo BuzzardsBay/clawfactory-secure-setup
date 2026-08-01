@@ -65,6 +65,8 @@ cat > /etc/clawfactory/quarantine.json <<CFG
 {
   "retentionDays": 30,
   "maxEntryBytes": 2147483648,
+  "maxStoreBytes": 10737418240,
+  "minFreeBytes": 2147483648,
   "quarantineRoots": ["/workspaces"],
   "skipSegments": ["node_modules", ".git"],
   "socketPath": "/run/clawfactory/quarantine.sock",

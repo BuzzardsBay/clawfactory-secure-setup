@@ -813,6 +813,11 @@ function Get-QuarantineItems {
     # Every held item, newest first. Each item carries originalPath, name, type,
     # sizeBytes, sha256 (files only), deletedAt, expiresAt, taskId and `present`
     # (whether the held copy is actually still on disk).
+    #
+    # Also returns `capacity` (usedBytes / maxStoreBytes / usedPercent /
+    # freeBytes / minFreeBytes) so the panel can warn before the store fills.
+    # Once it is full the broker REFUSES deletes outright, and the first the user
+    # hears of that should not be a failed delete.
     $res = Invoke-QuarantineCtl -Command 'list'
     if (-not $res.ok) {
         Write-GrantAudit -Event 'quarantine.list_failed' -Data @{ error = $res.error }

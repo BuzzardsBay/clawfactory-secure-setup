@@ -125,8 +125,25 @@ function newEntryId() {
   return `${new Date().toISOString().replace(/[:.]/g, '-')}-${process.hrtime.bigint().toString(36).slice(-6)}`;
 }
 
+/**
+ * Serialize the delete path. The store-capacity check reads the index, decides,
+ * and only then moves; two deletes interleaving between those steps could both
+ * pass a check that only one of them fits through. The broker is one process,
+ * so a promise chain is a complete mutex for it -- the on-disk index lock is
+ * what guards against the ctl and gc processes.
+ */
+let chain = Promise.resolve();
+function serialize(fn) {
+  const run = chain.then(fn, fn);
+  chain = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
+}
+
 /** The delete path. Returns the response object; never throws to the socket. */
-function handleDelete(req) {
+async function handleDelete(req) {
   const raw = typeof req.path === 'string' ? req.path : '';
   if (!raw.startsWith('/')) return { ok: false, code: 'EINVAL', error: 'absolute path required' };
 
@@ -180,6 +197,15 @@ function handleDelete(req) {
     };
   }
 
+  // Aggregate ceiling and free-space floor. REFUSE, never evict and never fall
+  // through: evicting would silently break the retention promise, and falling
+  // through would silently destroy the file this guard exists to protect.
+  const refusal = lib.capacityRefusal(cfg, lib.readIndex(cfg), size);
+  if (refusal) {
+    log(`REFUSED ${target}: ${refusal.code} (${refusal.error})`);
+    return { ok: false, code: refusal.code, error: refusal.error };
+  }
+
   const id = newEntryId();
   const dir = lib.entryDir(cfg, id);
   const stored = path.join(dir, path.basename(target));
@@ -217,7 +243,7 @@ function handleDelete(req) {
     requestedBy: AGENT_USER,
   };
   try {
-    lib.withIndexLock(cfg, () => {
+    await lib.withIndexLock(cfg, () => {
       const records = lib.readIndex(cfg);
       records.push(record);
       lib.writeIndex(cfg, records);
@@ -239,12 +265,12 @@ function safeHash(p) {
   }
 }
 
-function handle(req) {
+async function handle(req) {
   switch (req && req.op) {
     case 'ping':
       return { ok: true, pong: true, store: cfg.store, retentionDays: cfg.retentionDays };
     case 'delete':
-      return handleDelete(req);
+      return serialize(() => handleDelete(req));
     default:
       return { ok: false, code: 'EINVAL', error: `unknown op: ${req && req.op}` };
   }
@@ -265,7 +291,7 @@ fs.mkdirSync(path.dirname(cfg.socketPath), { recursive: true, mode: 0o755 });
 const server = net.createServer((sock) => {
   let buf = '';
   sock.setEncoding('utf8');
-  sock.on('data', (chunk) => {
+  sock.on('data', async (chunk) => {
     buf += chunk;
     // Requests are single-line JSON; anything absurd is a bad client.
     if (buf.length > 64 * 1024) {
@@ -278,7 +304,7 @@ const server = net.createServer((sock) => {
     buf = '';
     let res;
     try {
-      res = handle(JSON.parse(line));
+      res = await handle(JSON.parse(line));
     } catch (e) {
       res = { ok: false, code: 'EINVAL', error: `bad request: ${e.message}` };
     }

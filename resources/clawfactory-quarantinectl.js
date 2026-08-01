@@ -65,7 +65,24 @@ function cmdList() {
   }));
   // Newest first: the thing you just lost is the thing you want back.
   items.sort((a, b) => String(b.deletedAt).localeCompare(String(a.deletedAt)));
-  out({ ok: true, retentionDays: cfg.retentionDays, store: cfg.store, items });
+  // Capacity is reported so Studio can warn BEFORE the store fills. Once it is
+  // full the broker refuses deletes outright, and the first the user hears of
+  // it should not be a failed delete.
+  const usedBytes = lib.storeUsedBytes(records);
+  const maxStoreBytes = cfg.maxStoreBytes;
+  out({
+    ok: true,
+    retentionDays: cfg.retentionDays,
+    store: cfg.store,
+    capacity: {
+      usedBytes,
+      maxStoreBytes,
+      usedPercent: maxStoreBytes > 0 ? Math.round((usedBytes / maxStoreBytes) * 100) : 0,
+      freeBytes: lib.storeFreeBytes(cfg),
+      minFreeBytes: cfg.minFreeBytes,
+    },
+    items,
+  });
 }
 
 /** `report.txt` occupied -> `report (restored).txt`, then `report (restored 2).txt`. */
@@ -84,7 +101,7 @@ function freeName(target) {
   throw new Error(`cannot find a free name next to ${target}`);
 }
 
-function cmdRestore(id) {
+async function cmdRestore(id) {
   if (!id) return out({ ok: false, error: 'restore needs an entry id' });
   const records = lib.readIndex(cfg);
   const rec = records.find((r) => r.id === id);
@@ -95,6 +112,34 @@ function cmdRestore(id) {
   // there, and that does not make the held entry missing.
   if (!entryExists(src)) {
     return out({ ok: false, error: `the held copy for ${rec.name} is missing from the store` });
+  }
+
+  // INTEGRITY GATE. The digest was recorded at hold time and until now was
+  // never checked, so a corrupted held copy would have been handed back as if
+  // it were the original. Verify the SOURCE before writing anything: a refusal
+  // leaves both the held copy and the user's folder untouched, where restoring
+  // a corrupted file over a known-good path would not be undoable.
+  //
+  // Only type: file carries a digest. Directories and symlinks record null by
+  // design (no tree-manifest format in this guard), so there is nothing to
+  // check and nothing is claimed.
+  if (rec.type === 'file' && typeof rec.sha256 === 'string' && rec.sha256) {
+    let actual;
+    try {
+      actual = lib.sha256File(src);
+    } catch (e) {
+      return out({ ok: false, code: 'EINTEGRITY', error: `cannot read the held copy of ${rec.name}: ${e.message}` });
+    }
+    if (actual !== rec.sha256) {
+      return out({
+        ok: false,
+        code: 'EINTEGRITY',
+        error:
+          `the held copy of ${rec.name} does not match what was stored ` +
+          `(expected ${rec.sha256}, found ${actual}). Nothing was restored, and the ` +
+          `held copy has been left in place. Do not trust this copy.`,
+      });
+    }
   }
 
   // The original folder can be gone (or its grant revoked and unmounted). Do
@@ -129,7 +174,7 @@ function cmdRestore(id) {
 
   // Only now drop the held copy: if anything above failed we still have it.
   try {
-    lib.withIndexLock(cfg, () => {
+    await lib.withIndexLock(cfg, () => {
       const current = lib.readIndex(cfg).filter((r) => r.id !== id);
       lib.writeIndex(cfg, current);
     });
@@ -150,11 +195,11 @@ function cmdRestore(id) {
  * Retention cleanup. THE ONLY THING IN THIS GUARD THAT PERMANENTLY DELETES, and
  * it only ever touches entries already past the window.
  */
-function cmdGc() {
+async function cmdGc() {
   const cutoff = Date.now() - cfg.retentionDays * 86_400_000;
   const reaped = [];
   try {
-    lib.withIndexLock(cfg, () => {
+    await lib.withIndexLock(cfg, () => {
       const records = lib.readIndex(cfg);
       const keep = [];
       for (const rec of records) {
@@ -206,17 +251,27 @@ function cmdGc() {
 
 requireRoot();
 const [cmd, arg] = process.argv.slice(2);
-switch (cmd) {
-  case 'list':
-    cmdList();
-    break;
-  case 'restore':
-    cmdRestore(arg);
-    break;
-  case 'gc':
-    cmdGc();
-    break;
-  default:
-    out({ ok: false, error: `usage: clawfactory-quarantinectl.js list|restore <id>|gc (got: ${cmd || 'nothing'})` });
-    process.exit(1);
+
+async function main() {
+  switch (cmd) {
+    case 'list':
+      cmdList();
+      break;
+    case 'restore':
+      await cmdRestore(arg);
+      break;
+    case 'gc':
+      await cmdGc();
+      break;
+    default:
+      out({ ok: false, error: `usage: clawfactory-quarantinectl.js list|restore <id>|gc (got: ${cmd || 'nothing'})` });
+      process.exit(1);
+  }
 }
+
+main().catch((e) => {
+  // One line of JSON on every path, including this one -- the PowerShell engine
+  // ConvertFrom-Json's whatever it gets and a bare stack trace would break it.
+  out({ ok: false, error: `quarantinectl failed: ${e.message}` });
+  process.exit(1);
+});
