@@ -307,24 +307,239 @@ B arriving, which is precisely the defect staging exists to remove.
 
 ---
 
-## 4. Build
+## 4. Build, file by file
 
-TO BE COMPLETED. No build code has been written at the time of this revision.
+Commit `3acb0fd` (agent side) and `e767c8c` (validation-found fix).
 
-Blocked item recorded honestly: **Addendum B was not available to this session.** It is
-not present on disk and was not supplied in full. Only three fragments are known, quoted
-in the RESUME instruction: B.1 (file-based verifier channel, paired failing controls,
-lessons-learned entry), B.2 (the refuted A.4 concern), and B.4 (do not add
-element-manipulation logic to `clawfactory-allow-providers.sh`). B.4 reverses Addendum A
-section A.2's instruction without supplying its replacement, and at least one further
-section, B.3, is entirely unknown. Section 3.4 of the build, the egress policy file and
-firewall assertion, is therefore held rather than guessed at.
+| File | Installed to | Mode | Role |
+| --- | --- | --- | --- |
+| `resources/send-lib.js` | `/usr/local/lib/clawfactory/send-lib.js` | 0644 root:root | canonical hash, policy, credential, records, staging helpers, store lock |
+| `resources/send-smtp.js` | `/usr/local/lib/clawfactory/send-smtp.js` | 0644 root:root | self-contained SMTP submission, STARTTLS required |
+| `resources/clawfactory-sendd.js` | `/usr/local/sbin/clawfactory-sendd.js` | 0755 root:root | the root broker, two disjoint sockets |
+| `resources/clawfactory-sendctl.js` | `/usr/local/sbin/clawfactory-sendctl.js` | 0750 root:root | approval path, root only |
+| `resources/clawfactory-send.js` | `/usr/local/bin/clawfactory-send` | 0755 root:root | agent client, holds no capability |
+| `resources/clawfactory-fw-assert.sh` | `/usr/local/sbin/clawfactory-fw-assert.sh` | 0755 root:root | read-only chain tripwire |
+| `resources/install-send.sh` | run once as root | n/a | installer, fails loud |
+| `resources/egress-policy.json` | `/etc/clawfactory/egress-policy.json` | 0644 root:root | policy file, Guard 3 foundation |
+| `resources/clawfactory-send.service` | `/etc/systemd/system/` | 0644 | broker unit |
+| `resources/clawfactory-send-gc.service` | `/etc/systemd/system/` | 0644 | expiry and staging sweep |
+| `resources/clawfactory-send-gc.timer` | `/etc/systemd/system/` | 0644 | every 2 minutes |
+
+Runtime state, all created by the installer:
+
+| Path | Mode | Contents |
+| --- | --- | --- |
+| `/run/clawfactory/send.sock` | `srw-rw---- root:clawuser` | request channel, enqueue and status only |
+| `/run/clawfactory/send-admin.sock` | `srw------- root:root` | approval channel, unreachable by the agent |
+| `/etc/clawfactory/send-credential.json` | 0600 root:root | SMTP credential, never read by anything agent-side |
+| `/etc/clawfactory/send.json` | 0444 root:root | limits the agent may read but cannot widen |
+| `/var/lib/clawfactory/send/{pending,staging,receipts}` | 0700 root:root | records, staged bytes, receipts |
+
+### 4.1 Three implementation decisions that depart from the letter of v3
+
+**a. Staging performs the read AS THE AGENT rather than checking and then copying.**
+v3 section 3.2 says re-derive entitlement via `setpriv` and test, then stage. Testing
+and then copying leaves a window in which the agent can replace the path with a symlink
+to something it could not read. The explicit test is retained for a clean refusal
+message, but the authoritative copy is executed by a `setpriv` child running at the
+agent uid, so the check and the read are one operation. The broker cannot read what the
+caller could not, by construction rather than by inspection.
+
+**b. Configuring SMTP is the act that authorizes the destination.** `send_actions` ships
+empty, so a fresh install can send nothing at all. `credential-set` writes the credential
+and the single authorized destination together. It is therefore impossible to hold a
+credential pointing somewhere policy does not permit, or to leave a stale destination
+authorized after the user repoints their mail.
+
+**c. Receipt ordering, per the consolidated addendum section 6.** The intent record is
+written and `fsync`ed before the SMTP connection opens and amended with the result
+afterwards. Recorded here as a spec amendment rather than an implementation detail.
+Evidence that the ordering is real, from the failing run in section 5: `intentAt`
+15:06:07.410, `result.at` 15:06:07.475.
+
+### 4.2 The canonical payload hash
+
+Defined in section 3.1 above and implemented in `send-lib.js`. Self-test results, eleven
+cases:
+
+```
+base                     4dd80e58b6e2fa9b7c699800b40a0a8c0eacec38fcc94ed2d2c55df09d29b966
+repeat identical         SAME (deterministic)
+case/space normalized    SAME (correct)
+recipient reorder        SAME (correct)
+to -> cc                 CHANGED (correct)
+bcc added                CHANGED (correct)
+body changed             CHANGED (correct)
+subject changed          CHANGED (correct)
+attachment content       CHANGED (correct)
+attachment size          CHANGED (correct)
+attachment name          CHANGED (correct)
+destination port         CHANGED (correct)
+```
+
+One refinement against the section 3.1 text: attachment entries are joined with `0x1D`
+and fields within an entry with `0x1F`. The simulation used `0x1F` for both, which is
+ambiguous and collision-prone. Documented here as the authoritative definition.
+
+### 4.3 Firewall work, per the consolidated addendum section 5
+
+Two narrow things, and no element manipulation anywhere.
+
+1. An explicit drop inserted into `/etc/nftables.conf`, placed **before**
+   `oifname "lo" accept` so it also covers handing mail to a local relay:
+   `tcp dport { 25, 465, 587, 2525 } counter drop`. It is redundant with the terminal
+   `counter drop`, and the redundancy is the point: it states the property in source
+   instead of leaving it to be inferred from rule ordering.
+2. `clawfactory-fw-assert.sh`, a read-only tripwire hooked as `ExecStartPost` on
+   `clawfactory-allow-providers.service` through a **systemd drop-in**, so no
+   element-manipulation logic enters the refresh script and the hook survives the unit
+   being rewritten.
+
+Guard 2 adds **no accept and no exemption**. The broker reaches SMTP because the chain
+returns early for every uid that is not the agent. There is no port-scoped exemption for
+the broker, no such rule exists, and none should ever be added.
 
 ---
 
 ## 5. Validation
 
-TO BE COMPLETED.
+Channel discipline per the consolidated addendum section 4: file-based only, and every
+block assertion carries a paired control that must fail in the same run. Controls are
+shown inline throughout. Nothing below was measured through a nested
+`wsl.exe -- bash -c` invocation.
+
+### 5.1 Results table
+
+| # | Test | Result | Evidence |
+| --- | --- | --- | --- |
+| 1 | Agent enqueues, nothing leaves | PASS | `status=pending`, sink message count unchanged at 0 |
+| 2 | Approval card carries the full payload | PASS | full body, recipients, staged hash rendered; staged hash equals source hash |
+| 3 | Approve, send executes, receipt written | PASS to a local sink | `250 2.0.0 Ok: queued as SINK1`; external delivery NOT tested, see 5.3 |
+| 4 | Deny | PASS | nothing sent, receipt `outcome: denied`, staging purged |
+| 5 | Replay of a consumed approval | PASS | `ESTATE request is already sent` |
+| 5b | Payload changed after preview | PASS | `EHASH the payload changed after it was previewed; approval voided` |
+| 6 | **Attachment rewritten after approval** | **PASS** | approved bytes A transmitted, tampered bytes B not; both comparisons made |
+| 7 | Expiry | PASS | `EEXPIRED the approval window has closed`, nothing sent |
+| 8 | Agent cannot approve, every channel | PASS | `EPERM` on request socket, `EACCES` on admin socket, `Permission denied` on the tool |
+| 9 | clawuser direct to the send destination | PASS | blocked while a sink was demonstrably listening |
+| 9a | Same, after the shipped refresh | PASS | identical results post-refresh |
+| 9b | Co-hosted worst case, smtp.gmail.com | PASS | 465, 587, 25 all ETIMEDOUT |
+| 10 | Credential unreadable by the agent | PASS | `Permission denied`, control readable |
+| 11 | Root-only file as attachment | PASS | `permission denied: /etc/shadow`, refused before staging |
+| 12 | Broker down | PASS | fails loud, draft preserved, no fall-through |
+| 13 | Credential value appears nowhere | PASS | 0 in receipts, records, journal, process listing; control finds it in the credential file |
+| 14 | After distro restart | PASS | rules, services and socket modes returned; 9 and 10 re-run and hold |
+| - | Tripwire negative control | PASS | fires on a widened accept, clean again after restore |
+| - | Real agent turn | see section 5.4 | |
+
+### 5.2 The staging test, verbatim. The most important result in this job.
+
+```
+############ TEST 6: THE STAGING TEST (rewrite attachment after approval) ############
+-- attachment currently:
+ATTACHMENT-VERSION-A
+   sha256(A)=cf2e7ea874cc89e9e455d328dba3cd6b7ea1ccd1eea4441481b1702600a2bb62
+-- rewriting the file on disk AS THE AGENT, after the request was made
+   sha256(B)=badfdfcaa9f8a41ae39ace7f52c7cd7c2c6ac51b541c0c91289ecb201c3eee47
+-- approving request 2026-08-03T15-03-55-445Z-225ef4b8
+{"ok":true,"status":"sent","requestId":"2026-08-03T15-03-55-445Z-225ef4b8","reference":"250 2.0.0 Ok: queued as SINK1"}
+-- what actually arrived at the sink:
+   arrived attachment sha256 + content: cf2e7ea874cc89e9e455d328dba3cd6b7ea1ccd1eea4441481b1702600a2bb62 "ATTACHMENT-VERSION-A\n"
+PASS  T6 the APPROVED bytes (A) were transmitted
+PASS  T6 the TAMPERED bytes (B) were NOT transmitted
+```
+
+Both comparisons are made and both are reported. A pass on one alone would not have
+been a pass.
+
+### 5.3 Test 3 scope, stated precisely
+
+Test 3 was executed against a **local SMTP sink on 127.0.0.1:2525**, over a real SMTP
+session including STARTTLS, AUTH, MAIL, RCPT and DATA. What is proven is that the broker
+transmits the staged bytes and records the provider reference. What is **not** proven is
+delivery to an external mailbox, because no live third-party SMTP credential was placed
+on this box. That half of test 3 is UNTESTED, not passed.
+
+Two harness accommodations were required, and both are the product refusing correctly
+rather than the test finding a defect:
+
+1. The broker refuses cleartext submission, so the sink was given STARTTLS.
+2. The broker refuses an untrusted certificate, so the sink's self-signed certificate was
+   trusted for the broker process only, via a temporary systemd drop-in carrying
+   `NODE_EXTRA_CA_CERTS`. **Removed at teardown**, verified: `Environment=` empty.
+
+No product code was relaxed to accommodate the instrument.
+
+### 5.4 Agent-cannot-approve, verbatim
+
+```
+-- channel A: approve op on the REQUEST socket
+   reply: {"ok":false,"code":"EPERM","error":"approve is not available on the request channel"}
+-- channel B: connect to the APPROVAL socket directly
+   error: EACCES
+-- channel C: execute the control tool
+   /bin/bash: /usr/local/sbin/clawfactory-sendctl: Permission denied
+-- CONTROL (must succeed): the same approve as ROOT is possible
+PASS  T8 control: root can reach the admin channel
+```
+
+### 5.5 Network block, verbatim, with controls
+
+```
+   CONTROL A, MUST CONNECT: allowlisted host on 443
+      curl rc=0    node api.anthropic.com:443 => CONNECTED
+   CONTROL B, MUST FAIL: non-allowlisted host on 443
+      curl rc=28   node example.com:443 => ERROR (ETIMEDOUT)
+   SUBJECT T9: the CONFIGURED send destination, bypassing the broker
+      curl rc=28   node 127.0.0.1:2525 => TIMEOUT
+   SUBJECT T9b: co-hosted worst case, smtp.gmail.com
+      curl rc=28   node smtp.gmail.com:465 => ERROR (ETIMEDOUT)
+      curl rc=28   node smtp.gmail.com:587 => ERROR (ETIMEDOUT)
+      curl rc=28   node smtp.gmail.com:25  => ERROR (ETIMEDOUT)
+   ROOT reference, MUST CONNECT
+      node smtp.gmail.com:587 => CONNECTED (banner "220 smtp.gmail.com ESMTP a92af10")
+```
+
+T9 is stronger than a bare timeout: a sink was listening on 127.0.0.1:2525 throughout,
+and root connected to it in the same run and received its banner. The block is a block,
+not an empty port.
+
+Per the consolidated addendum section 7, T9b blocks because 465, 587 and 25 are never
+accepted for uid 1000 at any destination, not because Gmail's addresses are absent from
+the allowlist. The co-hosted residual is therefore scoped rather than open, and the
+port-scoping basis of the claim is measured rather than assumed.
+
+### 5.6 Tripwire, including its negative control
+
+```
+-- normal run (expect OK, rc=0):
+[fw-assert] chain shape OK (uid-scoped, allowlist accept is 443-only, SMTP dropped explicitly, terminal drop present)
+   rc=0
+-- NEGATIVE CONTROL: widen the accept to 465 and confirm the tripwire FIRES
+[fw-assert] FAIL: allowlist accept is no longer scoped to tcp dport 443: ip daddr @allowed_ipv4 tcp dport 465 accept
+[fw-assert] FAIL: an accept rule names an SMTP port
+   rc=1 (must be non-zero)
+-- restoring the chain from the persistent path
+   rc=0 (must be 0 again)
+-- ExecStartPost wiring is live on the refresh unit:
+   ExecStartPost={ path=/usr/local/sbin/clawfactory-fw-assert.sh ; ignore_errors=no ; ... }
+```
+
+### 5.7 Defects found by validation, and fixed in-session
+
+**Draft preservation was broken (fixed, `e767c8c`).** `clawfactory-send.js` resolved the
+drafts directory with `os.homedir()`, which prefers `$HOME`. Invoked through `setpriv`,
+`$HOME` still names the invoking account's home, so the draft was written to a directory
+the running uid cannot write and was silently lost, printing "The draft could NOT be
+preserved" at exactly the moment the user most needs their text kept. Now resolved from
+`os.userInfo()`, which goes to `getpwuid`. Re-tested:
+`Your draft was preserved at /home/clawuser/.clawfactory/drafts/...`, mode 600.
+
+**Two harness defects, corrected, listed so no reader mistakes them for product bugs.**
+`pkill -f smtp_sink.js` matched the wrapper shell whose own command line contained that
+string and killed the run, producing an empty evidence file. And test 13's first run
+grepped a live `ps` pipe, counting the grep's own command line as a hit and reporting a
+credential leak that did not exist. Both are the same family as L22.
 
 ---
 
