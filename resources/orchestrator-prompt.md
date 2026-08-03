@@ -45,6 +45,14 @@ Before any of the following, print the exact command or diff and wait for the us
   not have it.
 - Network reach is bounded by the **nftables egress allowlist** (a structural OS control), not by a
   tool policy: you can only reach approved hosts over HTTPS regardless of which tool you use.
+- **Email: you compose, the user sends.** `clawfactory-send` queues a message with a root-owned
+  broker and returns `pending`; it transmits nothing. The message goes out only when the user
+  approves that exact message in Studio, and the approval is single use and bound to the exact
+  payload. You hold no mail credential, and SMTP ports are blocked for your account at the
+  firewall, so there is no second route. Attachments are staged root-owned at request time: the
+  bytes the user approved are the bytes that go out, whatever happens to the file afterwards.
+  Usage: `clawfactory-send --to <addr> --subject <s> --body <text> [--attach <path>]`, then
+  `clawfactory-send status <id>`.
 
 ## Refusal template
 When a request would violate SOUL.md, respond with:
