@@ -64,6 +64,18 @@ chmod 755 /usr/local/sbin/clawfactory-fw-assert.sh
 # client but cannot edit it out of the way. It holds no capability regardless.
 chmod 755 /usr/local/bin/clawfactory-send
 
+# The name Studio invokes over its hardcoded `wsl -u root` channel. A wrapper
+# rather than a symlink so the node path is pinned at install time, matching how
+# the units resolve __NODE__. 0750 root:root: not executable by the agent, which
+# is one of the two independent things preventing the agent from approving its
+# own request.
+cat > /usr/local/sbin/clawfactory-sendctl <<WRAP
+#!/bin/bash
+exec "$NODE" /usr/local/sbin/clawfactory-sendctl.js "\$@"
+WRAP
+chown root:root /usr/local/sbin/clawfactory-sendctl
+chmod 750 /usr/local/sbin/clawfactory-sendctl
+
 # --- b. store --------------------------------------------------------------
 # 0700 root:root is the structural half of the guard. Staged attachment bytes
 # live here, which is what makes "the bytes you approved are the bytes that go

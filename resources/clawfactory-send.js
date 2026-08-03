@@ -22,7 +22,25 @@ const os = require('node:os');
 const path = require('node:path');
 
 const SOCKET = '/run/clawfactory/send.sock';
-const DRAFTS = path.join(os.homedir(), '.clawfactory', 'drafts');
+
+/**
+ * The REAL home of the account running this process.
+ *
+ * Deliberately not os.homedir(), which prefers $HOME. When this client is
+ * invoked through setpriv, or from any context that did not reset the
+ * environment, $HOME still names the INVOKING account's home, so a draft would
+ * be written to a directory this uid cannot write and silently lost. Validation
+ * caught exactly that. os.userInfo() goes to getpwuid and is correct regardless
+ * of the environment.
+ */
+function realHome() {
+  try {
+    return os.userInfo().homedir;
+  } catch {
+    return os.homedir();
+  }
+}
+const DRAFTS = path.join(realHome(), '.clawfactory', 'drafts');
 
 function usage() {
   process.stderr.write(
