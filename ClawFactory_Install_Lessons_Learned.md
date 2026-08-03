@@ -614,3 +614,42 @@ Confirmed with `bash -n`: LF ok, CRLF errors. Fixed by stripping carriage return
 3. **A latent bug in a rarely-reached multi-line cell hides behind a green aggregate.** Single-line commands
    survived CRLF, so the suite's "28/0" never exposed T4.5 until a run finally executed it. Trust a per-cell
    result you actually ran over a comfortable baseline count.
+
+## L22 -- the verifier channel can lie; an inline `wsl.exe -- bash -c` probe fabricates PASSES
+
+**Discovered:** Guard 2 Task 0 (2026-08-01/02). While confirming that uid 1000 has no route to SMTP, a
+probe run as `wsl.exe -u root -- bash -lc '<multi-line script>'` reported that clawuser had CONNECTED to
+`smtp.gmail.com` on both 465 and 587. That would have been a ship-blocking hole in the Guard 2 claim. It
+was false. The channel itself was corrupting the script and its results:
+
+- Whole `echo` lines silently vanished, and one header arrived truncated mid-word (`is bash? ---`).
+- `$?` returned `0` for a command that had just printed `Connection refused` on the line above.
+- Shell-function positional parameters expanded to empty, so `probe host port` ran `exec 3<>/dev/tcp//`
+  and printed `  : blocked`.
+- A `for ip in ...; do nft list ... | grep -q "$ip"; done` loop had `$ip` empty, making every iteration
+  `grep -q ""`, which matches any line. That produced three confident, entirely fabricated "PRESENT"
+  readings about firewall allowlist contents.
+
+MSYS path conversion was tested and **refuted** as the cause (`MSYS_NO_PATHCONV=1` changed nothing; the
+string arrives intact). The corruption is in the nested quoting and stream layer between the Bash tool,
+`wsl.exe`, and the inner shell. Same family as L20 and L21: the transport mangles the payload, and the
+result still looks like a clean measurement.
+
+The false SMTP result was caught only because the probe carried a **control that had to fail**: a
+non-allowlisted destination on 443 also reported success, which is impossible. Re-run through a
+file-based channel, the true result was unambiguous: allowlisted 443 connects, non-allowlisted 443
+times out, all three SMTP ports time out for clawuser, and root gets a real `220 smtp.gmail.com ESMTP`
+banner.
+
+**Rules:**
+1. **Never report a security result measured by an inline nested `wsl.exe -- bash -c`.** Write the probe
+   to a file, copy it in, strip CR, run it redirecting to a file, copy that file out, and read it. The
+   file-based channel is the only one that has held up.
+2. **Every block assertion carries a paired control that MUST fail in the same run.** A test whose
+   control does not fail is a void result, not a pass. Absent that control, this session would have
+   filed a false hole against a firewall that was working correctly.
+3. **A verifier that reports `0` is not evidence that the subject succeeded.** Prefer a positive artifact
+   that only a real success can produce: a protocol banner, a counter delta, a file that only the true
+   path writes. `rc=0` alone proved nothing here.
+4. **When a result contradicts a previously executed finding, suspect the harness before the system.**
+   Addendum A had recorded these ports as blocked by execution. The contradiction was the signal.
