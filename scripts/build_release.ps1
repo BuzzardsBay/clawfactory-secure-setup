@@ -30,6 +30,46 @@ if (-not (Test-Path $issPath)) {
     Fail "$issPath not found"
 }
 
+# --- Pre-build gate: the SOUL pin must be a build-time constant that MATCHES ---
+# setup.ps1 carries the expected SHA-256 of resources/safety-rules.md as a
+# literal, and refuses to install if the file on disk disagrees. That is what
+# makes the pin an integrity control rather than theatre: a pin computed from
+# the artefact it certifies certifies nothing.
+#
+# The literal therefore has to be kept honest at BUILD time, here, and drift has
+# to fail the build loudly rather than be auto-corrected -- silently rewriting it
+# would just move the self-certification one step earlier.
+$soulFile = Join-Path $RepoRoot "resources\safety-rules.md"
+if (-not (Test-Path $soulFile)) { Fail "resources/safety-rules.md not found" }
+$soulActual = (Get-FileHash -LiteralPath $soulFile -Algorithm SHA256).Hash.ToLower()
+$setupText  = Get-Content -Raw -LiteralPath (Join-Path $RepoRoot "setup.ps1")
+$m = [regex]::Match($setupText, "\$expectedSoulHash\s*=\s*'([a-f0-9]{64})'")
+if (-not $m.Success) {
+    Fail "setup.ps1 does not carry an `$expectedSoulHash literal. The SOUL pin must be baked in at build time."
+}
+$soulPinned = $m.Groups[1].Value
+if ($soulPinned -ne $soulActual) {
+    Fail ("SOUL pin drift: setup.ps1 pins $soulPinned but resources/safety-rules.md hashes to $soulActual. " +
+          "If the safety rules changed on purpose, update the `$expectedSoulHash literal in setup.ps1 to $soulActual and rebuild.")
+}
+Write-Host "SOUL pin OK: $soulPinned"
+
+# --- Pre-build gate: every preflight-required resource must be BUNDLED --------
+# The two halves of the bug that once shipped an installer with zero security
+# controls: Step-Preflight's required list and the .iss [Files] section drifted
+# apart, so the step existed and the file did not. Check the pairing here, where
+# it is cheap, instead of on a customer's machine.
+$reqMatch = [regex]::Match($setupText, "(?s)\$required\s*=\s*@\((.*?)\)")
+if (-not $reqMatch.Success) { Fail "could not read Step-Preflight's `$required list from setup.ps1" }
+$required = [regex]::Matches($reqMatch.Groups[1].Value, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value }
+$issText  = Get-Content -Raw -LiteralPath $issPath
+$notBundled = @($required | Where-Object { $issText -notmatch [regex]::Escape("resources\$_") })
+if ($notBundled.Count -gt 0) {
+    Fail ("These resources are required by Step-Preflight but are NOT in the .iss [Files] section: " +
+          ($notBundled -join ', ') + ". A build with this gap installs with missing security controls.")
+}
+Write-Host ("Bundle check OK: all {0} preflight resources are in [Files]." -f $required.Count)
+
 Write-Host "Compiling installer with Inno Setup..."
 & $IsccPath $issPath
 if ($LASTEXITCODE -ne 0) {

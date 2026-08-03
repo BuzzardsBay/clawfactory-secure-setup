@@ -846,3 +846,171 @@ function Restore-QuarantineItem {
     }
     return $res
 }
+
+#--- Send (v1 Guard 2: approval-gated email) ---------------------------------
+# The APPROVAL side of the send broker. Studio reaches it the same way every
+# other privileged operation here does: `wsl -u root` from the Windows side,
+# driven through the Electron IPC bridge.
+#
+# THE INVARIANT, AND IT IS PERMANENT: no send path may ever run as uid 1000.
+# The gateway runs as uid 1000, so it and the agent are one security principal;
+# a send capability placed there would be one the agent could reach directly.
+# Approval therefore never traverses the agent's socket, and these functions
+# never run as anything but root.
+#
+# The broker exposes two sockets. The agent can reach /run/clawfactory/send.sock
+# (enqueue and status only). Everything below speaks to
+# /run/clawfactory/send-admin.sock, which is 0600 root:root and which clawuser
+# cannot open at all.
+
+$script:CF_SendCtl = '/usr/local/sbin/clawfactory-sendctl'
+
+function Invoke-SendCtl {
+    # Run one sendctl subcommand as root and parse its single JSON line.
+    # Never used for credential-set: that path needs stdin, see Set-SendCredential.
+    param(
+        [Parameter(Mandatory)][string]$Command
+    )
+    $r = Invoke-ClawWslBash -User 'root' -Script "$script:CF_SendCtl $Command 2>/dev/null"
+    $out = $r.StdOut.Trim()
+    if (-not $out) {
+        $detail = $r.StdErr.Trim()
+        if (-not $detail) { $detail = "exit=$($r.ExitCode)" }
+        return [pscustomobject]@{ ok = $false; error = "send service did not respond ($detail)" }
+    }
+    try {
+        $line = ($out -split "`n" | Where-Object { $_.Trim() } | Select-Object -Last 1)
+        return ($line | ConvertFrom-Json)
+    } catch {
+        return [pscustomobject]@{ ok = $false; error = "unreadable send response: $($_.Exception.Message)" }
+    }
+}
+
+function Get-SendPending {
+    # Everything awaiting approval, with the FULL payload: every recipient, the
+    # subject, the body itself, and every attachment with name, size and the
+    # hash of the STAGED copy. The card renders this, never a model summary of
+    # it, because the thing being approved has to be the thing being shown.
+    return Invoke-SendCtl -Command 'list'
+}
+
+function Get-SendCredentialSummary {
+    # What is configured, never the secret. Not even masked: a mask still
+    # confirms length and prefix.
+    return Invoke-SendCtl -Command 'credential-summary'
+}
+
+function Approve-SendRequest {
+    # Approve one request and send it. Single use, bound to the payload hash.
+    param(
+        [Parameter(Mandatory)][string]$Id,
+        [string]$PayloadHash = ''
+    )
+    if ($Id -notmatch '^[A-Za-z0-9:.\-]+$') {
+        return [pscustomobject]@{ ok = $false; error = 'invalid send request id' }
+    }
+    if ($PayloadHash -and $PayloadHash -notmatch '^[a-f0-9]{64}$') {
+        return [pscustomobject]@{ ok = $false; error = 'invalid payload hash' }
+    }
+    $cmd = if ($PayloadHash) { "approve '$Id' '$PayloadHash'" } else { "approve '$Id'" }
+    $res = Invoke-SendCtl -Command $cmd
+    # Audit the decision, never the content. Recipients and body live in the
+    # root-owned receipt; duplicating them into a Windows-side log would put the
+    # payload somewhere the receipt discipline does not cover.
+    if ($res.ok) {
+        Write-GrantAudit -Event 'send.approved' -Data @{ id = $Id; reference = $res.reference }
+    } else {
+        Write-GrantAudit -Event 'send.approve_failed' -Data @{ id = $Id; code = $res.code; error = $res.error }
+    }
+    return $res
+}
+
+function Deny-SendRequest {
+    param(
+        [Parameter(Mandatory)][string]$Id
+    )
+    if ($Id -notmatch '^[A-Za-z0-9:.\-]+$') {
+        return [pscustomobject]@{ ok = $false; error = 'invalid send request id' }
+    }
+    $res = Invoke-SendCtl -Command "deny '$Id'"
+    if ($res.ok) {
+        Write-GrantAudit -Event 'send.denied' -Data @{ id = $Id }
+    } else {
+        Write-GrantAudit -Event 'send.deny_failed' -Data @{ id = $Id; error = $res.error }
+    }
+    return $res
+}
+
+function Set-SendCredential {
+    # Store the user's SMTP credential, and authorize that destination.
+    #
+    # THE CREDENTIAL GOES OVER STDIN, NEVER ON A COMMAND LINE. Every other
+    # function here builds a bash string and hands it to wsl.exe as an argument,
+    # which is fine for ids and hashes and fatal for a password: an argument is
+    # visible in `ps` to every account on the box, including clawuser, for the
+    # lifetime of the process. So this one path talks to the process directly
+    # and writes JSON to its standard input.
+    #
+    # It is also why nothing here logs the value, and why the broker returns only
+    # a summary rather than echoing it back.
+    param(
+        [Parameter(Mandatory)][string]$SmtpHost,
+        [Parameter(Mandatory)][int]$Port,
+        [Parameter(Mandatory)][string]$Username,
+        [Parameter(Mandatory)][string]$Password,
+        [Parameter(Mandatory)][string]$From
+    )
+    $payload = [ordered]@{
+        host     = $SmtpHost
+        port     = $Port
+        username = $Username
+        password = $Password
+        from     = $From
+    } | ConvertTo-Json -Compress
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName               = 'wsl.exe'
+    $psi.Arguments              = "-d $script:CF_WslDistro -u root -- $script:CF_SendCtl credential-set"
+    $psi.RedirectStandardInput  = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError  = $true
+    $psi.UseShellExecute        = $false
+    $psi.CreateNoWindow         = $true
+    $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+    $psi.StandardErrorEncoding  = [System.Text.Encoding]::UTF8
+
+    try {
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $proc.StandardInput.Write($payload)
+        $proc.StandardInput.Close()
+        $out = $proc.StandardOutput.ReadToEnd()
+        $err = $proc.StandardError.ReadToEnd()
+        $proc.WaitForExit()
+    } catch {
+        return [pscustomobject]@{ ok = $false; error = "could not reach the send service: $($_.Exception.Message)" }
+    } finally {
+        # Drop the plaintext as soon as the write is done. This does not defeat a
+        # memory scrape and is not claimed to; it shortens the window.
+        $payload = $null
+        [System.GC]::Collect()
+    }
+
+    $line = ($out -split "`n" | Where-Object { $_.Trim() } | Select-Object -Last 1)
+    if (-not $line) {
+        $detail = $err.Trim(); if (-not $detail) { $detail = "exit=$($proc.ExitCode)" }
+        return [pscustomobject]@{ ok = $false; error = "send service did not respond ($detail)" }
+    }
+    try {
+        $res = $line | ConvertFrom-Json
+    } catch {
+        return [pscustomobject]@{ ok = $false; error = 'unreadable send response' }
+    }
+    # Host and port only. The username is not audited either: it is half a
+    # credential and the summary endpoint already shows it on demand.
+    if ($res.ok) {
+        Write-GrantAudit -Event 'send.credential_set' -Data @{ host = $SmtpHost; port = $Port }
+    } else {
+        Write-GrantAudit -Event 'send.credential_set_failed' -Data @{ host = $SmtpHost; port = $Port; error = $res.error }
+    }
+    return $res
+}

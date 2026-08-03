@@ -663,7 +663,11 @@ function Step-Preflight {
         'quarantine-lib.js', 'clawfactory-quarantined.js', 'clawfactory-quarantinectl.js',
         'clawfactory-quarantine-rm.js', 'clawfactory-quarantine.service',
         'clawfactory-quarantine-gc.service', 'clawfactory-quarantine-gc.timer',
-        'install-quarantine.sh'
+        'install-quarantine.sh',
+        'send-lib.js', 'send-smtp.js', 'clawfactory-sendd.js', 'clawfactory-sendctl.js',
+        'clawfactory-send.js', 'clawfactory-send.service', 'clawfactory-send-gc.service',
+        'clawfactory-send-gc.timer', 'clawfactory-fw-assert.sh', 'egress-policy.json',
+        'install-send.sh'
     )
     $resDir  = Join-Path $PSScriptRoot 'resources'
     $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $resDir $_)) })
@@ -2360,8 +2364,27 @@ function Step-ApplySafetyRules {
     $soulSrc     = Join-Path $resourceDir 'safety-rules.md'
     if (-not (Test-Path $soulSrc)) { throw "Missing resources/safety-rules.md at $soulSrc" }
 
+    # THE PIN IS A BUILD-TIME CONSTANT, NOT AN INSTALL-TIME SELF-HASH.
+    #
+    # This used to read $soulHash = (Get-FileHash $soulSrc), i.e. it hashed
+    # whatever safety-rules.md happened to be sitting in {app}esources at
+    # install time and pinned THAT. A pin computed from the artefact it is meant
+    # to certify certifies nothing: swap the file after the installer is built
+    # and it installs cleanly, with the launch gate then faithfully enforcing the
+    # attacker's version of the safety rules.
+    #
+    # So the expected digest is a literal baked in from the repo copy at BUILD
+    # time (scripts/build_release.ps1 fails the build if this constant and the
+    # file disagree). Install compares and REFUSES on mismatch rather than
+    # adopting what it finds.
+    $expectedSoulHash = '8f5531a36e46af8143ffe59ae4112a83a28b3513c473562578ee81c408c07eb6'
     $soulHash = (Get-FileHash -LiteralPath $soulSrc -Algorithm SHA256).Hash.ToLower()
-    Write-Log INFO "SOUL.md SHA-256 = $soulHash"
+    if ($soulHash -ne $expectedSoulHash) {
+        throw ("resources/safety-rules.md does not match the digest this installer was built with. " +
+               "Expected $expectedSoulHash but found $soulHash. The safety rules have been altered since " +
+               "the build was signed. Refusing to install rather than pinning an unknown file.")
+    }
+    Write-Log INFO "SOUL.md SHA-256 = $soulHash (matches the build-time pin)"
 
     $soulB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($soulSrc))
     # Defect 2 / Layer 1: SOUL.md must be tamper-proof against the agent's own
@@ -2454,6 +2477,60 @@ rm -f /tmp/freeze-injected-soul.sh
     $rc = Invoke-WslBash -Script $drop -User 'root'
     if ($rc -ne 0) { Write-Log WARN "Step-FreezeInjectedSoul returned $rc; the injected safety rules may not be frozen. Verify ~/.openclaw/workspace/SOUL.md and re-run setup.ps1 -Resume." }
     Save-Checkpoint 'FreezeInjectedSoul'
+}
+
+function Step-InstallSend {
+    # v1 Guard 2: approval-gated email. Unlike Guard 1, BOTH halves are
+    # structural, and the close-out says so in these terms:
+    #
+    #   The agent can compose. It cannot send. There is no send capability at
+    #   uid 1000 at all: no credential, no transport, no socket that executes.
+    #   The only sender is a root process the agent cannot modify, reachable for
+    #   ENQUEUE only over a 0660 root:clawuser socket. Approval arrives on a
+    #   separate 0600 root:root socket the agent cannot open.
+    #
+    # THE INVARIANT IS PERMANENT: no send path may ever run as uid 1000. The
+    # gateway runs as uid 1000, so it and the agent are one security principal;
+    # a gate placed there is a code path the agent routes around, not a boundary.
+    #
+    # This step adds NO firewall accept and NO exemption. The broker reaches SMTP
+    # because the egress chain returns early for every uid that is not the agent.
+    # install-send.sh only makes that property legible (an explicit SMTP drop in
+    # /etc/nftables.conf) and adds a read-only tripwire on the refresh cycle.
+    Write-Log INFO 'Step 15f [Guard 2]: Installing the approval-gated send broker (root-owned SMTP, no send at uid 1000).'
+    $resourceDir = Join-Path $PSScriptRoot 'resources'
+    $lfB64 = { param($p) [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(([IO.File]::ReadAllText($p)).Replace("`r`n","`n").Replace("`r","`n"))) }
+    $sLibB64  = & $lfB64 (Join-Path $resourceDir 'send-lib.js')
+    $sSmtpB64 = & $lfB64 (Join-Path $resourceDir 'send-smtp.js')
+    $sDmnB64  = & $lfB64 (Join-Path $resourceDir 'clawfactory-sendd.js')
+    $sCtlB64  = & $lfB64 (Join-Path $resourceDir 'clawfactory-sendctl.js')
+    $sCliB64  = & $lfB64 (Join-Path $resourceDir 'clawfactory-send.js')
+    $sAsrtB64 = & $lfB64 (Join-Path $resourceDir 'clawfactory-fw-assert.sh')
+    $sSvcB64  = & $lfB64 (Join-Path $resourceDir 'clawfactory-send.service')
+    $sGcSvB64 = & $lfB64 (Join-Path $resourceDir 'clawfactory-send-gc.service')
+    $sGcTmB64 = & $lfB64 (Join-Path $resourceDir 'clawfactory-send-gc.timer')
+    $sPolB64  = & $lfB64 (Join-Path $resourceDir 'egress-policy.json')
+    $sInstB64 = & $lfB64 (Join-Path $resourceDir 'install-send.sh')
+    $drop = @"
+set -e
+mkdir -p /usr/local/lib/clawfactory /usr/local/sbin /usr/local/bin
+echo '$sLibB64'  | base64 -d > /usr/local/lib/clawfactory/send-lib.js
+echo '$sSmtpB64' | base64 -d > /usr/local/lib/clawfactory/send-smtp.js
+echo '$sDmnB64'  | base64 -d > /usr/local/sbin/clawfactory-sendd.js
+echo '$sCtlB64'  | base64 -d > /usr/local/sbin/clawfactory-sendctl.js
+echo '$sAsrtB64' | base64 -d > /usr/local/sbin/clawfactory-fw-assert.sh
+echo '$sCliB64'  | base64 -d > /usr/local/bin/clawfactory-send
+echo '$sSvcB64'  | base64 -d > /tmp/clawfactory-send.service
+echo '$sGcSvB64' | base64 -d > /tmp/clawfactory-send-gc.service
+echo '$sGcTmB64' | base64 -d > /tmp/clawfactory-send-gc.timer
+echo '$sPolB64'  | base64 -d > /tmp/egress-policy.json
+echo '$sInstB64' | base64 -d > /tmp/install-send.sh
+bash /tmp/install-send.sh
+rm -f /tmp/install-send.sh
+"@
+    $rc = Invoke-WslBash -Script $drop -User 'root'
+    if ($rc -ne 0) { throw 'Failed to install the approval-gated send broker (Guard 2). Refusing to finish: the product would claim that email needs your approval while the mechanism that enforces it is absent.' }
+    Save-Checkpoint 'InstallSend'
 }
 
 function Step-InstallQuarantine {
@@ -3023,6 +3100,7 @@ Invoke-WithRollback {
     Step-InstallTurnGate         # Defect 3: gated openclaw shim (SOUL + spend on every turn, all callers)
     Step-FreezeInjectedSoul      # Defect 4: deliver + freeze the factory safety rules into the injected SOUL
     Step-InstallQuarantine       # Guard 1: recoverable deletes. Before the proxy step, whose gateway restart picks up pathPrepend
+    Step-InstallSend             # Guard 2: approval-gated email. After the firewall steps: it asserts the live chain shape and refuses if it has drifted
     Step-InstallChatProxy        # Blocker 1: gate ClawChat's HTTP path; real gateway -> private 8788
 }
 

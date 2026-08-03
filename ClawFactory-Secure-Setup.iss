@@ -91,6 +91,22 @@ Source: "resources\clawfactory-quarantine.service";    DestDir: "{app}\resources
 Source: "resources\clawfactory-quarantine-gc.service"; DestDir: "{app}\resources"; Flags: ignoreversion
 Source: "resources\clawfactory-quarantine-gc.timer";   DestDir: "{app}\resources"; Flags: ignoreversion
 Source: "resources\install-quarantine.sh";             DestDir: "{app}\resources"; Flags: ignoreversion
+; --- v1 Guard 2: approval-gated send (email leaves only with your approval).
+; Step-InstallSend streams all eleven into WSL; Step-Preflight refuses to install
+; without them. This pairing is the two halves of the bug that once shipped an
+; installer with zero security controls: a step was added, the [Files] entry was
+; not, and a fresh install aborted with no guards in place. Add both or neither.
+Source: "resources\send-lib.js";                        DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\send-smtp.js";                       DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\clawfactory-sendd.js";               DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\clawfactory-sendctl.js";             DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\clawfactory-send.js";                DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\clawfactory-send.service";           DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\clawfactory-send-gc.service";        DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\clawfactory-send-gc.timer";          DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\clawfactory-fw-assert.sh";           DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\egress-policy.json";                 DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\install-send.sh";                    DestDir: "{app}\resources"; Flags: ignoreversion
 ; --- v1.1.0 (JOB 3B): embedded ClawFactory Studio (the visual workbench) --------
 ; The SIGNED per-user Studio installer (~100 MB), sourced from the Studio repo's
 ; release dir at build time (gitignored, verified by sha256 before compile). It is
