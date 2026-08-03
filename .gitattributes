@@ -14,6 +14,18 @@ resources/clawfactory-quarantine-rm.js text eol=lf
 resources/clawfactory-quarantine.service    text eol=lf
 resources/clawfactory-quarantine-gc.service text eol=lf
 resources/clawfactory-quarantine-gc.timer   text eol=lf
+# v1 Guard 2. clawfactory-send.js is installed as /usr/local/bin/clawfactory-send and
+# clawfactory-sendd.js / clawfactory-sendctl.js run from their shebangs, so a trailing
+# CR is fatal rather than untidy. install-send.sh CR-strips at runtime as well.
+resources/send-lib.js                  text eol=lf
+resources/send-smtp.js                 text eol=lf
+resources/clawfactory-sendd.js         text eol=lf
+resources/clawfactory-sendctl.js       text eol=lf
+resources/clawfactory-send.js          text eol=lf
+resources/clawfactory-send.service     text eol=lf
+resources/clawfactory-send-gc.service  text eol=lf
+resources/clawfactory-send-gc.timer    text eol=lf
+resources/egress-policy.json           text eol=lf
 
 # v1.1.0 (JOB 3B): structural defense-in-depth so no future multi-line bash carried
 # into WSL from a .ps1 (e.g. a probe's Wsl helper, the adversarial suite) can regress

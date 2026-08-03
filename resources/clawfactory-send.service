@@ -1,0 +1,30 @@
+[Unit]
+# ClawFactory approval-gated send broker (v1 Guard 2). Owns two unix sockets:
+#   /run/clawfactory/send.sock        0660 root:clawuser  request channel
+#   /run/clawfactory/send-admin.sock  0600 root:root      approval channel
+#
+# Runs as ROOT deliberately, and this is the whole design rather than a
+# convenience. The gateway runs as uid 1000 and therefore may NEVER hold a send
+# capability: it and the agent are one security principal, so a gate placed
+# there is a code path the agent routes around. Putting the credential and the
+# transport in a root process the agent cannot modify is what makes approval a
+# boundary instead of a suggestion.
+#
+# The broker refuses to read any attachment the CALLING account could not have
+# read itself. It does not merely check, it performs the read at the agent uid
+# via setpriv, so it can never become a root-read primitive. See the header of
+# clawfactory-sendd.js.
+Description=ClawFactory approval-gated send broker (root-owned SMTP, no send at uid 1000)
+After=local-fs.target network-online.target
+
+[Service]
+Type=simple
+# /run is tmpfs: systemd recreates the socket directory on every boot.
+RuntimeDirectory=clawfactory
+RuntimeDirectoryMode=0755
+ExecStart=__NODE__ /usr/local/sbin/clawfactory-sendd.js
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

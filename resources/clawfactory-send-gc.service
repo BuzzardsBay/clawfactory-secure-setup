@@ -1,0 +1,14 @@
+[Unit]
+# Expiry and staging cleanup for the approval-gated send broker.
+#
+# Two jobs, both fail-closed. It expires pending requests whose approval window
+# has closed (default 10 minutes, /etc/clawfactory/send.json), purging their
+# staged attachments; and it removes orphaned staging directories that have no
+# pending record at all. An expired request can never be approved afterwards:
+# the broker re-checks expiry under the store lock immediately before it opens
+# any connection, so this timer is cleanup, never the enforcement itself.
+Description=ClawFactory send approval expiry and staging cleanup
+
+[Service]
+Type=oneshot
+ExecStart=__NODE__ /usr/local/sbin/clawfactory-sendctl.js gc

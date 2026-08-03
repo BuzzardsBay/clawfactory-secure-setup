@@ -1,0 +1,34 @@
+{
+  "_comment": [
+    "ClawFactory egress policy. Root-owned, /etc/clawfactory/egress-policy.json, root:root 0644.",
+    "",
+    "TWO SECTIONS.",
+    "  read_fetch   -- research destinations the agent may fetch from. Carried here so that",
+    "                  Guard 3 becomes a day of config plus UI rather than a second full guard.",
+    "                  NOTHING IN v1 ENFORCES THIS SECTION. It is declarative only. Do not",
+    "                  describe it as a control until Guard 3 wires it up.",
+    "  send_actions -- approval-gated destinations. Guard 2 DOES enforce this section.",
+    "",
+    "send_actions IS EMPTY BY DEFAULT AND THAT IS THE FAIL-CLOSED STATE. No destination is",
+    "permitted until the user configures SMTP in Studio, which is the act that authorizes",
+    "exactly one host and port. A fresh install can enqueue nothing and send nothing.",
+    "",
+    "HOW send_actions IS ENFORCED, stated precisely because the wrong description is easy to",
+    "write and hard to unwrite. The send broker reads this file and refuses any destination",
+    "not listed here. That is BROKER-ENFORCED, in root-owned code reading a root-owned file.",
+    "It is NOT firewall-enforced. The nft chain begins `meta skuid != 1000 return`, which",
+    "leaves every non-1000 uid unfiltered by construction, so the broker's ability to reach",
+    "SMTP is emergent rather than granted. There is no firewall exemption for the broker and",
+    "none should ever be added.",
+    "",
+    "It remains structural with respect to the AGENT, because the agent cannot modify",
+    "root-owned code or this file. Matching is exact on host and port. No wildcards: a",
+    "wildcard in a send destination is an exfiltration channel with a friendly name."
+  ],
+  "version": 1,
+  "read_fetch": {
+    "_note": "Declarative only in v1. Guard 3 consumes this; nothing enforces it today.",
+    "allow": []
+  },
+  "send_actions": []
+}

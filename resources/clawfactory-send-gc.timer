@@ -1,0 +1,19 @@
+[Unit]
+Description=ClawFactory send approval expiry and staging cleanup (every 2 minutes)
+
+[Timer]
+# Frequent on purpose. The approval window is minutes, not days, so a daily
+# sweep would leave approved-but-unexecuted staging on disk far longer than the
+# window it belongs to. Cheap: the sweep reads a directory that is normally
+# empty.
+#
+# Enforcement does NOT depend on this timer. The broker re-checks expiry under
+# the store lock immediately before opening a connection, so a request cannot be
+# approved late even if this unit never runs. The timer bounds how long staged
+# bytes sit on disk, which is a different promise.
+OnBootSec=2min
+OnUnitActiveSec=2min
+Unit=clawfactory-send-gc.service
+
+[Install]
+WantedBy=timers.target
