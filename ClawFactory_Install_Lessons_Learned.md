@@ -653,3 +653,48 @@ banner.
    path writes. `rc=0` alone proved nothing here.
 4. **When a result contradicts a previously executed finding, suspect the harness before the system.**
    Addendum A had recorded these ports as blocked by execution. The contradiction was the signal.
+
+## L23 -- `$HOME` does not follow a privilege drop; derive the home directory from the uid
+
+**Discovered:** Guard 2 validation, test 12 (2026-08-03). `clawfactory-send.js` preserves the user's
+draft when the broker is unreachable, writing it under `os.homedir()`. Run through
+`setpriv --reuid=1000`, it wrote nothing and reported "The draft could NOT be preserved" -- at
+exactly the moment a user most needs their text kept.
+
+Root cause: `setpriv` changes the credentials, **not the environment**. `$HOME` still names the
+INVOKING account's home, and Node's `os.homedir()` prefers `$HOME` over the passwd database. So a
+process running as uid 1000 tried to write into `/root`, got EACCES, and lost the data. The same
+trap hit the validation harness twice in the same session: a probe reading
+`~/.openclaw/auth-profiles.json` under `setpriv` silently read `/root/.openclaw` and reported the
+file ABSENT, and an `openclaw agents list` probe read the wrong profile entirely.
+
+`os.userInfo().homedir` goes to `getpwuid` and is correct regardless of the environment.
+
+**This is a CLASS, so both guards were audited.** Every dropped-privilege context in
+`resources/` was checked for `os.homedir()`, `$HOME`, and tilde expansion:
+
+| Site | Verdict |
+| --- | --- |
+| `clawfactory-send.js` draft path | **WAS THE BUG.** Fixed to `os.userInfo().homedir`. |
+| `clawfactory-quarantined.js` (`setpriv` for `test`) | CLEAN. No path is home-derived. |
+| `clawfactory-quarantinectl.js` restore | CLEAN. Writes to the recorded absolute `originalPath` and chowns by account NAME. |
+| `clawfactory-sendd.js` (`setpriv` for `test -r` and `cat`) | CLEAN. Caller-supplied absolute paths only. |
+| `install-quarantine.sh`, `install-send.sh` `setpriv` probes | CLEAN. Socket pings, no file writes. |
+| `clawfactory-turn-gate.sh` | CLEAN. Hardcodes `/home/clawuser/.openclaw/SOUL.md`; the `~/` occurrences are in comments only. |
+| `setup.ps1` running the vendored `openclaw-install.sh` as root | CLEAN, and it is the model to copy: it sets `HOME=/home/clawuser USER=clawuser LOGNAME=clawuser` explicitly. |
+
+Guard 1 does **not** carry the defect. That is a measured result, not an assumption.
+
+**Rules:**
+1. **A privilege drop is not a login.** `setpriv`, `runuser -u` without `-l`, and `su` without `-`
+   all leave `$HOME`, `$USER` and `$LOGNAME` pointing at the caller. Either set them explicitly, as
+   `setup.ps1` does, or never read them.
+2. **In Node, prefer `os.userInfo().homedir` to `os.homedir()`** in anything that might run under a
+   dropped privilege. The former asks the system who this uid is; the latter asks the environment,
+   which is attacker- or caller-influenced.
+3. **This failure mode is silent and it destroys data.** The write fails, the fallback returns null,
+   and the only symptom is a message saying the thing did not happen. Any code path that preserves
+   user data on an error path needs a test that actually runs it under the target uid.
+4. **Audit the class, not the instance.** The same drop pattern is used by both guards and by both
+   installers. One grep across every `setpriv` call site took minutes and converted "probably fine"
+   into a table.

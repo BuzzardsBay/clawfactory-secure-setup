@@ -623,6 +623,301 @@ not inferred.
 
 ---
 
+### 5.9 Post-Studio, post-installer re-run of tests 8, 9, 10 and 13
+
+The earlier results were measured against a build with no approval UI in it and
+no installer placement, which is a smaller surface than what ships. Section 3.7
+added a new path into the approval channel and section 3.8 changed how
+everything is placed on disk, so all four were re-run against the shipped
+layout. **Every result is identical**, and test 8 is now stronger because two
+further channels were added.
+
+| Test | Pre-Studio | Post-Studio | Same? |
+| --- | --- | --- | --- |
+| 8 channel A, approve op on request socket | `EPERM` | `EPERM` | yes |
+| 8 channel B, connect to approval socket | `EACCES` | `EACCES` | yes |
+| 8 channel C, execute the ctl `.js` | `Permission denied` | `EACCES` on open | yes |
+| 8 channel D, the wrapper Studio calls | not present | `Permission denied` | new, refused |
+| 8 channel E, `node <ctl>` bypassing the exec bit | not tested | `EACCES` on open | new, refused |
+| 9 clawuser to SMTP 587/465/25 | ETIMEDOUT | ETIMEDOUT | yes |
+| 10 credential readable by agent | denied | denied | yes |
+| 13 credential in logs/records/ps | 0 | 0 | yes |
+
+Channel E is the interesting addition. Invoking the tool through `node` to
+sidestep the execute bit still fails, because 0750 root:root denies the agent
+the **read** as well. The refusal does not depend on the exec bit alone.
+
+Verbatim, post-Studio:
+
+```
+-- channel D: execute the WRAPPER that Studio calls (new since the last run)
+   /bin/bash: /usr/local/sbin/clawfactory-sendctl: Permission denied
+-- channel E: run it through node explicitly, bypassing the exec bit
+   Error: EACCES: permission denied, open '/usr/local/sbin/clawfactory-sendctl.js'
+-- CONTROL (must succeed): root can reach the admin channel
+PASS  T8 control: root reaches the admin channel
+```
+
+On-disk placement produced by the shipped installer:
+
+```
+-rwxr-xr-x root root  /usr/local/bin/clawfactory-send
+-rw-r--r-- root root  /usr/local/lib/clawfactory/send-lib.js
+-rwxr-x--- root root  /usr/local/sbin/clawfactory-sendctl        (the wrapper)
+-rwxr-x--- root root  /usr/local/sbin/clawfactory-sendctl.js
+-rwxr-xr-x root root  /usr/local/sbin/clawfactory-sendd.js
+srw------- root root      /run/clawfactory/send-admin.sock
+srw-rw---- root clawuser  /run/clawfactory/send.sock
+-r--r--r-- root root  /etc/clawfactory/send.json
+-rw------- root root  /etc/clawfactory/send-credential.json
+```
+
+### 5.10 Two structural properties found incidentally, now tested deliberately
+
+Both were first met as harness friction, and both are real properties of the
+shipped code rather than instrument notes. Each was re-run as its own test with
+the accommodation removed.
+
+**Property A: the broker refuses cleartext submission.** A credential is at
+stake, so the fail-closed rule applies to transport too. Against a server
+offering no STARTTLS:
+
+```
+{"ok":false,"code":"ESMTP","error":"127.0.0.1:2525 does not offer STARTTLS; refusing to submit in cleartext"}
+```
+
+**Property B: the broker refuses an untrusted certificate.** Against the same
+STARTTLS sink with its self-signed certificate and **no** test CA trusted:
+
+```
+-- confirming NO test-CA drop-in is in place for this test:
+   ls: cannot access '/etc/systemd/system/clawfactory-send.service.d/': No such file or directory
+   Environment=
+{"ok":false,"code":"ESMTP","error":"self-signed certificate; if the root CA is installed locally, try running Node.js with --use-system-ca"}
+-- messages that arrived at the sink (must be 0):
+   0
+```
+
+Nothing was transmitted in either case. Both failures are recorded in the
+receipt as `outcome: smtp_error` with no retry, per the fail-closed table.
+
+**Final teardown confirmation, after all installer work** (installer changes can
+reintroduce a drop-in, so this is checked last):
+
+```
+ls: cannot access '/etc/systemd/system/clawfactory-send.service.d/': No such file or directory
+Environment=
+clawfactory-send.service: active
+```
+
+---
+
 ## 6. End-of-session gate
 
-TO BE COMPLETED.
+### 6.1 Task 0 prerequisite verification
+
+Complete, section 1. State re-established by execution, hazard sweep clean,
+five cheap re-confirmations all passing, comprehension gate answered.
+
+### 6.2 What was built, file by file
+
+Sections 4 and 4.3 above, plus:
+
+**Studio** (`ClawFactory-Studio`, commit `14b6422`): `desktop/src/send-engine.ts`,
+`desktop/src/send-ipc.ts`, `frontend/src/pages/send/ApprovalsPage.tsx`,
+`frontend/src/pages/send/SmtpSetupPage.tsx`, and edits to `grants-engine.ts`
+(new `invokeEngineWithInput`), `preload.ts`, `main.ts`, `api/client.ts`,
+`App.tsx`. Typecheck and build both clean.
+
+**Installer** (`ab180d4`): `Step-InstallSend` in `setup.ps1`, eleven entries in
+`Step-Preflight`'s required list, eleven matching `.iss` `[Files]` entries, two
+new pre-build gates in `scripts/build_release.ps1`, and the send approval API in
+`resources/clawfactory-grants.ps1`.
+
+### 6.3 Structural versus advisory, with every known bypass named
+
+**Structural, and these are the load-bearing claims:**
+
+- **No send capability at uid 1000.** No credential, no transport, no socket
+  that executes. The agent-facing client contains no SMTP code at all: delete
+  the broker and it cannot send by any means.
+- **The agent cannot approve.** Five channels tested, all refused. Two
+  independent mechanisms, either sufficient alone: 0750 root:root on the control
+  tool (denying read as well as exec) and 0600 root:root on the admin socket.
+- **Approved bytes are the sent bytes.** Attachments are staged root-owned at
+  request time, and the read is performed AS THE AGENT via `setpriv`, so the
+  check and the copy are one operation with no swap window.
+- **Single use, hash-bound.** Any change to destination, any recipient field,
+  subject, body, or any attachment name, size or content voids the approval.
+- **No route to SMTP for uid 1000**, at any destination, including loopback.
+- **The credential is unreadable by the agent** and never appears in argv,
+  logs, receipts or errors.
+- **Transport refuses cleartext and refuses an untrusted certificate.**
+
+**Broker-enforced, NOT firewall-enforced, and it must always be described that
+way:** destination scoping. The broker reads a root-owned policy file and
+refuses anything not listed. The nft chain begins `meta skuid != 1000 return`,
+which leaves every non-1000 uid unfiltered by construction, so the broker's
+reach is emergent rather than granted. **There is no port-scoped exemption for
+the broker. No such rule exists and none should ever be added.** It remains
+structural with respect to the agent, because the agent cannot modify
+root-owned code or a root-owned file.
+
+**Known bypasses and residuals, named:**
+
+1. **The agent can exfiltrate to the model provider.** The gateway runs as uid
+   1000 and holds the provider credential; anything the agent can read can leave
+   over the allowlisted 443 route, authenticated with the user's own key. No v1
+   guard touches this. Card #197.
+2. **Full-path `.mjs` / direct execution (Door 2).** The agent and gateway share
+   a uid, so the agent can run code as the gateway. It gains nothing toward
+   sending email, because there is no send capability at that uid to reach, but
+   it remains the standing v1 structural residual.
+3. **Co-hosted addresses re-open 443, never an SMTP port.** Scoped residual,
+   measured in test 9b rather than assumed.
+4. **Allowlisted addresses persist up to six hours** after a host is removed
+   from source. Bounded by the set's 6h timeout. Card #194.
+5. **Nothing enforces `read_fetch`.** That section of the policy file is
+   declarative only in v1 and must not be described as a control until Guard 3
+   wires it up.
+6. **A user who approves without reading is not protected.** The card shows the
+   payload rather than a summary, which is the most the mechanism can do.
+
+### 6.4 The honest claim, written for customer copy
+
+> Your agent can write an email. It cannot send one. Every message waits for
+> you, and approving it sends exactly that message, once.
+
+And the boundary, which must accompany it wherever the mechanism is described:
+
+> This covers email. It is not a claim that no data can leave your machine: your
+> agent talks to a hosted AI model, and anything it can read it can send there.
+
+**The sentence this job must never write, in the close-out or anywhere else:
+that data cannot leave the machine without approval.** Per section 2 answer 6 it
+can, and that is inherent to any local agent calling a hosted model. Guard 2
+gates email. It does not gate egress.
+
+### 6.5 Task accounting
+
+| Task | Status |
+| --- | --- |
+| Task 0 re-confirmation (R.0, R.1, R.2) | DONE |
+| Comprehension gate (R.3) | DONE |
+| Section 4 simulation | DONE |
+| 3.1 credential intake and storage | DONE |
+| 3.2 send broker, staging, entitlement | DONE |
+| 3.3 approval, single use, expiry | DONE |
+| 3.4 egress policy file | DONE |
+| 3.4 firewall, per addendum section 5 | DONE |
+| 3.5 fail-closed table | DONE, every row exercised |
+| 3.6 receipts, corrected ordering | DONE |
+| 3.7 Studio surfaces | DONE |
+| 3.8 installer wiring | DONE |
+| SOUL re-pin as a build-time constant | DONE |
+| Section 5 tests 1 to 14 | DONE |
+| Real agent turn | DONE |
+| Re-run of 8, 9, 10, 13 post-Studio | DONE |
+| `$HOME` class audit across both guards | DONE, L23 |
+| L22 verifier-channel lesson | DONE |
+| Test 3 external mailbox delivery | **BLOCKED**, no third-party credential. Card #198 |
+| Discoverability from shipped SOUL wording | **BLOCKED**, needs a fresh install. Card #199 |
+| Retroactive audit of nested-channel evidence | **DEFERRED**, card #200 |
+| Addendum section 9 items 1 to 4 | **DEFERRED** by instruction, cards #194 to #197 |
+| Guard 3 UI, outbound injector, Evergreen | **OUT OF SCOPE** by instruction |
+
+No task was silently dropped.
+
+### 6.6 Resource ledger
+
+- **Found and removed at session start: nothing.** The R.1 hazard sweep was
+  clean; no half-built send artifacts existed.
+- **Created on the live box:** the send broker, its two sockets, its store under
+  `/var/lib/clawfactory/send`, `/etc/clawfactory/send.json`,
+  `/etc/clawfactory/egress-policy.json`, `/etc/clawfactory/send-credential.json`
+  (test value), three systemd units, a systemd drop-in on the refresh unit, and
+  one added block in `/etc/nftables.conf` with a backup at
+  `/etc/nftables.conf.pre-guard2`.
+- **Test-only artifacts, all removed:** the `NODE_EXTRA_CA_CERTS` drop-in
+  (removal verified three times, last after all installer work), `/tmp/sinkcert`,
+  the SMTP sinks, and `/workspaces/g2test`. The credential currently on the box
+  is a **test** value pointing at `127.0.0.1:2525`; a real deployment replaces it
+  through Studio.
+- **Dispatch cards:** #193 (this job), #194 to #197 (addendum section 9), #198 to
+  #200 (assembled-build gate).
+- **Azure:** none used. No VMs created, none live.
+
+### 6.7 Delta security sweep
+
+**Claims this job made untrue, and the fix:** none found. The one at risk was
+SOUL's "network egress is filtered" wording, which remains accurate; the new
+SMTP drop narrows egress further rather than widening it. `safety-rules.md` and
+`orchestrator-prompt.md` were both updated to describe the new capability, which
+would otherwise have been an omission rather than an untruth.
+
+**A pre-existing claim this job found to be false, and fixed:** the SOUL pin was
+self-certifying. `Step-ApplySafetyRules` hashed whatever `safety-rules.md` was
+present at install time and pinned that, so a file swapped after the build
+installed cleanly and the launch gate then enforced the attacker's version. It
+is now a build-time literal with install refusing on mismatch, and
+`build_release.ps1` fails the build on drift. **This was the highest-value
+finding of the session and it was not in the job's scope.**
+
+**Every allowlist definition, enumerated as required, whether or not changed:**
+
+| # | Location | Changed? |
+| --- | --- | --- |
+| 1 | `setup.ps1:1260` `$baseHosts` | NO |
+| 2 | `setup.ps1:90-130` per-provider `AllowlistHosts` | NO |
+| 3 | `setup.ps1:1822` `AUX_HOSTS` one-shot | NO |
+| 4 | `setup.ps1:1904` `AUX_HOSTS` in the refresh heredoc | NO |
+| 5 | `resources/switch-provider.ps1:170` `BASE_HOSTS` + `PROVIDER_HOST` | NO |
+| - | `/etc/clawfactory/allowed-ips.txt` (75 entries, replayed at boot) | NO |
+
+Guard 2 changed **none** of them, by design: its firewall work adds no accept
+and manipulates no set element. The only `/etc/nftables.conf` change is an
+added drop.
+
+**Verifier-channel doubt, recorded for the assembled-build gate:** Guard 1 and
+prerequisite-session evidence predates the L22 discipline and carries the same
+doubt. Not re-litigated here. Card #200.
+
+**Confidence label required by the addendum section 8:** the exec-approvals
+token rotation is **INFERRED, permanently**. The file's mtime (2026-08-01 07:13)
+is consistent with rotation during the prerequisite session, but the outgoing
+value was deliberately never recorded, so rotation cannot be proven. Never label
+it VERIFIED.
+
+### 6.8 Delta bug review
+
+Diff re-read end to end. Found and fixed in-session:
+
+- **Draft preservation used `$HOME` under a privilege drop** (`e767c8c`). See
+  L23. Audited as a class across both guards; Guard 1 is clean, measured.
+- **The self-certifying SOUL pin** (`ab180d4`), above.
+
+Carded rather than patched:
+
+- The `read_fetch` policy section is inert in v1. Correctly documented as
+  declarative, but a future reader could mistake its presence for enforcement.
+- `send-smtp.js` buffers each attachment fully in memory (bounded by the 25 MB
+  cap). Fine at the current cap; if the cap ever rises, stream it.
+
+### 6.9 Next-session recommendations
+
+**What Guard 3 now needs, given the policy file built here.** The file, its
+loader, the fail-closed default and the root-owned placement already exist, and
+`send_actions` is enforced. Guard 3 is therefore: populate and enforce
+`read_fetch`, add the UI, and consolidate the five allowlist definitions into
+this one file, which closes cards #194 and #195 as a side effect. The enforcement
+point for `read_fetch` is the open question: it cannot be the nft allowlist,
+because that is IP-scoped and hostnames are co-hosted, so it likely needs a
+fetch broker on the same shape as the send broker.
+
+**What the outbound injector question from 2.3 would take to resolve.** One
+experiment, before any building: does the bundled Anthropic plugin honour a
+`models.providers.*.baseUrl` override? If it does, a root-owned outbound
+injector can hold the provider key and the gateway never sees it, which closes
+both the exfiltration residual and the co-hosted-address residual at once. If it
+does not, the residual is permanent for v1 and the claim language stays as
+written here. Card #197. Do not build before that question is answered.
