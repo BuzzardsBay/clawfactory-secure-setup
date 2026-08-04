@@ -43,7 +43,12 @@ $soulFile = Join-Path $RepoRoot "resources\safety-rules.md"
 if (-not (Test-Path $soulFile)) { Fail "resources/safety-rules.md not found" }
 $soulActual = (Get-FileHash -LiteralPath $soulFile -Algorithm SHA256).Hash.ToLower()
 $setupText  = Get-Content -Raw -LiteralPath (Join-Path $RepoRoot "setup.ps1")
-$m = [regex]::Match($setupText, "\$expectedSoulHash\s*=\s*'([a-f0-9]{64})'")
+# NOTE the backtick. In a double-quoted PowerShell string "$expectedSoulHash" is
+# an EMPTY VARIABLE, not a literal, so the pattern collapsed to one that can never
+# match and this gate failed the build unconditionally from the day it was added.
+# It failed closed, so nothing shipped past it -- but it also never once compared
+# the pin to the file. Verified by execution 2026-08-04; use '\$' or `$, not \$.
+$m = [regex]::Match($setupText, "\`$expectedSoulHash\s*=\s*'([a-f0-9]{64})'")
 if (-not $m.Success) {
     Fail "setup.ps1 does not carry an `$expectedSoulHash literal. The SOUL pin must be baked in at build time."
 }
@@ -59,7 +64,7 @@ Write-Host "SOUL pin OK: $soulPinned"
 # controls: Step-Preflight's required list and the .iss [Files] section drifted
 # apart, so the step existed and the file did not. Check the pairing here, where
 # it is cheap, instead of on a customer's machine.
-$reqMatch = [regex]::Match($setupText, "(?s)\$required\s*=\s*@\((.*?)\)")
+$reqMatch = [regex]::Match($setupText, "(?s)\`$required\s*=\s*@\((.*?)\)")   # backtick: see above
 if (-not $reqMatch.Success) { Fail "could not read Step-Preflight's `$required list from setup.ps1" }
 $required = [regex]::Matches($reqMatch.Groups[1].Value, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value }
 $issText  = Get-Content -Raw -LiteralPath $issPath
@@ -69,6 +74,39 @@ if ($notBundled.Count -gt 0) {
           ($notBundled -join ', ') + ". A build with this gap installs with missing security controls.")
 }
 Write-Host ("Bundle check OK: all {0} preflight resources are in [Files]." -f $required.Count)
+
+# --- Pre-build gate: the embedded Studio installer must be the VALIDATED one ---
+# resources\ClawFactory-Studio-Setup-*.exe is gitignored and copied in from the
+# Studio repo's release directory at build time, so git cannot tell you whether
+# the right binary is sitting there. Both ClawFactory-Secure-Setup.iss and
+# .gitignore said it was "verified by sha256 before compile"; that verification
+# was real but MANUAL (performed in JOB 3B, recorded as MATCH in
+# docs/session_reports/2026-07-21_job3b_combined_installer_closeout.md), and a
+# check that lives only in a human's habit is not a check the build has.
+#
+# The digest below is NOT computed from the file in resources\. It is the value
+# recorded in that close-out for the artefact built from Studio @9d62ad0 and
+# validated on cfv-152. Drift fails the build; it is never auto-corrected, for
+# the same reason the SOUL pin above is not.
+$studioName   = 'ClawFactory-Studio-Setup-1.1.0.exe'
+$studioPinned = 'd5ff8370943194c2643674ddba98e917ca61865ce127ec424a1cb37c746d45a7'
+$studioFile   = Join-Path $RepoRoot "resources\$studioName"
+if (-not (Test-Path $studioFile)) {
+    Fail ("resources\$studioName not found. It is gitignored; copy it in from the Studio repo's " +
+          "release directory before building.")
+}
+if ($issText -notmatch [regex]::Escape($studioName)) {
+    Fail ("ClawFactory-Secure-Setup.iss no longer embeds $studioName. If Studio was rebuilt, update " +
+          "BOTH the .iss #define and the `$studioPinned digest in this script.")
+}
+$studioActual = (Get-FileHash -LiteralPath $studioFile -Algorithm SHA256).Hash.ToLower()
+if ($studioActual -ne $studioPinned) {
+    Fail ("Studio installer drift: resources\$studioName hashes to $studioActual but this build pins " +
+          "$studioPinned. Refusing to embed an unverified 100 MB payload. If Studio was rebuilt on " +
+          "purpose, validate the new artefact, record its digest in a close-out, and update " +
+          "`$studioPinned here to $studioActual.")
+}
+Write-Host "Studio pin OK: $studioPinned"
 
 Write-Host "Compiling installer with Inno Setup..."
 & $IsccPath $issPath

@@ -62,6 +62,24 @@ else
 fi
 [ -n "$PERSONA" ] || PERSONA="$DEFAULT_PERSONA"
 
+# THE PIN MUST NOT BE COMPUTED FROM THE FILE IT CERTIFIES.
+#
+# This block used to write $WS directly and then `sha256sum "$WS" > "$PIN"`,
+# which is the same self-certification the factory SOUL pin used to have: a pin
+# taken from the artefact it is meant to protect certifies nothing, while the
+# launch gate goes on enforcing it faithfully. Here it was worse than academic,
+# because the workspace DIRECTORY is clawuser-owned by necessity (the agent must
+# create AGENTS.md in it, see L16 above). That means clawuser could unlink $WS
+# and put its own file at that name in the window between the write and the
+# chattr, and the chown/chmod/chattr/sha256sum that follow would have frozen and
+# pinned the AGENT's file as the authoritative safety rules.
+#
+# So: build the intended bytes in /etc/clawfactory, which only root can write;
+# install them; freeze them; and only THEN verify and pin. After `chattr +i` the
+# inode cannot be replaced or renamed even by the owner of the directory, so a
+# check made after that point is a check on the bytes that will actually be read.
+STAGED=/etc/clawfactory/.workspace-soul.staged
+rm -f "$STAGED"
 {
     printf '<!--\n'
     printf '  CLAWFACTORY -- HARD SAFETY BOUNDARIES (the block below, before the persona).\n'
@@ -69,13 +87,44 @@ fi
     printf '  chmod, or delete it. A turn is REFUSED in code at launch if this file is\n'
     printf '  tampered with. The boundaries below override everything that follows.\n'
     printf -- '-->\n\n'
-    cat "$FACTORY"
-    printf '\n---\n%s\n\n' "$MARKER"
-    printf '%s\n' "$PERSONA"
-} > "$WS"
+} > "$STAGED"
+HDRLEN=$(wc -c < "$STAGED")
+cat "$FACTORY" >> "$STAGED"
+FACLEN=$(wc -c < "$FACTORY")
+printf '\n---\n%s\n\n' "$MARKER" >> "$STAGED"
+printf '%s\n' "$PERSONA" >> "$STAGED"
+chown root:root "$STAGED"; chmod 400 "$STAGED"
 
-chown root:root "$WS"; chmod 444 "$WS"; chattr +i "$WS"
-sha256sum "$WS" | awk '{print $1}' > "$PIN"
+# rm before install so a symlink planted at $WS is removed rather than written
+# through. install(1) then creates a fresh root-owned 444 regular file.
+rm -f "$WS"
+install -o root -g root -m 444 "$STAGED" "$WS"
+chattr +i "$WS"
+
+# --- the file is now frozen; everything below is verification ----------------
+if [ -L "$WS" ]; then
+    echo "[injected-soul] FATAL: $WS is a symlink; refusing to pin it." >&2
+    exit 1
+fi
+cmp -s "$STAGED" "$WS" || {
+    echo "[injected-soul] FATAL: the frozen $WS does not match the bytes staged for it. Something replaced it between install and freeze. Refusing to pin." >&2
+    exit 1
+}
+# State the chain explicitly rather than inferring it from the fact that we ran
+# `cat "$FACTORY"` a few lines up: the safety block inside the frozen file must
+# be byte-identical to the factory rules, which Step-ApplySafetyRules has already
+# proven equal to the SHA-256 baked into setup.ps1 at build time. That is what
+# anchors this pin to the signed build instead of to itself.
+dd if="$WS" bs=1 skip="$HDRLEN" count="$FACLEN" 2>/dev/null | cmp -s - "$FACTORY" || {
+    echo "[injected-soul] FATAL: the safety block inside $WS is not byte-identical to $FACTORY. Refusing to pin." >&2
+    exit 1
+}
+echo "[injected-soul] verified: safety block matches the factory rules (offset $HDRLEN, $FACLEN bytes)"
+
+# Pin from the staged known-good copy, not from $WS. cmp above has already proven
+# the two are identical, so this is the same digest -- taken from the side of the
+# comparison whose provenance is the build.
+sha256sum "$STAGED" | awk '{print $1}' > "$PIN"
 chown root:root "$PIN"; chmod 444 "$PIN"
 echo "[injected-soul] frozen + pinned: $(cat "$PIN") ($(wc -c < "$WS") bytes)"
 

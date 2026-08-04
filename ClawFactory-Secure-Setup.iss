@@ -109,7 +109,8 @@ Source: "resources\egress-policy.json";                 DestDir: "{app}\resource
 Source: "resources\install-send.sh";                    DestDir: "{app}\resources"; Flags: ignoreversion
 ; --- v1.1.0 (JOB 3B): embedded ClawFactory Studio (the visual workbench) --------
 ; The SIGNED per-user Studio installer (~100 MB), sourced from the Studio repo's
-; release dir at build time (gitignored, verified by sha256 before compile). It is
+; release dir at build time (gitignored; scripts\build_release.ps1 fails the build if
+; its sha256 does not match the digest pinned there). It is
 ; staged to {app}\stage rather than {tmp} on purpose: this Setup runs elevated, so
 ; {tmp} is the elevating admin's temp -- unreadable to a DIFFERENT original user.
 ; {app} (Program Files) is world Read+Execute, so the de-elevated original user that

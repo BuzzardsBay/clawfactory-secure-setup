@@ -698,3 +698,67 @@ Guard 1 does **not** carry the defect. That is a measured result, not an assumpt
 4. **Audit the class, not the instance.** The same drop pattern is used by both guards and by both
    installers. One grep across every `setpriv` call site took minutes and converted "probably fine"
    into a table.
+
+## L24 -- an integrity value derived from the artefact it protects certifies nothing, and looks exactly like a working control
+
+**Discovered:** Guard 2 (2026-08-02), by accident, while wiring an unrelated step. Confirmed as a
+class by the self-certifying integrity audit (2026-08-04), which found a second instance and a
+third defect of the same shape in the build gate that was supposed to prevent it.
+
+**The shape.** A control computes an expected value *at install time* from the artefact it is meant
+to certify, pins it, and then enforces the pin faithfully on every launch. `Step-ApplySafetyRules`
+hashed whatever `safety-rules.md` was sitting in `{app}\resources` and pinned that.
+`freeze-injected-soul.sh` did the same for the workspace SOUL, taking `sha256sum "$WS"` from the
+file it had just written into a directory the agent owns.
+
+**Why it is expensive.** Every part of the mechanism except the provenance of the expected value is
+real. The hash function is real. The pin file is real, root-owned, and outside the agent's reach.
+The launch gate really does recompute and really does refuse on mismatch. So every observable a
+validator would check comes back green: the pin exists, the gate fires, the tamper test refuses.
+What the gate actually proves is *"this file has not changed since we looked at it"* -- and we
+looked at it after the attacker did. It is not a broken control. It is a working control answering
+the wrong question, which is far harder to see.
+
+Proven by execution, not argued. With one line injected to simulate an attacker replacing the file
+in the window between the write and the pin:
+
+| | old script | fixed script |
+| --- | --- | --- |
+| script exit | **0** | 1 |
+| script says | `frozen + pinned`, `ownership OK` | `FATAL ... Refusing to pin` |
+| pin ends up holding | the attacker's digest | the legitimate digest |
+| launch gate then | **exit 0, turn ALLOWED** | exit 3, `soul_mismatch`, all turns blocked |
+
+The old path pinned a 23-byte file reading `MALICIOUS SAFETY RULES` as the agent's authoritative
+safety rules and reported success at every step.
+
+**How to recognise it without being told.** Ask of every integrity value: *where does the expected
+side come from?* Then follow it back. It must terminate at something a customer's machine can
+verify independently -- for this product, the Authenticode signature on the installer, reached
+through literals baked into signed source. If the trail instead terminates at the artefact itself,
+at a file written moments earlier by the same script, or at "whatever was in the build directory",
+the control is self-certifying. Three linguistic tells, all of which appeared here: a comment
+containing the words *basic integrity check*; a comment asserting a verification that exists
+nowhere in code (`.iss` and `.gitignore` both said the embedded Studio installer was "verified by
+sha256 before compile" -- the check was real but **manual**, performed once in JOB 3B and never
+encoded); and a test whose assertion is the absence of a string that no longer exists in the source
+(`Check "Orchestrator SOUL hash substituted"` has passed unconditionally since 8eaeb60).
+
+**Rules:**
+1. **Bake the expected value at build time, as a literal in signed source.** Not at install time,
+   and not from the artefact.
+2. **Refuse on mismatch. Never adopt what you find.** Adopting is what makes it self-certifying.
+3. **Drift fails the build; it is never auto-corrected.** A build script that rewrites its own
+   literal to match the file has moved the defect one step earlier, not fixed it. Drift is the
+   signal: either a human changed the artefact on purpose and should update the literal knowingly,
+   or nobody did, which is the case the pin exists to catch.
+4. **When the covered artefact legitimately varies** (the workspace SOUL carries user persona, so no
+   literal can cover it), pin from content whose provenance you control, and verify the frozen file
+   against it *after* it is immutable -- not from the file on disk before it is.
+5. **A control's own build gate is code and can carry the same defect.** The gate added to prevent
+   SOUL drift never ran: `"\$expectedSoulHash..."` in a double-quoted PowerShell string interpolates
+   an **empty variable**, so the regex could never match and `build_release.ps1` failed
+   unconditionally from the day it was written. It failed *closed*, so nothing shipped past it -- but
+   it never once compared the pin to the file. Use `` `$ `` or single quotes, and run the gate's
+   negative control before believing it works. Both defects here were found by executing the
+   control, not by reading it.

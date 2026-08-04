@@ -5,7 +5,8 @@ Output/
 resources/ubuntu-rootfs.tar.gz
 
 # Embedded ClawFactory Studio installer (v1.1.0 combined build). Sourced from the
-# Studio repo's release dir at build time and verified by sha256; too large for git.
+# Studio repo's release dir at build time; too large for git. Because git cannot
+# see it, scripts\build_release.ps1 pins its sha256 and fails the build on drift.
 resources/ClawFactory-Studio-Setup-*.exe
 
 # Inno Setup compiler artifacts
