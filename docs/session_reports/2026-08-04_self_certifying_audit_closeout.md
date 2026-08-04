@@ -317,7 +317,7 @@ card **#198**.
 
 | Item | Status |
 | --- | --- |
-| Dispatch card created at session start | **BLOCKED.** No `dispatch_card.py` exists at the remembered path or anywhere under `~/FrontierAI`. The tooling is not present in this environment. Founder action: create the card and move it to done manually |
+| Dispatch card created and moved to done | DONE. Card **#208**. Recorded late in the session: the first search looked under `C:\Users\bmcki\FrontierAI` and found nothing, but the helper lives at `C:\Projects\FrontierAI\scripts\dispatch_card.py`. Two different FrontierAI checkouts exist |
 | Comprehension gate answered before any change | DONE (section 1) |
 | Enumerate every integrity value in the install and launch path | DONE (section 2, 22 rows plus the Guard 2 sub-table, clean results included) |
 | `setup.ps1` in full, every `Step-*`, refresh heredocs | DONE |
