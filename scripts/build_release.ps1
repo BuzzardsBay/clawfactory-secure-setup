@@ -126,6 +126,57 @@ if ($issVer.Groups[1].Value -ne $psVer.Groups[1].Value) {
 }
 Write-Host "Version OK: $($issVer.Groups[1].Value) (.iss and setup.ps1 agree)"
 
+# --- Pre-build gate: the persona and the COMPOSED workspace SOUL -------------
+# v1 makes the agent's injected SOUL a build-time constant: factory safety rules
+# plus a fixed persona, in a fixed order. Two literals in setup.ps1 cover it, and
+# both are checked here for the same reason the SOUL pin is. The composed digest
+# is the one that matters, because that is the file the agent actually reads and
+# the launch gate actually enforces.
+#
+# The composition below MUST stay byte-identical to the one in
+# resources/freeze-injected-soul.sh. It is deliberately trivial (two constant
+# strings around two file bodies) to keep that surface small, and a drift between
+# the two fails the INSTALL loudly as well, because the script compares its own
+# composed output against the digest passed to it.
+$personaFile = Join-Path $RepoRoot "resources\persona.md"
+if (-not (Test-Path $personaFile)) { Fail "resources/persona.md not found" }
+$personaActual = (Get-FileHash -LiteralPath $personaFile -Algorithm SHA256).Hash.ToLower()
+$pm = [regex]::Match($setupText, "\`$expectedPersonaHash\s*=\s*'([a-f0-9]{64})'")
+if (-not $pm.Success) { Fail "setup.ps1 does not carry an `$expectedPersonaHash literal." }
+if ($pm.Groups[1].Value -ne $personaActual) {
+    Fail ("Persona pin drift: setup.ps1 pins $($pm.Groups[1].Value) but resources/persona.md hashes to " +
+          "$personaActual. If the persona changed on purpose, update BOTH `$expectedPersonaHash and " +
+          "`$expectedWorkspaceSoulHash in setup.ps1 and rebuild.")
+}
+
+Write-Host "Persona pin OK: $personaActual"
+
+$hdr = "<!--`n" +
+       "  CLAWFACTORY -- HARD SAFETY BOUNDARIES (the block below, before the persona).`n" +
+       "  This file is root-owned and IMMUTABLE (chattr +i): the agent cannot modify,`n" +
+       "  chmod, or delete it. A turn is REFUSED in code at launch if this file is`n" +
+       "  tampered with. The boundaries below override everything that follows.`n" +
+       "-->`n`n"
+$sep = "`n---`n<!-- CLAWFACTORY: the text below is fixed at build time in v1. -->`n`n"
+$enc = New-Object System.Text.UTF8Encoding($false)
+$composed = New-Object System.Collections.Generic.List[byte]
+$composed.AddRange($enc.GetBytes($hdr))
+$composed.AddRange([IO.File]::ReadAllBytes($soulFile))
+$composed.AddRange($enc.GetBytes($sep))
+$composed.AddRange([IO.File]::ReadAllBytes($personaFile))
+$sha = [System.Security.Cryptography.SHA256]::Create()
+$composedHash = ([BitConverter]::ToString($sha.ComputeHash($composed.ToArray())) -replace '-','').ToLower()
+$sha.Dispose()
+$wm = [regex]::Match($setupText, "\`$expectedWorkspaceSoulHash\s*=\s*'([a-f0-9]{64})'")
+if (-not $wm.Success) { Fail "setup.ps1 does not carry an `$expectedWorkspaceSoulHash literal." }
+if ($wm.Groups[1].Value -ne $composedHash) {
+    Fail ("Workspace SOUL pin drift: setup.ps1 pins $($wm.Groups[1].Value) but the composed file " +
+          "(header + safety-rules.md + separator + persona.md) hashes to $composedHash. " +
+          "Update `$expectedWorkspaceSoulHash to $composedHash and rebuild. If you did not change " +
+          "either resource, check their line endings: .gitattributes pins both to eol=lf.")
+}
+Write-Host "Workspace SOUL pin OK: $composedHash ($($composed.Count) bytes composed)"
+
 Write-Host "Compiling installer with Inno Setup..."
 & $IsccPath $issPath
 if ($LASTEXITCODE -ne 0) {

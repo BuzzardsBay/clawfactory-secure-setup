@@ -820,3 +820,46 @@ The fix refuses, changes nothing, and prints the recovery options.
 6. **Classify honestly.** This was advisory-layer persistence, not a structural break. The firewall,
    the root-owned brokers, the credential modes and the approval path do not read the SOUL and were
    unaffected. Say which layer moved.
+
+### L25 addendum (2026-08-04, same day) -- the fix above was SUPERSEDED by deleting the input class
+
+The fix L25 describes, branching on the root-owned pin instead of on a marker inside the file, was
+correct and it worked. It was replaced within the day by something shorter: **persona became a
+build-time constant, so there is no untrusted input to validate at all.**
+
+The frozen workspace SOUL is now the factory safety rules plus a fixed `resources/persona.md`,
+composed in a fixed order with `eol=lf` pinned in `.gitattributes`, and its SHA-256 is a literal in
+`setup.ps1` enforced by `scripts/build_release.ps1`. The freeze script reads nothing off the box.
+
+What that deleted, rather than handled:
+
+| Case L25 had to reason about | Status now |
+| --- | --- |
+| marker absent, adopt whole file | cannot occur, nothing is adopted |
+| remnant from a faulted run | cannot occur |
+| agent edited the file | cannot occur |
+| first freeze has no pin to compare against | cannot occur, the anchor is a build-time literal |
+| unlink-and-replace race in the `chattr -i` window | cannot occur, there is no read to race |
+
+The residual L25 explicitly could not close, that a first freeze adopts whatever is present because
+there is no reference to compare against, did not need closing. It stopped existing.
+
+**The rule, and it generalises past this file.** When untrusted input reaches a privileged path, the
+options in order of preference are:
+
+1. **Remove the input class.** Ask whether the input is needed at all. Here it was not: nothing read
+   the persona region, it contained no identity, path, tool directive or frontmatter, and no
+   authoring path for it had ever existed anywhere in the product. An input nobody can legitimately
+   author and nobody reads is not a feature, it is an unguarded channel with a friendly name.
+2. **Anchor it to something the untrusted side cannot write**, which is what L25 did.
+3. **Validate its shape**, which is what the code before L25 did, and which failed because the shape
+   was the attacker's to choose.
+
+Prefer 1. It is the only one of the three that removes cases from the test matrix instead of adding
+them. The check for whether 1 is available is a short one: **who is authorised to write this, and is
+there any supported path by which they do?** If the honest answer to the second half is "none", the
+input class is dead weight and the guard protecting it is guarding nothing.
+
+The cost is real and should be stated rather than waved past: a user-authorable persona is a genuine
+feature, and this defers it to v1.5 rather than shipping it. Deleting an input class is only cheap
+when nobody was using it, which is why that question is asked first and answered with evidence.

@@ -666,7 +666,7 @@ function Step-Preflight {
     # step 15b with a bare FileNotFoundException and NO security controls. Fail
     # here instead -- loud, named, and before anything is changed on the machine.
     $required = @(
-        'safety-rules.md', 'openclaw-shim.sh', 'clawfactory-turn-gate.sh',
+        'safety-rules.md', 'persona.md', 'openclaw-shim.sh', 'clawfactory-turn-gate.sh',
         'clawfactory-spend-check.js', 'install-turn-gate.sh', 'freeze-injected-soul.sh',
         'clawfactory-proxy.js', 'clawfactory-proxy.service', 'install-chat-proxy.sh',
         'gateway-wait.sh',
@@ -2377,7 +2377,7 @@ function Step-ApplySafetyRules {
     # THE PIN IS A BUILD-TIME CONSTANT, NOT AN INSTALL-TIME SELF-HASH.
     #
     # This used to read $soulHash = (Get-FileHash $soulSrc), i.e. it hashed
-    # whatever safety-rules.md happened to be sitting in {app}esources at
+    # whatever safety-rules.md happened to be sitting in {app}\resources at
     # install time and pinned THAT. A pin computed from the artefact it is meant
     # to certify certifies nothing: swap the file after the installer is built
     # and it installs cleanly, with the launch gate then faithfully enforcing the
@@ -2387,7 +2387,12 @@ function Step-ApplySafetyRules {
     # time (scripts/build_release.ps1 fails the build if this constant and the
     # file disagree). Install compares and REFUSES on mismatch rather than
     # adopting what it finds.
-    $expectedSoulHash = '8f5531a36e46af8143ffe59ae4112a83a28b3513c473562578ee81c408c07eb6'
+    # Changed when resources/safety-rules.md was normalised to LF. It had been
+    # CRLF on disk with no .gitattributes rule, so its digest followed whatever
+    # core.autocrlf a given clone used: a clone configured differently would have
+    # produced a different hash and this very check would have refused its own
+    # safety rules. The file is now pinned to eol=lf in .gitattributes.
+    $expectedSoulHash = 'e70212603f2f91e6abf6db576c9535b1aaad60506e2fb075c199f18160db7941'
     $soulHash = (Get-FileHash -LiteralPath $soulSrc -Algorithm SHA256).Hash.ToLower()
     if ($soulHash -ne $expectedSoulHash) {
         throw ("resources/safety-rules.md does not match the digest this installer was built with. " +
@@ -2476,12 +2481,44 @@ function Step-FreezeInjectedSoul {
     # the shim). Runs late so the workspace is likely already created.
     Write-Log INFO 'Step 15c [Defect 4]: Delivering + freezing the injected workspace SOUL.'
     $resourceDir = Join-Path $PSScriptRoot 'resources'
-    # Normalize CRLF->LF (bash script; git autocrlf can introduce CRLF).
+
+    # v1: the injected workspace SOUL is a BUILD-TIME CONSTANT -- the factory
+    # safety rules plus a fixed persona, composed in a fixed order. The script no
+    # longer reads anything off the box, so there is nothing to adopt and no
+    # marker to parse. Two literals below, both baked from the repo copies at
+    # build time and both enforced by scripts/build_release.ps1:
+    #   $expectedPersonaHash        covers resources/persona.md
+    #   $expectedWorkspaceSoulHash  covers the COMPOSED file the agent reads
+    # Same anchor as $expectedSoulHash above: a literal in signed source, never a
+    # digest taken from the artefact it certifies (L24).
+    $expectedPersonaHash       = '0557d07004d4d067d8cd9e7cee7b2a3a783e0ac8ff4c492c0c152d7e35ff63a0'
+    $expectedWorkspaceSoulHash = '441b6279f6613c313e87e9e9e034f97a220540cddbf1cf738bb9a86c37a5a257'
+
+    $personaSrc = Join-Path $resourceDir 'persona.md'
+    if (-not (Test-Path -LiteralPath $personaSrc)) { throw "Missing resources/persona.md at $personaSrc" }
+    $personaHash = (Get-FileHash -LiteralPath $personaSrc -Algorithm SHA256).Hash.ToLower()
+    if ($personaHash -ne $expectedPersonaHash) {
+        throw ("resources/persona.md does not match the digest this installer was built with. " +
+               "Expected $expectedPersonaHash but found $personaHash. Refusing to install rather than " +
+               "freezing an unknown persona into the agent's prompt.")
+    }
+    Write-Log INFO "persona.md SHA-256 = $personaHash (matches the build-time pin)"
+
+    # Raw bytes, NOT CRLF-normalised: the digests above are over the repo bytes,
+    # so anything else would compose to a different file. .gitattributes pins
+    # persona.md and safety-rules.md to eol=lf so every clone agrees.
+    $personaB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($personaSrc))
+    # The freeze script itself IS transported LF-normalised: it is executed through
+    # bash, where a trailing CR in the shebang is fatal (L20/L21).
     $frzB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(([IO.File]::ReadAllText((Join-Path $resourceDir 'freeze-injected-soul.sh'))).Replace("`r`n","`n").Replace("`r","`n")))
     $drop = @"
 set -e
+mkdir -p /etc/clawfactory
+echo '$personaB64' | base64 -d > /etc/clawfactory/persona.md
+chown root:root /etc/clawfactory/persona.md
+chmod 444 /etc/clawfactory/persona.md
 echo '$frzB64' | base64 -d > /tmp/freeze-injected-soul.sh
-bash /tmp/freeze-injected-soul.sh
+CLAWFACTORY_WORKSPACE_SOUL_SHA256='$expectedWorkspaceSoulHash' bash /tmp/freeze-injected-soul.sh
 rm -f /tmp/freeze-injected-soul.sh
 "@
     $rc = Invoke-WslBash -Script $drop -User 'root'

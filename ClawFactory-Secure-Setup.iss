@@ -43,6 +43,7 @@ Source: "setup.ps1";                         DestDir: "{app}";            Flags:
 Source: "README.md";                         DestDir: "{app}";            Flags: ignoreversion
 Source: "LICENSE";                           DestDir: "{app}";            Flags: ignoreversion
 Source: "resources\safety-rules.md";         DestDir: "{app}\resources";  Flags: ignoreversion
+Source: "resources\persona.md";              DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\orchestrator-prompt.md";  DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\post-install.ps1";        DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\bootstrap.ps1";           DestDir: "{app}\resources";  Flags: ignoreversion

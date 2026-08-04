@@ -43,3 +43,13 @@ resources/egress-policy.json           text eol=lf
 # inside a comment ABOUT NUL bytes) has been removed. It was in a `#` comment, so
 # removing it cannot change behaviour, and with it gone nothing auto-detects either.
 setup.ps1 -text diff
+
+# v1 persona-as-a-constant. The frozen workspace SOUL is composed from these two
+# files, and its SHA-256 is baked into setup.ps1 at build time, so their bytes
+# must be identical in every clone. Without an explicit rule these follow
+# core.autocrlf, which means a clone on a differently configured machine would
+# produce a different digest and the install would refuse its own safety rules.
+# safety-rules.md was CRLF on disk until this rule landed; normalising it changes
+# $expectedSoulHash, which is why that literal was recomputed in the same commit.
+resources/safety-rules.md text eol=lf
+resources/persona.md      text eol=lf
