@@ -2501,8 +2501,11 @@ rm -f /tmp/freeze-injected-soul.sh
                "into the agent's prompt, or could not be frozen and pinned. Refusing to finish the install, " +
                "because the launch gate enforces the injected safety rules only once their pin exists -- " +
                "continuing would produce an install that looks complete but runs the agent unchecked. " +
-               "Check ~/.openclaw/workspace/SOUL.md and /etc/clawfactory/workspace-soul.sha256, then re-run " +
-               "setup.ps1 -Resume.")
+               "NOTHING was changed on this run. Do NOT just re-run: if the workspace SOUL no longer matches " +
+               "its pin, the freeze refuses on purpose rather than adopting contents it cannot attribute, so " +
+               "a plain re-run will refuse again. The step logged the exact recovery commands for your case; " +
+               "read the lines beginning '[injected-soul]' in $LogFile and follow one of the numbered options " +
+               "there, then re-run setup.ps1 -Resume.")
     }
     Save-Checkpoint 'FreezeInjectedSoul'
 }
