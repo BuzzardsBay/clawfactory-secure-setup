@@ -35,7 +35,10 @@ param(
 #   [R3] WSL egress firewall (nftables, clawuser UID-scoped, provider-specific allowlist).
 #   [R4] Windows Firewall inbound-deny on gateway port.
 #   [R5] Provider API key read from Windows Credential Manager (DPAPI).
-#   [R6] SOUL.md hash pinned into orchestrator prompt.
+#   [R6] SOUL.md frozen root-owned + immutable and hash-pinned; the turn gate
+#        refuses the turn (soul_mismatch) if the hash changes. The pin has NOT
+#        been in the orchestrator prompt since 8eaeb60, which replaced a
+#        prompt-level "compute the hash yourself" rule with this code gate.
 #   [R7] Checkpoint + rollback on failure.
 
 $ErrorActionPreference = 'Stop'
@@ -43,7 +46,14 @@ Set-StrictMode -Version 3.0
 
 #--- Constants ----------------------------------------------------------------
 # v1.0.4 - pre-install OpenClaw build deps before install.sh runs
-$InstallerVersion      = '1.0.34'
+# MUST equal MyAppVersion in ClawFactory-Secure-Setup.iss. That is the value the
+# customer sees (it feeds AppVersion, so Apps & Features and the uninstall entry
+# show it), which makes it the authority; this constant follows it.
+# scripts/build_release.ps1 fails the build if the two disagree.
+# It sat at 1.0.34 from 2026-05 through v1.1.1, roughly fifteen releases, because
+# nothing referenced it and nothing compared it. It is still unreferenced today;
+# the assertion exists so that stops being possible rather than staying luck.
+$InstallerVersion      = '1.1.1'
 # [R2] OpenClaw install.sh is BUNDLED into the installer (resources\openclaw-install.sh).
 # No network call to openclaw.ai/install.sh during install — that URL tracks "latest" and
 # changed twice in 24 hours on 2026-05-09/10. Hash is computed at install time and written
@@ -2475,7 +2485,25 @@ bash /tmp/freeze-injected-soul.sh
 rm -f /tmp/freeze-injected-soul.sh
 "@
     $rc = Invoke-WslBash -Script $drop -User 'root'
-    if ($rc -ne 0) { Write-Log WARN "Step-FreezeInjectedSoul returned $rc; the injected safety rules may not be frozen. Verify ~/.openclaw/workspace/SOUL.md and re-run setup.ps1 -Resume." }
+    # THROW, do not warn. This used to log a WARN and let the install finish and
+    # report success. That was the worst available outcome, because
+    # clawfactory-turn-gate.sh enforces the injected SOUL only IF its pin exists:
+    # a freeze that failed left no pin, so every turn ran unchecked while the
+    # installer, the checklist and the smoke suite all reported green. A green
+    # install with no SOUL enforcement is the exact failure class this product
+    # exists to eliminate.
+    #
+    # The audit's fix to freeze-injected-soul.sh makes this path MORE likely to
+    # fire, by design: the script now refuses to pin in cases where it previously
+    # proceeded. That refusal has to reach the customer, not the log.
+    if ($rc -ne 0) {
+        throw ("Step-FreezeInjectedSoul failed (exit $rc): the factory safety rules were not delivered " +
+               "into the agent's prompt, or could not be frozen and pinned. Refusing to finish the install, " +
+               "because the launch gate enforces the injected safety rules only once their pin exists -- " +
+               "continuing would produce an install that looks complete but runs the agent unchecked. " +
+               "Check ~/.openclaw/workspace/SOUL.md and /etc/clawfactory/workspace-soul.sha256, then re-run " +
+               "setup.ps1 -Resume.")
+    }
     Save-Checkpoint 'FreezeInjectedSoul'
 }
 

@@ -447,10 +447,19 @@ Read the complete working diff across all five files.
 
 ### 6.5 Next-session recommendations
 
-1. **Cut a build.** `build_release.ps1` has never completed a run, because of Fix 3. Nothing
-   validates that the compile and sign path still works end to end after these changes. This is the
-   highest-value next step and it is small. Note that the three gates now pass, so the next attempt
-   should reach `ISCC.exe` for the first time.
+1. **Cut a build.** `build_release.ps1` has never completed a run **in its gated form**, because of
+   Fix 3. Nothing validates that the compile and sign path still works end to end after these
+   changes. This is the highest-value next step and it is small. Note that the three gates now pass,
+   so the next attempt should be the first to reach `ISCC.exe` **through the gates**.
+
+   > **Correction, 2026-08-04, post-audit follow-up session.** An earlier draft of this line said
+   > "`build_release.ps1` has never completed a run" without qualification, and the headline said the
+   > compile-and-sign path had never completed one. That was wrong. `v1.0.45` was tagged 2026-07-17
+   > and `ab180d4` landed 2026-08-03, so the gate defect **postdates every shipped release**. Those
+   > releases were built by `build_release.ps1` as of `e966409`, which carried no gates at all.
+   > The accurate claim is the narrow one now stated above. See
+   > `2026-08-04_post_audit_followups_closeout.md` Task 1, which also records a bypass-route finding
+   > that this audit missed.
 2. **Clean-box validation of Fix 1.** The injected-SOUL change was proven on a box that already had
    an install. The path that has never been exercised is the fresh-install ordering, where
    `$WS` does not exist and `PERSONA` falls back to `DEFAULT_PERSONA`. Reuse the cfv harness.

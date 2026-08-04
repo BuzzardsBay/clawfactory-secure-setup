@@ -238,7 +238,7 @@ Write-Host " [x] Provider: $Provider (model: $($cfg.Model))"
 Write-Host ' [x] Gateway bound to 127.0.0.1:8787 only'
 Write-Host ' [x] Sandbox mode = all, network = none'
 Write-Host ' [x] Tool denylist active (shell/sudo/rm/system.run/browser/net.fetch)'
-Write-Host ' [x] SOUL.md installed and hash-pinned in orchestrator prompt'
+Write-Host ' [x] SOUL.md frozen root-owned + immutable; a changed hash refuses the turn'
 Write-Host ' [x] WSL automount disabled'
 Write-Host ' [x] Non-root clawuser, no sudo group membership'
 Write-Host ' [x] WSL egress firewall (nftables, clawuser-scoped, provider-specific allowlist)'

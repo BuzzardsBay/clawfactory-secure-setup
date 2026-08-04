@@ -108,6 +108,24 @@ if ($studioActual -ne $studioPinned) {
 }
 Write-Host "Studio pin OK: $studioPinned"
 
+# --- Pre-build gate: the two version literals must agree ----------------------
+# .iss MyAppVersion feeds AppVersion, so it is what the customer sees in Apps &
+# Features and on the uninstall entry. That makes it the authority.
+# setup.ps1's $InstallerVersion follows it. The two drifted for roughly fifteen
+# releases (1.0.34 against 1.1.1) because nothing compared them. Same shape as
+# the gates above: fail on drift, never auto-correct, because a silent rewrite
+# would just hide which one someone forgot to bump.
+$issVer = [regex]::Match($issText,   '#define\s+MyAppVersion\s+"([^"]+)"')
+$psVer  = [regex]::Match($setupText, "\`$InstallerVersion\s*=\s*'([^']+)'")   # backtick, see above
+if (-not $issVer.Success) { Fail "could not read MyAppVersion from ClawFactory-Secure-Setup.iss" }
+if (-not $psVer.Success)  { Fail "could not read `$InstallerVersion from setup.ps1" }
+if ($issVer.Groups[1].Value -ne $psVer.Groups[1].Value) {
+    Fail ("Version drift: .iss MyAppVersion is $($issVer.Groups[1].Value) but setup.ps1 " +
+          "`$InstallerVersion is $($psVer.Groups[1].Value). The .iss value is the one the customer " +
+          "sees, so set `$InstallerVersion to $($issVer.Groups[1].Value) and rebuild.")
+}
+Write-Host "Version OK: $($issVer.Groups[1].Value) (.iss and setup.ps1 agree)"
+
 Write-Host "Compiling installer with Inno Setup..."
 & $IsccPath $issPath
 if ($LASTEXITCODE -ne 0) {
