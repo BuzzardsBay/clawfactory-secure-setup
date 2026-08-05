@@ -1,11 +1,16 @@
 <#
 Produces a release-ready, signed ClawFactory installer:
-  1. Compiles ClawFactory-Secure-Setup.iss with Inno Setup (ISCC.exe)
-  2. Signs the resulting Output\ClawFactory-Secure-Setup.exe via scripts\sign_installer.ps1
+  1. Runs seven pre-build gates (SOUL, bundle, Studio, version, persona,
+     workspace SOUL, rootfs). Each fails the build on drift; none auto-correct.
+  2. Compiles ClawFactory-Secure-Setup.iss with Inno Setup (ISCC.exe)
+  3. Stamps the compiled bytes so sign_installer.ps1 will accept them
+  4. Signs Output\ClawFactory-Secure-Setup.exe via scripts\sign_installer.ps1
 
-This is the only path that should feed a GitHub Release. For a quick local dev
-build that doesn't need a valid signature, compile with ISCC.exe directly instead
-(see README.md "Building from source").
+This is the build command, not merely the release one. ISCC.exe on its own still
+compiles a perfectly good local dev build; that output simply cannot be signed,
+because sign_installer.ps1 refuses anything this script did not stamp. That is
+the whole point of the stamp: unsigned dev compiles stay easy, and the route
+that reaches a customer is the one that passed the gates.
 #>
 
 [CmdletBinding()]
@@ -208,6 +213,53 @@ if ($wm.Groups[1].Value -ne $composedHash) {
 }
 Write-Host "Workspace SOUL pin OK: $composedHash ($($composed.Count) bytes composed)"
 
+# --- Pre-build gate: the bundled Ubuntu rootfs must be the IDENTIFIED one -----
+# resources\ubuntu-rootfs.tar.gz is 341 MB and gitignored, so like the Studio
+# payload above, git cannot tell you whether the right bytes are sitting there.
+# It is the higher risk of the two: every structural control the product sells
+# runs INSIDE this filesystem, so a substitution here is underneath the nftables
+# chain, both root brokers, the credential modes and the turn gate at once.
+#
+# Until 2026-08-05 it had no recorded source and no digest anywhere in the repo.
+# It has now been identified as a stock, unmodified Canonical image and the
+# digest below is UPSTREAM'S published value, not one computed from the file in
+# resources\. See the setup.ps1 comment at the pin literal for the full
+# provenance block (source URL, date, and what was checked).
+#
+#   Ubuntu 22.04.5 LTS (jammy) amd64, image built 2025-03-18
+#   https://cloud-images.ubuntu.com/wsl/jammy/20250318/ubuntu-jammy-wsl-amd64-ubuntu22.04lts.rootfs.tar.gz
+#   published in that directory's SHA256SUMS, retrieved 2026-08-05
+#
+# Fails on drift, never auto-corrects, same as every gate above.
+$rootfsName   = 'ubuntu-rootfs.tar.gz'
+$rootfsFile   = Join-Path $RepoRoot "resources\$rootfsName"
+if (-not (Test-Path $rootfsFile)) {
+    Fail ("resources\$rootfsName not found. It is gitignored; fetch it from " +
+          "https://cloud-images.ubuntu.com/wsl/jammy/20250318/ubuntu-jammy-wsl-amd64-ubuntu22.04lts.rootfs.tar.gz " +
+          "before building.")
+}
+if ($issText -notmatch [regex]::Escape("resources\$rootfsName")) {
+    Fail ("ClawFactory-Secure-Setup.iss no longer bundles $rootfsName. Without it the installer " +
+          "silently falls back to a network WSL install, which is not the filesystem this build was " +
+          "verified against.")
+}
+# The expected value is read out of setup.ps1 rather than written here, so the
+# literal that the INSTALL enforces is the one this gate keeps honest. A second
+# copy here would only ever drift from it.
+$rm = [regex]::Match($setupText, "\`$expectedRootfsHash\s*=\s*'([a-f0-9]{64})'")   # backtick, see above
+if (-not $rm.Success) {
+    Fail "setup.ps1 does not carry an `$expectedRootfsHash literal. The rootfs pin must be baked in at build time."
+}
+$rootfsPinned = $rm.Groups[1].Value
+$rootfsActual = (Get-FileHash -LiteralPath $rootfsFile -Algorithm SHA256).Hash.ToLower()
+if ($rootfsActual -ne $rootfsPinned) {
+    Fail ("Rootfs drift: resources\$rootfsName hashes to $rootfsActual but setup.ps1 pins $rootfsPinned. " +
+          "Refusing to embed an unidentified 341 MB filesystem. If the rootfs was replaced on purpose, " +
+          "check the new file against the publisher's own SHA256SUMS, record the source URL and date in " +
+          "the `$expectedRootfsHash comment in setup.ps1, and update the literal to $rootfsActual.")
+}
+Write-Host "Rootfs pin OK: $rootfsPinned"
+
 Write-Host "Compiling installer with Inno Setup..."
 & $IsccPath $issPath
 if ($LASTEXITCODE -ne 0) {
@@ -218,6 +270,41 @@ $installerPath = Join-Path $RepoRoot "Output\ClawFactory-Secure-Setup.exe"
 if (-not (Test-Path $installerPath)) {
     Fail "Expected compiled installer not found at $installerPath"
 }
+
+# --- Build stamp: the thing sign_installer.ps1 refuses to sign without --------
+# Every gate above was advisory until this existed. `ISCC.exe` invoked directly
+# followed by the signer produced a release-grade signed binary that had passed
+# none of them, and that two-line route was the one the README taught first.
+#
+# The stamp is bound to the DIGEST of the unsigned bytes, not merely present, so
+# a fresh direct compile cannot inherit an older stamp. It is worth being precise
+# about why that holds: an Inno compile over identical inputs is byte-for-byte
+# deterministic (measured 2026-08-05), so a stale stamp matches a direct compile
+# only when the inputs were identical to a build that already passed the gates,
+# which is the case where the gates would have passed anyway. Any input that
+# would have failed a gate changes the compiled bytes and orphans the stamp.
+#
+# What this is NOT: a defence against anyone who can run the signer. The stamp is
+# a file, and whoever can invoke sign_installer.ps1 can write one. That is
+# accepted. The threat being addressed is a tired founder taking a documented
+# shortcut at 2am, not an adversary with local execution. This control is
+# ADVISORY against an attacker and STRUCTURAL against process drift, and it
+# should never be described as more than that.
+$unsignedHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLower()
+$stampPath    = "$installerPath.buildstamp"
+$stamp = [ordered]@{
+    producer      = 'scripts/build_release.ps1'
+    version       = $issVer.Groups[1].Value
+    unsignedSha256 = $unsignedHash
+    unsignedBytes = (Get-Item -LiteralPath $installerPath).Length
+    gatesPassed   = @('soul', 'bundle', 'studio', 'version', 'persona', 'workspace-soul', 'rootfs')
+    stampedUtc    = (Get-Date).ToUniversalTime().ToString('o')
+}
+# BOM-less UTF-8 on purpose; see the same note in sign_installer.ps1. PS 5.1's
+# Set-Content -Encoding utf8 writes a BOM and non-PowerShell readers choke on it.
+[System.IO.File]::WriteAllText($stampPath, ($stamp | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
+Write-Host "Build stamp written: $stampPath"
+Write-Host "  unsigned sha256: $unsignedHash"
 
 Write-Host "Signing compiled installer..."
 $signScript = Join-Path $RepoRoot "scripts\sign_installer.ps1"

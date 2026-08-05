@@ -439,6 +439,40 @@ function Install-WslDistroWithFallback {
     param([string]$BundledRootfs = '')
 
     if ($BundledRootfs -and (Test-Path -LiteralPath $BundledRootfs)) {
+        # --- Rootfs pin. Same anchor as the SOUL and persona pins: a literal in
+        # signed source, compared at install time, REFUSING on mismatch rather
+        # than adopting whatever is on disk.
+        #
+        # This filesystem is the one every structural control in the product runs
+        # inside: the nftables chain, both root brokers, the credential file
+        # modes, the turn gate. Until 2026-08-05 it was a 341 MB gitignored blob
+        # with no recorded source and no digest anywhere, so nothing at any layer
+        # would have noticed a substituted one. A control built on an
+        # unidentified filesystem is only as trustworthy as that filesystem.
+        #
+        # PROVENANCE (recorded 2026-08-05, see the close-out of the same date):
+        #   Ubuntu 22.04.5 LTS (jammy), amd64, image built 2025-03-18.
+        #   Source:  https://cloud-images.ubuntu.com/wsl/jammy/20250318/ubuntu-jammy-wsl-amd64-ubuntu22.04lts.rootfs.tar.gz
+        #   Checked against Canonical's published SHA256SUMS at that same dated
+        #   URL, retrieved over HTTPS on 2026-08-05. The digest below IS the
+        #   published one, so this is upstream's value and not one we computed
+        #   from the file we happen to hold. Use the DATED path when refetching;
+        #   .../wsl/jammy/current/ moves to whatever the newest build is.
+        #   The bytes are stock: no packages added, no users added, no file with
+        #   an mtime later than the 2025-03-18 build stamp.
+        #
+        # A mismatch does NOT fall through to the network install path below.
+        # Falling through would let a substituted rootfs turn into a quiet
+        # "installed from the network instead" and lose the signal entirely.
+        $expectedRootfsHash = '1483cc5c1dce13064f774834cbffdff226559fd522a67a381a8ea77d63fb4109'
+        $rootfsHash = (Get-FileHash -LiteralPath $BundledRootfs -Algorithm SHA256).Hash.ToLower()
+        if ($rootfsHash -ne $expectedRootfsHash) {
+            throw ("The bundled Ubuntu rootfs does not match the digest this installer was built with. " +
+                   "Expected $expectedRootfsHash but found $rootfsHash. Every security control ClawFactory " +
+                   "installs runs inside this filesystem. Refusing to import an unverified one.")
+        }
+        Write-Log INFO "Bundled rootfs SHA-256 = $rootfsHash (matches the build-time pin)"
+
         $WslInstallDir = 'C:\Program Files\ClawFactory\WSL'
         if (-not (Test-Path -LiteralPath $WslInstallDir)) {
             New-Item -ItemType Directory -Path $WslInstallDir -Force | Out-Null
