@@ -84,12 +84,29 @@ Write-Host ("Bundle check OK: all {0} preflight resources are in [Files]." -f $r
 # docs/session_reports/2026-07-21_job3b_combined_installer_closeout.md), and a
 # check that lives only in a human's habit is not a check the build has.
 #
-# The digest below is NOT computed from the file in resources\. It is the value
-# recorded in that close-out for the artefact built from Studio @9d62ad0 and
-# validated on cfv-152. Drift fails the build; it is never auto-corrected, for
-# the same reason the SOUL pin above is not.
+# The digest below is NOT computed from the file in resources\. It is recorded
+# here by hand from a build whose contents were checked, and drift fails the
+# build; it is never auto-corrected, for the same reason the SOUL pin above is
+# not.
+#
+# Repinned 2026-08-05 for v1.2.0. The previous pin, d5ff8370..., covered the
+# artefact built from Studio @9d62ad0 and validated on cfv-152. That artefact had
+# gone STALE rather than merely old: Studio @6105c53 and @14b6422 added the three
+# panels the agent-side guards need a front end for, and none of them were in it.
+# Shipping it would have paired a working send broker with a Studio that has no
+# approval card, which is a broken product rather than an out-of-date asset.
+#
+# The value below is the artefact built from Studio @14b6422 (main), signed by
+# the same Azure Trusted Signing cert. Before pinning it, its app.asar was
+# extracted from the compiled NSIS payload and searched for twelve markers drawn
+# from the three new panels (/approvals/smtp, Email settings, smtp.example.com,
+# Currently sending as, send:approve, send:credential, send:deny, send:list,
+# Recently deleted, quarantine:list, quarantine:restore, clawfactory-sendctl).
+# All twelve are present in this artefact and absent from the d5ff8370 one, so
+# the search discriminates rather than merely matching. See
+# docs/session_reports/2026-08-05_first_gated_build_closeout.md.
 $studioName   = 'ClawFactory-Studio-Setup-1.1.0.exe'
-$studioPinned = 'd5ff8370943194c2643674ddba98e917ca61865ce127ec424a1cb37c746d45a7'
+$studioPinned = 'b701bfb734d5a307a41cf4b3cca8d34eb4f9c89b2116c7bc084fb180afefb7eb'
 $studioFile   = Join-Path $RepoRoot "resources\$studioName"
 if (-not (Test-Path $studioFile)) {
     Fail ("resources\$studioName not found. It is gitignored; copy it in from the Studio repo's " +
