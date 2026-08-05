@@ -11,10 +11,24 @@ build that doesn't need a valid signature, compile with ISCC.exe directly instea
 [CmdletBinding()]
 param(
     [string]$IsccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-    [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot)
+    # No default here on purpose; see the resolution below.
+    [string]$RepoRoot
 )
 
 $ErrorActionPreference = "Stop"
+
+# $RepoRoot used to default to (Split-Path -Parent $PSScriptRoot) in the param
+# block. That is fine when the script is invoked from an existing session with &
+# or dot-sourcing, which is the only way it has ever been run here, but it is
+# broken under `powershell.exe -File`: with [CmdletBinding()] present, parameter
+# defaults are evaluated at a point where $PSScriptRoot is still EMPTY, so
+# Split-Path threw "Cannot bind argument to parameter 'Path'" and the script died
+# before the first gate. Isolated to that single variable on 2026-08-05: the same
+# param block without [CmdletBinding()] resolves correctly under -File, and the
+# same script with it fails under -File whether or not arguments are passed.
+# $PSScriptRoot IS populated by the time the body runs, so resolve it here.
+if (-not $RepoRoot) { $RepoRoot = Split-Path -Parent $PSScriptRoot }
+if (-not $RepoRoot) { Write-Error "build_release.ps1: could not resolve the repo root; pass -RepoRoot explicitly."; exit 1 }
 
 function Fail($msg) {
     Write-Error "build_release.ps1: $msg"

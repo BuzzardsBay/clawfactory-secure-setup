@@ -53,7 +53,7 @@ Set-StrictMode -Version 3.0
 # It sat at 1.0.34 from 2026-05 through v1.1.1, roughly fifteen releases, because
 # nothing referenced it and nothing compared it. It is still unreferenced today;
 # the assertion exists so that stops being possible rather than staying luck.
-$InstallerVersion      = '1.1.1'
+$InstallerVersion      = '1.2.0'
 # [R2] OpenClaw install.sh is BUNDLED into the installer (resources\openclaw-install.sh).
 # No network call to openclaw.ai/install.sh during install — that URL tracks "latest" and
 # changed twice in 24 hours on 2026-05-09/10. Hash is computed at install time and written
