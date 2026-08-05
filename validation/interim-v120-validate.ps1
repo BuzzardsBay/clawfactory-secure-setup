@@ -1,0 +1,382 @@
+<#
+  Driver for the v1.2.0 INTERIM clean-box validation.
+
+  THIS IS NOT THE RELEASE GATE. It validates a build carrying Guards 1 and 2
+  only. Guard 3, Guard 4, the guardrail config pass and the honest-copy pass are
+  unbuilt. Full validation on the assembled build still happens after those land.
+
+  SHAPE, AND WHY IT DIFFERS FROM job3-validate.ps1
+  ------------------------------------------------
+  JOB 3 was fire-and-forget: arm, reboot, poll one sentinel, retrieve, tear
+  down. This job cannot be, for three reasons:
+    * Phase 1 is a HARD CHECKPOINT -- stop and report before the guard suite.
+    * Phase 3 needs Bret at the keyboard over RDP, entering the SMTP app
+      password into the Studio panel himself so it never enters a script, a
+      transcript, or the driver's context.
+    * Studio GUI surfaces must be driven to completion, not merely observed.
+  So the VM STAYS UP between phases and the driver feeds it work through the
+  on-VM runner (interim-v120-runner.ps1). See that file for why the interactive
+  session is mandatory rather than convenient.
+
+  DEVIATIONS FROM THE JOB PROMPT, both verified live before deviating:
+    * Size: the prompt says Standard_D2s_v5. Live quota for the DSv5 family in
+      westus2 is 0 (limit=0, current=0), so D2s_v5 cannot provision at all.
+      Using Standard_D2s_v4 (limit=10), which is what every recent green run
+      actually used and what azure-validate.ps1 already documents.
+    * Image: the prompt says clawfactory-win11-baseline. Recent green runs
+      (cfv-151, cfv-152) used clawfactory-win11-baseline-v2, which carries the
+      newer WSL. Using -v2.
+  Both are recorded in the close-out rather than silently applied.
+#>
+[CmdletBinding()]
+param(
+    [string]$VmName        = 'cfv-153',
+    [string]$ResourceGroup = 'clawfactory-validation',
+    [string]$Image         = 'clawfactory-win11-baseline-v2',
+    [string]$Size          = 'Standard_D2s_v4',
+    [string]$StorageAcct   = 'clawfactoryvalc467',
+    [string]$Container     = 'validation',
+    [string]$AdminUser     = 'clawadmin',
+    [string]$LicenseKey    = 'CF-TEST-TEST-TEST-TEST',
+    [string]$SeedKeyTarget = 'ClawFactory/AnthropicApiKey',
+    [string]$SeedKeyB64    = '',
+    [string]$OutDir        = '',
+    [switch]$Resume
+)
+
+$ErrorActionPreference = 'Stop'
+
+# [CmdletBinding()] + -File empties $PSScriptRoot inside param defaults, so
+# resolve paths in the BODY. This exact trap killed build_release.ps1 before
+# gate 1 (see reference: psscriptroot-cmdletbinding).
+$RepoRoot    = Split-Path -Parent $PSScriptRoot
+if (-not $OutDir) { $OutDir = Join-Path $RepoRoot 'validation-runs' }
+$CombinedExe = Join-Path $RepoRoot 'Output\ClawFactory-Secure-Setup.exe'
+$Sha256      = '6f378d3ad731739e09a086e68eb898dcd446c3e6337ec8e118134ea183624bf9'
+$ExpectBytes = 440575752
+
+New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
+$run = "{0}-{1}" -f $VmName, (Get-Date -Format 'yyyyMMdd-HHmmss')
+$dir = Join-Path $OutDir $run
+New-Item -ItemType Directory -Path $dir -Force | Out-Null
+$stateFile = Join-Path $OutDir "$VmName.state.json"
+
+function Say($m, $c = 'Cyan') { Write-Host "[$([DateTime]::Now.ToString('HH:mm:ss'))] $m" -ForegroundColor $c }
+function Save($name, $content) { $content | Out-File (Join-Path $dir $name) -Encoding utf8 }
+
+$script:State = [ordered]@{ vmName = $VmName; resourceGroup = $ResourceGroup; machineId = ''; phase = 'init'; run = $run }
+if ($Resume -and (Test-Path $stateFile)) {
+    try {
+        $prev = Get-Content $stateFile -Raw | ConvertFrom-Json
+        $script:State.machineId = $prev.machineId; $script:State.phase = $prev.phase
+        Say "Resuming $VmName from phase '$($prev.phase)'" Yellow
+    } catch { }
+}
+function Set-Phase([string]$p) {
+    $script:State.phase = $p
+    [IO.File]::WriteAllText($stateFile, ($script:State | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
+    Say "  [state] phase=$p" DarkGray
+}
+
+# --- Invoke-Rc: the ONE way this harness talks to run-command (L2/L4/L7).
+# az on Windows is az.cmd and cmd.exe re-parses every argument, so the script
+# goes in via @file and the query carries no parentheses.
+function Invoke-Rc {
+    param([string]$Script, [string]$Label = 'run-command')
+    $f = Join-Path ([IO.Path]::GetTempPath()) ("cfv-rc-{0}.ps1" -f [Guid]::NewGuid())
+    try {
+        [IO.File]::WriteAllText($f, $Script, (New-Object Text.UTF8Encoding($false)))
+        $out = az vm run-command invoke -g $ResourceGroup -n $VmName `
+                 --command-id RunPowerShellScript --scripts "@$f" `
+                 --query "value[].message" -o tsv
+        if ($LASTEXITCODE -ne 0) { throw "$Label : az run-command exited $LASTEXITCODE" }
+        return ($out -join "`n")
+    } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue }
+}
+
+function Retrieve-VmFile {
+    param([string]$VmPath, [string]$BlobName, [string]$LocalPath, [string]$Key, [string]$Expiry)
+    $sas = az storage blob generate-sas --account-name $StorageAcct --account-key $Key `
+             --container-name $Container --name $BlobName --permissions cw --expiry $Expiry -o tsv
+    $url = "https://$StorageAcct.blob.core.windows.net/$Container/$BlobName`?$sas"
+    $put = Invoke-Rc ("if (-not (Test-Path '$VmPath')) { 'MISSING_ON_VM' } else { Invoke-WebRequest -Uri '$url' -Method Put -Headers @{'x-ms-blob-type'='BlockBlob'} -InFile '$VmPath' -UseBasicParsing | Out-Null; `"UPLOADED=`$((Get-Item '$VmPath').Length)`" }") "upload $BlobName"
+    if ($put -match 'MISSING_ON_VM')   { Say "  $VmPath absent on VM" Yellow; return $null }
+    if ($put -notmatch 'UPLOADED=\d+') { Say "  upload of $BlobName did not confirm: $put" Yellow; return $null }
+    if ("$(az storage blob exists --account-name $StorageAcct --account-key $Key --container-name $Container --name $BlobName --query exists -o tsv)" -ne 'true') {
+        Say "  $BlobName did NOT land in blob (PUT failed)" Yellow; return $null
+    }
+    az storage blob download --account-name $StorageAcct --account-key $Key `
+        --container-name $Container --name $BlobName --file $LocalPath --overwrite --output none
+    return $LocalPath
+}
+
+function Read-CredAsBase64([string]$Target) {
+    Add-Type -Namespace CFR -Name Cred -MemberDefinition @'
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet=System.Runtime.InteropServices.CharSet.Unicode)]
+public struct CREDENTIAL { public uint Flags; public uint Type; public string TargetName; public string Comment; public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten; public uint CredentialBlobSize; public System.IntPtr CredentialBlob; public uint Persist; public uint AttributeCount; public System.IntPtr Attributes; public string TargetAlias; public string UserName; }
+[System.Runtime.InteropServices.DllImport("Advapi32.dll", EntryPoint="CredReadW", CharSet=System.Runtime.InteropServices.CharSet.Unicode, SetLastError=true)]
+public static extern bool CredRead(string target, uint type, uint flags, out System.IntPtr credential);
+[System.Runtime.InteropServices.DllImport("Advapi32.dll", EntryPoint="CredFree")]
+public static extern void CredFree(System.IntPtr cred);
+public static string ReadB64(string target) {
+    System.IntPtr p;
+    if (!CredRead(target, 1, 0, out p)) return null;
+    try {
+        CREDENTIAL c = (CREDENTIAL)System.Runtime.InteropServices.Marshal.PtrToStructure(p, typeof(CREDENTIAL));
+        byte[] blob = new byte[c.CredentialBlobSize];
+        System.Runtime.InteropServices.Marshal.Copy(c.CredentialBlob, blob, 0, (int)c.CredentialBlobSize);
+        return System.Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(System.Text.Encoding.Unicode.GetString(blob)));
+    } finally { CredFree(p); }
+}
+'@ -Language CSharp
+    return [CFR.Cred]::ReadB64($Target)
+}
+
+# ---- 0. Preflight ---------------------------------------------------------
+Say "Preflight."
+$sub = az account show --query id -o tsv
+# The cached profile has lied before; ask the control plane for the real state.
+$sstate = az rest --method get --url "https://management.azure.com/subscriptions/$sub`?api-version=2020-01-01" --query state -o tsv
+if ($sstate -ne 'Enabled') { throw "Subscription is '$sstate', not Enabled. Stop." }
+Say "  subscription: Enabled" Green
+
+if (-not (az image show -g $ResourceGroup -n $Image --query id -o tsv 2>$null)) { throw "Image $Image not found in $ResourceGroup." }
+Say "  image present: $Image" Green
+
+if (-not (Test-Path $CombinedExe)) { throw "Artifact not found at $CombinedExe." }
+$len = (Get-Item $CombinedExe).Length
+if ($len -ne $ExpectBytes) { throw "Artifact size $len != expected $ExpectBytes. STOP -- wrong binary." }
+$localSha = (Get-FileHash $CombinedExe -Algorithm SHA256).Hash.ToLower()
+if ($localSha -ne $Sha256) { throw "Artifact hash mismatch: $localSha != $Sha256. STOP. Do not proceed with a different binary." }
+Say "  artifact digest verified: $localSha ($len bytes)" Green
+
+# Signature validity only. The Authenticode TIMESTAMP test is DECOUPLED from this
+# job by instruction: it needs a date after 2026-08-06 19:31Z and no VM, and it
+# lives on the pre-launch checklist. This check is not that test.
+$sig = Get-AuthenticodeSignature $CombinedExe
+if ($sig.Status -ne 'Valid') { throw "Artifact Authenticode is '$($sig.Status)', not Valid. Refusing to validate an unsigned build." }
+Say "  signature: Valid ($($sig.SignerCertificate.Subject))" Green
+
+if (-not $Resume -and (az vm list -g $ResourceGroup --query "[?name=='$VmName'].name" -o tsv)) {
+    throw "VM $VmName already exists. Use -Resume, or tear it down first."
+}
+if (-not $SeedKeyB64) { $SeedKeyB64 = Read-CredAsBase64 $SeedKeyTarget }
+if (-not $SeedKeyB64) { throw "Provider key absent from Credential Manager at '$SeedKeyTarget'. Guard 1 and Guard 2 both need real agent turns." }
+Say "  provider key present (value never printed)" DarkGray
+
+$resumePhase = if ($Resume) { $script:State.phase } else { 'init' }
+$skipTo = @{ init = 0; provisioned = 1; staged = 2; armed = 3; phase1done = 4 }
+$at = if ($skipTo.ContainsKey($resumePhase)) { $skipTo[$resumePhase] } else { 0 }
+
+try {
+    # ---- 1. Provision -----------------------------------------------------
+    if ($at -lt 1) {
+        Say "Provisioning $VmName ($Size, $Image, security-type Standard)..."
+        $pw = -join ((65..90)+(97..122)+(48..57)+(33,35,37,42) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
+        az vm create -g $ResourceGroup -n $VmName --image $Image --size $Size `
+            --admin-username $AdminUser --admin-password $pw `
+            --security-type Standard --public-ip-sku Standard --nsg-rule NONE `
+            --os-disk-name "$VmName-osdisk" --public-ip-address "$VmName-pip" --nsg "$VmName-nsg" `
+            --subnet (az network vnet subnet show -g $ResourceGroup --vnet-name bake-vmVNET -n bake-vmSubnet --query id -o tsv) `
+            --output none
+        if ($LASTEXITCODE -ne 0) {
+            Say "az vm create exit $LASTEXITCODE -- asking the VM whether it came up..." Yellow
+            $codes = @(az vm get-instance-view -g $ResourceGroup -n $VmName --query "instanceView.statuses[].code" -o tsv 2>$null)
+            if ($codes -notcontains 'PowerState/running') { throw "az vm create failed and VM not running (statuses: $($codes -join ', '))." }
+            if ($codes -match 'ProvisioningState/failed') { throw "INFRA: terminal provisioning-Failed (OSProvisioningTimedOut lottery). Retry a FRESH VM name. Not a product fault." }
+            Say "  ...VM running. Continuing." Yellow
+        }
+        # Sweep list: a killed process cannot run finally, and a leftover VM is a
+        # real cost and a real finding.
+        Add-Content -Path (Join-Path $OutDir 'ACTIVE_VMS.txt') -Value "$VmName $ResourceGroup $(Get-Date -Format s)" -Encoding ascii
+        Set-Phase 'provisioned'
+        Say "Provisioned. Admin password generated in memory, never printed or written." Green
+
+        Say "Waiting for the VM agent to report Ready..."
+        $agentOk = $false
+        foreach ($i in 1..24) {
+            $ag = @(az vm get-instance-view -g $ResourceGroup -n $VmName --query "instanceView.vmAgent.statuses[].displayStatus" -o tsv 2>$null)
+            if ($ag -match 'Ready') { $agentOk = $true; Say "  agent: Ready" Green; break }
+            Say "  agent: $($ag -join ',') ($i/24)" DarkGray; Start-Sleep -Seconds 15
+        }
+        if (-not $agentOk) { throw "VM agent never Ready after ~6 min. INFRA failure, not a product verdict." }
+
+        $script:State.machineId = (Invoke-Rc "(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography' MachineGuid).MachineGuid" 'machine-id').Trim()
+        Set-Phase 'provisioned'
+        Say "  machine_id: $($script:State.machineId)" DarkGray
+    } else { Say "Resume: provision already done." Yellow }
+
+    # ---- 2. Stage ---------------------------------------------------------
+    if ($at -lt 2) {
+        Say "Staging artifact + probe + runner + WSL channel..."
+        $key = az storage account keys list -g $ResourceGroup -n $StorageAcct --query "[0].value" -o tsv
+        if ($LASTEXITCODE -ne 0 -or -not $key) { throw "Could not read a storage key for $StorageAcct." }
+        $exp = (Get-Date).ToUniversalTime().AddHours(3).ToString('yyyy-MM-ddTHH:mmZ')
+
+        # Create the container if it is absent. The first run of this harness
+        # assumed '$Container' already existed; it did not (the account carries
+        # 'installers' and 'logs'), every upload failed, and because an az
+        # failure does NOT stop the script (L6) the harness cheerfully printed
+        # "uploaded" four times before the VM told the truth with a
+        # ContainerNotFound. Create it, then verify every upload by exit code.
+        az storage container create --account-name $StorageAcct --account-key $key --name $Container --output none 2>$null
+        if ("$(az storage container exists --account-name $StorageAcct --account-key $key --name $Container --query exists -o tsv)" -ne 'true') {
+            throw "Container '$Container' does not exist in $StorageAcct and could not be created."
+        }
+        Say "  container '$Container' present" DarkGray
+        $files = @(
+            @{ p = $CombinedExe; n = "combined-$VmName.exe" },
+            @{ p = (Join-Path $PSScriptRoot 'interim-v120-phase1.ps1');  n = 'interim-v120-phase1.ps1' },
+            @{ p = (Join-Path $PSScriptRoot 'interim-v120-runner.ps1');  n = 'interim-v120-runner.ps1' },
+            @{ p = (Join-Path $PSScriptRoot 'interim-v120-wslchan.ps1'); n = 'interim-v120-wslchan.ps1' }
+        )
+        foreach ($f in $files) {
+            if (-not (Test-Path $f.p)) { throw "Cannot stage '$($f.p)' -- not found." }
+            az storage blob upload --account-name $StorageAcct --account-key $key --container-name $Container `
+                --name $f.n --file $f.p --overwrite --output none
+            # L6: an az failure does not stop the script. Verify by exit code AND
+            # by asking the service for the blob's actual size, because "the
+            # command returned" and "the bytes are there" are different claims.
+            if ($LASTEXITCODE -ne 0) { throw "Upload of $($f.n) failed (az exit $LASTEXITCODE)." }
+            $remote = az storage blob show --account-name $StorageAcct --account-key $key --container-name $Container `
+                        --name $f.n --query "properties.contentLength" -o tsv
+            $localLen = (Get-Item $f.p).Length
+            if ("$remote" -ne "$localLen") { throw "Upload of $($f.n) landed $remote bytes, expected $localLen." }
+            Say "  uploaded $($f.n) ($localLen bytes, size confirmed at the service)" DarkGray
+        }
+        function Sas([string]$name) {
+            $s = az storage blob generate-sas --account-name $StorageAcct --account-key $key `
+                   --container-name $Container --name $name --permissions r --expiry $exp -o tsv
+            return "https://$StorageAcct.blob.core.windows.net/$Container/$name`?$s"
+        }
+        $uExe = Sas "combined-$VmName.exe"; $uP1 = Sas 'interim-v120-phase1.ps1'
+        $uRun = Sas 'interim-v120-runner.ps1'; $uCh = Sas 'interim-v120-wslchan.ps1'
+        $stage = "`$ErrorActionPreference='Stop'; New-Item -ItemType Directory -Path C:\cfv\jobs -Force | Out-Null; New-Item -ItemType Directory -Path C:\cfv\wsl -Force | Out-Null; " +
+                 "Invoke-WebRequest -Uri '$uExe' -OutFile C:\cfv\combined-setup.exe -UseBasicParsing; " +
+                 "Invoke-WebRequest -Uri '$uP1' -OutFile C:\cfv\interim-v120-phase1.ps1 -UseBasicParsing; " +
+                 "Invoke-WebRequest -Uri '$uRun' -OutFile C:\cfv\interim-v120-runner.ps1 -UseBasicParsing; " +
+                 "Invoke-WebRequest -Uri '$uCh' -OutFile C:\cfv\interim-v120-wslchan.ps1 -UseBasicParsing; " +
+                 "`$h=(Get-FileHash C:\cfv\combined-setup.exe -Algorithm SHA256).Hash.ToLower(); " +
+                 "if (`$h -ne '$Sha256') { throw `"ARTIFACT HASH MISMATCH ON VM: `$h`" }; " +
+                 "`"OK staged; artifact=`$h size=`$((Get-Item C:\cfv\combined-setup.exe).Length)`""
+        $r = Invoke-Rc $stage 'stage'; Save 'stage.txt' $r
+        if ($r -notmatch 'OK staged') { throw "Stage did not confirm the artifact hash on the VM. Output: $r" }
+        Set-Phase 'staged'; Say "Staged, hash re-verified on the VM. $r" Green
+    } else { Say "Resume: staging already done." Yellow }
+
+    # ---- 3. Seed key + arm auto-logon ------------------------------------
+    if ($at -lt 3) {
+        Say "Seeding provider key and arming the auto-logon session..."
+        $pw = -join ((65..90)+(97..122)+(48..57)+(33,35,37,42) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
+        az vm user update -g $ResourceGroup -n $VmName --username $AdminUser --password $pw --output none
+        $seedPs = @"
+`$ErrorActionPreference='Stop'
+Add-Type -Namespace CFW -Name Cred -MemberDefinition @'
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet=System.Runtime.InteropServices.CharSet.Unicode)]
+public struct CREDENTIAL { public uint Flags; public uint Type; public string TargetName; public string Comment; public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten; public uint CredentialBlobSize; public System.IntPtr CredentialBlob; public uint Persist; public uint AttributeCount; public System.IntPtr Attributes; public string TargetAlias; public string UserName; }
+[System.Runtime.InteropServices.DllImport("Advapi32.dll", EntryPoint="CredWriteW", CharSet=System.Runtime.InteropServices.CharSet.Unicode, SetLastError=true)]
+public static extern bool CredWrite(ref CREDENTIAL c, uint f);
+public static bool Write(string target, string secret) {
+    byte[] blob = System.Text.Encoding.Unicode.GetBytes(secret);
+    System.IntPtr p = System.Runtime.InteropServices.Marshal.AllocHGlobal(blob.Length);
+    System.Runtime.InteropServices.Marshal.Copy(blob, 0, p, blob.Length);
+    CREDENTIAL c = new CREDENTIAL(); c.Type = 1; c.TargetName = target; c.CredentialBlobSize = (uint)blob.Length;
+    c.CredentialBlob = p; c.Persist = 2; c.UserName = "clawfactory";
+    bool ok = CredWrite(ref c, 0); System.Runtime.InteropServices.Marshal.FreeHGlobal(p); return ok;
+}
+'@ -Language CSharp
+`$k=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$SeedKeyB64'))
+if(-not [CFW.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
+`$k=`$null
+'seeded' | Out-File C:\cfv\seed-ok.txt -Encoding ascii
+"@
+        $seedEnc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($seedPs))
+
+        # wrapper.cmd. The runner starts BEFORE the probe so that a wedged
+        # install still leaves a live diagnostic channel. Each command and its
+        # redirect are ONE joined physical line: cfv-149 lost an entire run to a
+        # multi-line concat inside an array literal, which PowerShell parsed as
+        # separate elements and silently orphaned the redirect.
+        $probeArgs = @(
+            '-NoProfile','-ExecutionPolicy','Bypass',
+            '-File','C:\cfv\interim-v120-phase1.ps1',
+            '-CombinedExe','C:\cfv\combined-setup.exe',
+            '-LicenseKey',$LicenseKey
+        ) -join ' '
+        $cmdLines = @(
+            '@echo off',
+            "powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand $seedEnc",
+            'start "cfrunner" powershell -NoProfile -ExecutionPolicy Bypass -File C:\cfv\interim-v120-runner.ps1',
+            "powershell $probeArgs > C:\cfv\phase1-out.txt 2>&1",
+            'echo PHASE1_DONE > C:\cfv\PHASE1_DONE.txt'
+        )
+        if ($cmdLines.Count -ne 5) {
+            throw "wrapper.cmd builder produced $($cmdLines.Count) lines, expected 5. The probe command was likely re-split from its redirect (cfv-149 signature). Refusing to arm a broken wrapper."
+        }
+        $cmdB64 = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(($cmdLines -join "`r`n") + "`r`n"))
+        $arm = "`$ErrorActionPreference='Stop'; " +
+               "[IO.File]::WriteAllBytes('C:\cfv\wrapper.cmd', [Convert]::FromBase64String('$cmdB64')); " +
+               "`$w='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'; " +
+               "Set-ItemProperty `$w AutoAdminLogon '1'; Set-ItemProperty `$w DefaultUserName '$AdminUser'; " +
+               "Set-ItemProperty `$w DefaultPassword '$pw'; Set-ItemProperty `$w AutoLogonCount 1 -Type DWord; " +
+               "Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' CFV-Interim 'cmd /c C:\cfv\wrapper.cmd'; " +
+               "'armed'"
+        $r = Invoke-Rc $arm 'arm'; Save 'arm.txt' $r
+        if ($r -notmatch 'armed') { throw "Arm did not confirm. Do not reboot into a half-written wrapper. Output: $r" }
+        Set-Phase 'armed'
+        Say "Armed. Rebooting into the auto-logon session to run Phase 1..." Yellow
+        az vm restart -g $ResourceGroup -n $VmName --output none
+    } else { Say "Resume: already armed." Yellow }
+
+    # ---- 4. Poll for Phase 1 ---------------------------------------------
+    if ($at -lt 4) {
+        Say "Polling for PHASE1_DONE (install ~15-25 min; allow up to ~75 min)..."
+        $done = $false
+        foreach ($i in 1..100) {
+            Start-Sleep -Seconds 45
+            $p = Invoke-Rc "if (Test-Path C:\cfv\PHASE1_DONE.txt) { 'PHASE1_DONE' } else { `$m=(Get-ChildItem C:\cfv\*.marker -EA SilentlyContinue | ForEach-Object Name) -join ','; `$hb=if (Test-Path C:\cfv\jobs\_runner.heartbeat) { Get-Content C:\cfv\jobs\_runner.heartbeat -Raw } else { 'no-runner' }; `"PENDING markers=`$m runner=`$hb`" }" 'poll'
+            if ($p -match 'PHASE1_DONE') { $done = $true; Say "Phase 1 finished on the VM." Green; break }
+            if ($i % 4 -eq 0) { Say "  ...running ($i/100, ~$([int]($i*0.75))min) $p" DarkGray }
+        }
+        if (-not $done) { throw "Phase 1 did not report PHASE1_DONE within ~75 min. Resume with -Resume before blaming the product." }
+        Set-Phase 'phase1done'
+    }
+
+    # ---- 5. Retrieve both evidence channels -------------------------------
+    Say "Retrieving both evidence channels..."
+    $key  = az storage account keys list -g $ResourceGroup -n $StorageAcct --query "[0].value" -o tsv
+    $dExp = (Get-Date).ToUniversalTime().AddHours(3).ToString('yyyy-MM-ddTHH:mmZ')
+    $main  = Retrieve-VmFile 'C:\cfv\phase1-out.txt'       "phase1-out-$VmName.txt"       (Join-Path $dir 'phase1-out.txt')       $key $dExp
+    $probe = Retrieve-VmFile 'C:\cfv\phase1-out-probe.txt' "phase1-out-probe-$VmName.txt" (Join-Path $dir 'phase1-out-probe.txt') $key $dExp
+    $null  = Retrieve-VmFile 'C:\cfv\phase1-results.json'  "phase1-results-$VmName.json"  (Join-Path $dir 'phase1-results.json')  $key $dExp
+    $null  = Retrieve-VmFile 'C:\ProgramData\ClawFactory\logs\setup.log' "setup-$VmName.log" (Join-Path $dir 'setup.log') $key $dExp
+    Say ("  main: {0} | probe transcript: {1}" -f `
+        $(if ($main)  { "$((Get-Item $main).Length) B" }  else { 'MISSING' }),
+        $(if ($probe) { "$((Get-Item $probe).Length) B" } else { 'MISSING' })) Cyan
+
+    # ---- 5b. Evidence gate -------------------------------------------------
+    $haveEvidence = $false
+    foreach ($f in @($main, $probe)) {
+        if ($f -and (Test-Path $f) -and (Get-Item $f).Length -ge 512 -and (Get-Content $f -Raw) -match 'PHASE1_PROBE_COMPLETE') { $haveEvidence = $true }
+    }
+    if (-not $haveEvidence) {
+        Write-Host "`n===== EVIDENCE_MISSING =====" -ForegroundColor Red
+        Say "No channel carries PHASE1_PROBE_COMPLETE above 512 B. Deallocating and PRESERVING $VmName for salvage." Red
+        az vm deallocate -g $ResourceGroup -n $VmName --output none 2>$null
+        Save 'EVIDENCE-MISSING.txt' "EVIDENCE_MISSING at $(Get-Date -Format s). $VmName deallocated + preserved."
+        throw "EVIDENCE_MISSING: $VmName deallocated and preserved, not torn down."
+    }
+    Say "Evidence gate PASSED." Green
+
+    Write-Host "`n===== PHASE 1 EVIDENCE (producer transcript) =====" -ForegroundColor Cyan
+    if ($probe) { Get-Content $probe } elseif ($main) { Get-Content $main }
+
+    Write-Host "`n===== CHECKPOINT =====" -ForegroundColor Yellow
+    Say "$VmName IS STILL RUNNING AND BILLING, by design: Phase 3 needs an interactive session." Yellow
+    Say "Evidence in $dir" Green
+}
+catch {
+    Say "DRIVER ERROR: $($_.Exception.Message)" Red
+    Say "$VmName left in place for diagnosis. Tear down with validation\job3-teardown.ps1 -VmName $VmName" Red
+    throw
+}

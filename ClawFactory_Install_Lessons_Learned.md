@@ -936,3 +936,48 @@ how confident you are about the file, because confidence is not a control. Pin i
 provenance next to the pin, because a pin with no recorded source is only half of one. It proves the
 bytes have not changed since somebody pinned them; it says nothing about whether they were ever the
 right bytes.
+
+## L27 -- a delivery channel with no size guard silently deletes whole features from the product
+
+**Discovered:** v1.2.0 interim clean-box validation (2026-08-05), first clean install attempt.
+
+The install died at step 15e with `Exception calling "Start" with "1" argument(s): "The filename or
+extension is too long"`. The cause is not exotic. `Invoke-WslBash` (setup.ps1:659-671) base64-encodes
+the whole script it is handed and passes it as `ProcessStartInfo.Arguments`. `Step-InstallQuarantine`
+builds its script by base64-embedding eight resource files INTO that script, so the payloads are
+encoded twice, and Windows `CreateProcess` caps a command line at 32,767 characters.
+
+Measured across every step using the pattern:
+
+| step | resulting command line | vs 32,767 |
+|---|---|---|
+| 15b turn gate | 17,208 | 15,559 to spare |
+| 15d chat proxy | 28,676 | **4,091 to spare** |
+| 15e quarantine (Guard 1) | 84,692 | OVER by 51,925 |
+| 15f send (Guard 2) | 153,912 | OVER by 121,145 |
+
+Three things make this worth its own lesson:
+
+1. **Both v1 guards were undeliverable, and every dev-box test still passed.** Guard 1 and Guard 2
+   were validated where their components were already present. Neither had ever been installed by the
+   shipping installer. The mechanisms were right; the delivery was broken; and no test looked at
+   delivery. A guard that cannot be installed is, for the customer, a guard that does not exist.
+2. **The next failure was already queued.** Fixing 15e alone moves the failure to 15f, which is over
+   by nearly four times the limit itself. When a limit is breached, measure EVERY caller of the same
+   channel before declaring the blast radius, because the second one is usually already broken too.
+3. **The one that had not failed yet was the real warning.** 15d passes with 4,091 characters of
+   headroom, which is not a margin, it is a countdown. Any growth in `clawfactory-proxy.js` converts a
+   working install into a failing one, with no code change to blame.
+
+**Rules:**
+1. **Never carry a variable-size payload on a command line.** Write it to a file and pass the path.
+   The limit is invisible in source, absent from every code review, and only appears when a payload
+   crosses it on a customer's machine.
+2. **Put a guard at the channel, not at each caller.** `Invoke-WslBash` should refuse, loudly and by
+   name, any script whose encoded form approaches the limit. A per-caller check rots the moment a new
+   caller is added, and this channel already has four.
+3. **Measure headroom, not just pass or fail.** "It installs" is not the property you want; "it
+   installs with room" is. A step at 90 percent of a hard limit is a defect that has not fired yet.
+4. **A component is not shipped until the SHIPPING INSTALLER has installed it on a clean box.**
+   Not "the mechanism works", not "the dev box has it". Both guards were recorded as shipped and
+   neither could be delivered.
