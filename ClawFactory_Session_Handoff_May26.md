@@ -144,7 +144,7 @@ Tell Claude -- it will write the v1.0.30 compile + validation prompt:
 | License API | `C:\Users\bmcki\clawfactory-license-api` |
 | Installer source | `ClawFactory-Secure-Setup.iss` |
 | Main install script | `setup.ps1` |
-| Build command | `& 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' 'ClawFactory-Secure-Setup.iss'` |
+| Build command | `.\scripts\build_release.ps1` (runs the pre-build gates, compiles, then signs). A bare `ISCC.exe` compile is a local dev build only and cannot be signed. Corrected 2026-08-05; this row previously taught the direct-ISCC route |
 | Output binary | `Output\ClawFactory-Secure-Setup.exe` |
 
 ## Opening Prompt for New Session

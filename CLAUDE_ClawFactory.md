@@ -610,7 +610,7 @@ Re-read after every `OPENCLAW_VERSION` pin bump — paths and command names can 
 ```ini
 ; ClawFactory Secure Setup - Inno Setup 6 script
 ; Builds a hardened OpenClaw Skills Factory on Windows 11.
-; Compile with: "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ClawFactory-Secure-Setup.iss
+; Build with: .\scripts\build_release.ps1   (gates, then compile, then sign)
 
 #define MyAppName      "ClawFactory Secure Setup"
 #define MyAppVersion   "1.0.0"

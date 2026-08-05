@@ -17,7 +17,7 @@ ANSWER: The installer does **not** ship a pairing flow. Pair from the control UI
 
 Q3: Is the upstream `install.sh` SHA-256 pin real, and how do I rotate it?
 WHAT HAPPENS: `setup.ps1` line 26: `$OpenClawInstallSha256 = 'b585950258e21eb3fb0b2ecfbc2f1e8d79ae472b2c21a7919a082067b925f6e7'`. Step-InstallOpenClaw `curl`s `openclaw.ai/install.sh`, computes `sha256sum`, exits 43 on mismatch and 42 if the pin is the literal placeholder string. The pin is verified before the script runs.
-ANSWER: Real. To rotate: re-fetch `install.sh` from a trusted source, compute `sha256sum`, paste hex into `setup.ps1` line 26, recompile via `ISCC.exe`. The README documents this in the "Pinning the OpenClaw install.sh hash" section. **Caveat**: nothing pins the OpenClaw `.deb`/npm artifacts that `install.sh` itself fetches — your trust chain bottoms out at OpenClaw's CDN.
+ANSWER: Real. To rotate: re-fetch `install.sh` from a trusted source, compute `sha256sum`, paste hex into `setup.ps1` line 26, rebuild via `.\scripts\build_release.ps1`. The README documents this in the "Pinning the OpenClaw install.sh hash" section. **Caveat**: nothing pins the OpenClaw `.deb`/npm artifacts that `install.sh` itself fetches, so your trust chain bottoms out at OpenClaw's CDN.
 
 Q4: Can I verify the `.exe` itself wasn't tampered with?
 WHAT HAPPENS: The `.iss` has a commented-out `SignTool=signtool` directive. As shipped, the `.exe` is **unsigned**. Windows SmartScreen will warn "Unknown publisher" on first run.

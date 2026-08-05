@@ -7,6 +7,11 @@ Every invocation includes an RFC 3161 timestamp (/tr + /td SHA256). Azure Artifa
 Signing leaf certificates are valid for only 3 days and rotate daily -- without a
 timestamp, the signature reads as expired within days of shipping.
 
+This script REFUSES to sign a binary that scripts\build_release.ps1 did not just
+produce, so that the build gates cannot be skipped by compiling with ISCC.exe and
+signing the result. Use -SignWithoutBuildStamp to override in an emergency; it
+announces itself loudly in the output and in this file's own reasoning below.
+
 Doc source used to build this script (fetched live, not from training-data
 assumptions): https://learn.microsoft.com/en-us/azure/artifact-signing/how-to-signing-integrations
 (ms.date 2026-05-14). Package/role names on that page reflect the Trusted Signing
@@ -20,9 +25,17 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$InstallerPath,
 
-    [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
+    # EMERGENCY ONLY. Signs a binary with no valid build stamp, meaning a binary
+    # that may have passed none of build_release.ps1's gates. Named rather than
+    # undocumented on purpose: an override that exists but is not written down
+    # gets rediscovered as a trick, and a signing path with no override at all
+    # gets worked around by editing this script, which is worse than both.
+    [switch]$SignWithoutBuildStamp,
 
-    [string]$ToolsDir = (Join-Path (Split-Path -Parent $PSScriptRoot) "signing\tools"),
+    # No defaults here on purpose; see the resolution below.
+    [string]$RepoRoot,
+
+    [string]$ToolsDir,
 
     [string]$TimestampUrl = "http://timestamp.acs.microsoft.com"
 )
@@ -34,10 +47,80 @@ function Fail($msg) {
     exit 1
 }
 
+# $RepoRoot and $ToolsDir used to default to expressions over $PSScriptRoot in the
+# param block. That works when the script is invoked with & or dot-sourced from an
+# existing session, which is how it has always been called, but it is broken under
+# `powershell.exe -File`: with [CmdletBinding()] present, parameter defaults are
+# evaluated while $PSScriptRoot is still EMPTY, so Split-Path throws "Cannot bind
+# argument to parameter 'Path'" and the script dies before doing anything. Same
+# defect, same diagnosis and same fix as build_release.ps1 on 2026-08-05, which
+# left this one latent. $PSScriptRoot IS populated by the time the body runs.
+if (-not $RepoRoot) { $RepoRoot = Split-Path -Parent $PSScriptRoot }
+if (-not $RepoRoot) { Fail "could not resolve the repo root; pass -RepoRoot explicitly." }
+if (-not $ToolsDir) { $ToolsDir = Join-Path $RepoRoot "signing\tools" }
+
 if (-not (Test-Path $InstallerPath)) {
     Fail "Installer not found: $InstallerPath"
 }
 $InstallerPath = (Resolve-Path $InstallerPath).Path
+
+# ---------------------------------------------------------------------------
+# 0. Build-gate enforcement. Refuse anything build_release.ps1 did not stamp.
+# ---------------------------------------------------------------------------
+# Until 2026-08-05 this script referenced no gate of any kind. It took an
+# arbitrary -InstallerPath and signed it, so
+#
+#     ISCC.exe ClawFactory-Secure-Setup.iss
+#     scripts\sign_installer.ps1 -InstallerPath Output\ClawFactory-Secure-Setup.exe
+#
+# produced a release-grade signed binary that had passed none of the seven build
+# gates, and that route was documented in six places including the README.
+#
+# The stamp is state, and anyone who can run this script can forge one. That is
+# accepted rather than solved: the threat here is a tired founder taking a
+# documented shortcut under time pressure, not an adversary with local code
+# execution. Against an attacker this is ADVISORY. Against process drift it is
+# structural, because the shortcut now fails instead of quietly succeeding.
+#
+# Local dev compiles with ISCC.exe remain entirely legitimate. They simply do not
+# produce signable output, which is the correct division: unsigned binaries never
+# reach a customer, and the gates are only load-bearing for the ones that do.
+$stampPath = "$InstallerPath.buildstamp"
+if ($SignWithoutBuildStamp) {
+    Write-Host ""
+    Write-Host "***************************************************************************"
+    Write-Host "*** -SignWithoutBuildStamp: BUILD GATES NOT ENFORCED FOR THIS SIGNATURE ***"
+    Write-Host "***************************************************************************"
+    Write-Host "This binary is being signed WITHOUT proof that scripts\build_release.ps1"
+    Write-Host "produced it. It may not have passed the SOUL, bundle, Studio, version,"
+    Write-Host "persona, workspace-SOUL or rootfs gate. Do not publish it as a release"
+    Write-Host "unless you know exactly why you reached for this switch."
+    Write-Host "  target: $InstallerPath"
+    Write-Host ""
+} else {
+    if (-not (Test-Path -LiteralPath $stampPath)) {
+        Fail ("no build stamp at $stampPath, so this binary was not produced by " +
+              "scripts\build_release.ps1 and may have passed none of the build gates. Build " +
+              "with `"scripts\build_release.ps1`" instead of calling ISCC.exe directly. If you " +
+              "genuinely need to re-sign an existing binary, pass -SignWithoutBuildStamp.")
+    }
+    try {
+        $stamp = Get-Content -Raw -LiteralPath $stampPath | ConvertFrom-Json
+    } catch {
+        Fail "build stamp at $stampPath is unreadable: $($_.Exception.Message)"
+    }
+    if (-not $stamp.unsignedSha256) {
+        Fail "build stamp at $stampPath carries no unsignedSha256 field."
+    }
+    $actualHash = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash.ToLower()
+    if ($actualHash -ne ([string]$stamp.unsignedSha256).ToLower()) {
+        Fail ("build stamp mismatch: the stamp covers $($stamp.unsignedSha256) but " +
+              "$InstallerPath hashes to $actualHash. The binary changed after it was built, or " +
+              "the stamp belongs to a different build. Re-run scripts\build_release.ps1.")
+    }
+    Write-Host "Build stamp OK: produced by $($stamp.producer) v$($stamp.version) at $($stamp.stampedUtc)"
+    Write-Host "  gates passed: $($stamp.gatesPassed -join ', ')"
+}
 
 # ---------------------------------------------------------------------------
 # 1. Load signing config from .env (repo-root, gitignored -- never committed)
@@ -156,6 +239,15 @@ Write-Host "  metadata: $metadataPath"
 
 if ($LASTEXITCODE -ne 0) {
     Fail "signtool sign failed (exit $LASTEXITCODE). Installer is UNSIGNED -- do not publish it."
+}
+
+# Consume the stamp. Signing appends to the file, so the digest the stamp covers
+# is no longer the digest on disk and the stamp is now stale by construction.
+# Leaving it would let a later direct compile land next to a stamp that no longer
+# describes anything, which is the one way this check could quietly weaken.
+if (Test-Path -LiteralPath $stampPath) {
+    Remove-Item -LiteralPath $stampPath -Force
+    Write-Host "Build stamp consumed: $stampPath"
 }
 
 Write-Host "Signed successfully: $InstallerPath"

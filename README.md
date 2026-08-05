@@ -87,7 +87,7 @@ The script runs 19 checks and exits 0 only if all pass:
 
 ## Known limitations
 
-- **SmartScreen "Unknown publisher" warning on unsigned builds.** Releases built via `scripts\build_release.ps1` are Authenticode-signed (Azure Artifact Signing, individual identity, Bret Mckinney) and timestamped. A build compiled directly with `ISCC.exe` (skipping the signing step) is still unsigned — click "More info -> Run anyway" for those.
+- **SmartScreen "Unknown publisher" warning on unsigned builds.** Releases built via `scripts\build_release.ps1` are Authenticode-signed (Azure Artifact Signing, individual identity, Bret Mckinney) and timestamped. A local dev build compiled directly with `ISCC.exe` is unsigned and cannot be signed; click "More info -> Run anyway" for those.
 - **WSL1 fallback on hardware without nested virtualization.** If `HCS_E_HYPERV_NOT_INSTALLED` fires (common in nested VMs and some older laptops), the installer falls back to WSL1 automatically. Some features (systemd, networking) behave differently — egress firewall uses iptables-legacy instead of nftables.
 - **Provider model IDs are forward-looking** (`grok-4-1-fast`, `gpt-5`, `claude-sonnet-4-6`, `gemini-2.5-pro`). If your provider's catalog uses a different name when you install, change it via `Switch AI Provider` from the Start Menu.
 
@@ -105,18 +105,30 @@ Buy at [clawfactory.app](https://clawfactory.app).
 
 ## Building from source
 
+```powershell
+.\scripts\build_release.ps1
+```
+
+This is the build command. It runs seven pre-build gates, compiles with Inno Setup, and signs the result. The gates check that the SOUL, persona and composed-workspace-SOUL digests pinned in `setup.ps1` match the files on disk, that every preflight-required resource is actually bundled, that the embedded Studio payload and the bundled Ubuntu rootfs are the pinned ones, and that the two version literals agree. Each one fails the build on drift and none of them auto-correct.
+
+Output: `Output\ClawFactory-Secure-Setup.exe`. Requires the bundled rootfs at `resources\ubuntu-rootfs.tar.gz` (gitignored; see [Build prerequisites in CONTRIBUTING.md](CONTRIBUTING.md#build-prerequisites) for the source URL and digest). The `.iss` and `setup.ps1` are the only sources of truth: every line is auditable before you trust a build.
+
+### Local dev compiles
+
+For a quick local check that the `.iss` still compiles, `ISCC.exe` on its own is fine:
+
 ```cmd
 "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ClawFactory-Secure-Setup.iss
 ```
 
-Output: `Output\ClawFactory-Secure-Setup.exe`. Requires the bundled rootfs at `resources\ubuntu-rootfs.tar.gz` (gitignored — sourced separately at build time). The `.iss` and `setup.ps1` are the only sources of truth — every line is auditable before you trust a build.
+Its output is a legitimate dev build and **cannot be signed**: `scripts\sign_installer.ps1` refuses any binary that `build_release.ps1` did not produce, so a compile that skipped the gates cannot become a release. Nothing stops you compiling; it just doesn't get you a shippable artifact.
 
 ### Producing a signed release build
 
 Any installer uploaded to a GitHub Release must be Authenticode-signed via Azure
-Artifact Signing. Use `scripts\build_release.ps1` instead of calling `ISCC.exe`
-directly — it compiles with Inno Setup and then signs the resulting `.exe`
-(`scripts\sign_installer.ps1`) before it's ready to upload:
+Artifact Signing. `scripts\build_release.ps1` is the whole path: it runs the gates,
+compiles with Inno Setup, records a build stamp over the compiled bytes, and then
+signs the `.exe` via `scripts\sign_installer.ps1`.
 
 ```powershell
 .\scripts\build_release.ps1
@@ -126,6 +138,13 @@ Requires `AZURE_SIGNING_*` values in a repo-root `.env` (see `signing\metadata.j
 for the fields) and the service principal to hold the **Artifact Signing Certificate
 Profile Signer** role on the `clawfactory-signing` account. Signing fails loudly
 (non-zero exit) on any error — never proceed with an unsigned `.exe`.
+
+`sign_installer.ps1` refuses to sign a binary carrying no build stamp, or one whose
+bytes do not match the stamp beside it. To re-sign an existing binary in an emergency,
+pass `-SignWithoutBuildStamp`; it prints a banner saying the gates were not enforced.
+Be honest about what that check is worth: the stamp is an ordinary file, so anyone who
+can run the signer can write one. It is a guard against the documented shortcut being
+taken under time pressure, not against an attacker who already has local execution.
 
 ## License
 

@@ -1,6 +1,9 @@
 ; ClawFactory Secure Setup - Inno Setup 6 script
 ; Builds a hardened OpenClaw Skills Factory on Windows 11.
-; Compile with: "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ClawFactory-Secure-Setup.iss
+; Build with: .\scripts\build_release.ps1   (gates, then compile, then sign)
+; A bare "ISCC.exe ClawFactory-Secure-Setup.iss" compiles a local dev build. It
+; skips every pre-build gate, so its output cannot be signed: sign_installer.ps1
+; refuses any binary build_release.ps1 did not stamp.
 
 #define MyAppName      "ClawFactory Secure Setup"
 #define MyAppVersion   "1.2.0"
