@@ -863,3 +863,76 @@ input class is dead weight and the guard protecting it is guarding nothing.
 The cost is real and should be stated rather than waved past: a user-authorable persona is a genuine
 feature, and this defers it to v1.5 rather than shipping it. Deleting an input class is only cheap
 when nobody was using it, which is why that question is asked first and answered with evidence.
+
+---
+
+## L26 -- a large opaque dependency admitted early is inherited by every control built on top of it
+
+**Discovered:** 2026-08-05, during the release-engineering pass after the first gated build. Not by
+a failure. Nothing broke; the gap was found by asking a question that had never been asked, which is
+the point of the lesson.
+
+**The shape.** `resources/ubuntu-rootfs.tar.gz` entered the repo on 2026-05-01 as a 341 MB tarball.
+It was gitignored the same day for a good and correct reason, that it exceeds GitHub's 100 MB
+per-file limit, and the commit that did so said "Source it separately (CDN / build-time download)".
+That sentence is the whole defect. It defers the question of *which* bytes, and nothing ever came
+back to answer it. Fourteen weeks later the file had:
+
+* no recorded source URL anywhere in the repo or in any session report,
+* no digest in any pin, gate, checklist or close-out,
+* a `CONTRIBUTING.md` line promising "see internal docs for the source", and no such doc,
+* and no build-time or install-time check of any kind, not even a presence check. The audit of
+  2026-08-04 scored it PRESENCE ONLY and noted it was not even in `Step-Preflight`'s `$required`.
+
+Meanwhile the product had been busy building controls, and every one of them runs *inside* that
+filesystem: the nftables egress chain, both root brokers, the credential file modes, the turn gate,
+the immutable SOUL. Each was designed carefully, tested on clean VMs, and validated on Azure. All of
+that work sits on top of a dependency nobody had identified.
+
+**Why it is worth a lesson even though it turned out fine.** It did turn out fine. The bytes were
+identified as a stock, unmodified Canonical image, and the digest matched Canonical's own published
+`SHA256SUMS` exactly:
+
+```
+1483cc5c1dce13064f774834cbffdff226559fd522a67a381a8ea77d63fb4109
+  ubuntu-jammy-wsl-amd64-ubuntu22.04lts.rootfs.tar.gz
+  https://cloud-images.ubuntu.com/wsl/jammy/20250318/
+```
+
+That is the best of the three possible outcomes and it was luck in exactly one respect: whoever
+fetched it in May fetched the right thing, and nothing since had touched it. The important detail is
+that **before the check ran, the product could not tell that outcome apart from the worst one.** A
+substituted rootfs, a rootfs with an added user, a rootfs with a modified `nftables` binary, would
+all have installed and validated identically green. The controls would have reported success while
+enforcing nothing, because a control is only as trustworthy as the filesystem it executes in.
+
+**The generalisation, and it is not really about rootfs images.** A dependency gets a pass on
+identification in inverse proportion to how convenient it is to check:
+
+| Property | Effect |
+| --- | --- |
+| Large | Too big for git, so version control cannot see it change |
+| Opaque | Nobody opens a 341 MB tarball casually, so drift is invisible on inspection |
+| Admitted early | Predates the controls, so it is background rather than a decision |
+| Works | Never generates a failure that would prompt anyone to look |
+| Foundational | Everything above it depends on it, so it is the *last* thing anyone suspects |
+
+Every one of those makes the dependency *more* important to pin and *less* likely to get pinned. The
+`ClawChat.exe` payload is the same class, tracked in git but carrying no build-time pin. The Studio
+payload was the same class until 2026-08-04, and its close call was not hypothetical: the pinned
+digest had gone stale enough to describe a build missing two whole guard panels.
+
+**The rule.** *When you admit a dependency you cannot read, record where it came from in the same
+commit that admits it.* Not later, not in an internal doc, not in a close-out. The recording is
+cheap at admission time, when someone still knows the answer, and it gets monotonically more
+expensive afterwards. Four months on, answering it required unpacking the archive, dating it from
+`/var/lib/dpkg/status` and `/var/log/apt/history.log`, reading the apt manifest to recognise
+`ubuntu-wsl wsl-setup` as Canonical's WSL package set, and then finding the matching dated build
+directory upstream. That is a session of work to recover something that was one URL at the time.
+
+The corollary is the check that would have caught it: **for every file the build consumes, ask "if
+someone swapped this, what would notice?"** If the honest answer is "nothing", it does not matter
+how confident you are about the file, because confidence is not a control. Pin it, and record the
+provenance next to the pin, because a pin with no recorded source is only half of one. It proves the
+bytes have not changed since somebody pinned them; it says nothing about whether they were ever the
+right bytes.
