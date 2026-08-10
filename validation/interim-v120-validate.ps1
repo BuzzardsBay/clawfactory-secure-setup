@@ -52,8 +52,15 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot    = Split-Path -Parent $PSScriptRoot
 if (-not $OutDir) { $OutDir = Join-Path $RepoRoot 'validation-runs' }
 $CombinedExe = Join-Path $RepoRoot 'Output\ClawFactory-Secure-Setup.exe'
-$Sha256      = '6f378d3ad731739e09a086e68eb898dcd446c3e6337ec8e118134ea183624bf9'
-$ExpectBytes = 440575752
+# Repinned 2026-08-10 after the Invoke-WslBash stdin fix.
+#
+# The original input to this job was 6f378d3a..., 440,575,752 bytes. That build
+# could not install: Step-InstallQuarantine needed 84,692 characters of command
+# line against a 32,767 limit, and Step-InstallSend 153,912, so neither Guard 1
+# nor Guard 2 was deliverable. setup.ps1 now streams the script over stdin, which
+# changes the bytes, so the artifact is re-pinned to the new signed build.
+$Sha256      = '04baf6dc5b54144e6f0b1ae61b63c5da28b508dbd5056629ad49c60b23608ca4'
+$ExpectBytes = 440578344
 
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $run = "{0}-{1}" -f $VmName, (Get-Date -Format 'yyyyMMdd-HHmmss')

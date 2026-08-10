@@ -656,23 +656,107 @@ function Invoke-WslBash {
         [Parameter(Mandatory)][string]$Script,
         [string]$User = 'root'
     )
-    $enc = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Script.Replace("`r`n", "`n").Replace("`r", "`n")))
+    # The script travels over STDIN, never over argv.
+    #
+    # It used to be base64'd onto the command line. That silently capped every
+    # caller at the Windows CreateProcess limit of 32,767 characters, and on
+    # 2026-08-05 the v1.2.0 clean-box validation found that BOTH v1 guards had
+    # sailed past it: Step-InstallQuarantine needed 84,692 characters and
+    # Step-InstallSend 153,912, so neither Guard 1 nor Guard 2 could install at
+    # all. Step-InstallChatProxy was passing with 4,091 characters to spare,
+    # which is a countdown rather than a margin.
+    #
+    # The limit was already known in this very file: Step-InstallOpenClaw
+    # streams the ~93K install.sh over stdin for exactly this reason and says so
+    # in its comment. That workaround was never generalised, so four later
+    # security steps inherited the broken path. Generalising it is the fix.
+    $lf = $Script.Replace("`r`n", "`n").Replace("`r", "`n")
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName               = 'wsl.exe'
-    # Use bash -lc (login shell) so ~/.profile is sourced and PATH picks up
-    # ~/.local/bin for clawuser (where the openclaw shim lives).
-    $psi.Arguments              = "-d $WslDistro -u $User --cd ~ -- bash -lc `"echo '$enc' | base64 -d | bash -l`""
+    # bash -l -s: login shell (so ~/.profile is sourced and PATH picks up
+    # ~/.local/bin for clawuser, where the openclaw shim lives) reading the
+    # script from stdin. Same shell semantics as the old `bash -lc "... | bash -l"`,
+    # including that a command inside the script which reads stdin will consume
+    # script text; that exposure is unchanged, since the old inner shell was fed
+    # by a pipe too.
+    $psi.Arguments              = "-d $WslDistro -u $User --cd ~ -- bash -l -s"
+    $psi.RedirectStandardInput  = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError  = $true
     $psi.UseShellExecute        = $false
     $psi.CreateNoWindow         = $true
 
-    $proc   = [System.Diagnostics.Process]::Start($psi)
-    $stdout = $proc.StandardOutput.ReadToEnd()
-    $stderr = $proc.StandardError.ReadToEnd()
-    $proc.WaitForExit()
-    $exit = $proc.ExitCode
+    # The command line is now fixed-size and tiny. Assert it anyway: this is the
+    # guard that makes the whole class fail LOUDLY AND BY NAME if a future edit
+    # puts a payload back on argv. Without it, the next oversized step deletes
+    # itself from the product on a customer's machine with no code change to blame.
+    if ($psi.Arguments.Length -gt 8000) {
+        throw ("Invoke-WslBash: command line is $($psi.Arguments.Length) characters. " +
+               'The script must travel over stdin, never argv (Windows caps a command line at 32,767). ' +
+               'Something has put payload back on the command line. Refusing rather than truncating a security control.')
+    }
+
+    # .NET Framework builds the child's StandardInput StreamWriter from
+    # Console.InputEncoding and writes that encoding's PREAMBLE into the pipe
+    # before our first byte. When the console is UTF-8 the preamble is a BOM and
+    # bash fails line 1 with "<BOM>set: command not found", which would silently
+    # decapitate every script sent to WSL.
+    #
+    # Measured on 2026-08-05, not assumed. With a UTF-8 console the child
+    # received `ef bb bf 65 63 68 6f`; after neutralising, `65 63 68 6f`. The
+    # preamble appears even when writing raw bytes to BaseStream, and even when
+    # BaseStream is captured before any write, because it is emitted when the
+    # StreamWriter is constructed. Setting Console.OutputEncoding does nothing;
+    # InputEncoding is the lever.
+    #
+    # This is environment-dependent, which is worse than a plain bug: it works on
+    # a default console and breaks on a machine set to UTF-8. Hence fail loud
+    # rather than best-effort. Where there is NO console the encoding is the OEM
+    # codepage, which has no preamble, so the problem cannot arise and the catch
+    # correctly swallows the failure to read or set it.
+    $prevIn  = $null
+    $bomRisk = $false
+    try {
+        if ([Console]::InputEncoding.GetPreamble().Length -gt 0) {
+            $prevIn = [Console]::InputEncoding
+            [Console]::InputEncoding = New-Object Text.UTF8Encoding($false)
+            $bomRisk = ([Console]::InputEncoding.GetPreamble().Length -gt 0)
+        }
+    } catch {
+        $bomRisk = $false
+    }
+    if ($bomRisk) {
+        throw ('Invoke-WslBash: the console input encoding emits a byte-order mark that would corrupt ' +
+               'line 1 of every script sent to WSL, and it could not be cleared. Refusing rather than ' +
+               'half-installing a security control.')
+    }
+
+    try {
+        $proc = [System.Diagnostics.Process]::Start($psi)
+
+        # Drain stdout/stderr BEFORE writing stdin. A large script can exceed the
+        # pipe buffer; if the child blocks writing stdout while we block writing
+        # stdin, both sides wait on each other forever. Async reads make the
+        # order safe for any payload size.
+        $outTask = $proc.StandardOutput.ReadToEndAsync()
+        $errTask = $proc.StandardError.ReadToEndAsync()
+
+        # Raw UTF-8 bytes to the BaseStream: the StreamWriter would re-encode
+        # through the console codepage and mangle non-ASCII, and PS 5.1 has no
+        # StandardInputEncoding to set.
+        $bytes = [Text.Encoding]::UTF8.GetBytes($lf)
+        $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+        $proc.StandardInput.BaseStream.Flush()
+        $proc.StandardInput.Close()
+
+        $stdout = $outTask.Result
+        $stderr = $errTask.Result
+        $proc.WaitForExit()
+        $exit = $proc.ExitCode
+    } finally {
+        if ($prevIn) { try { [Console]::InputEncoding = $prevIn } catch { } }
+    }
 
     foreach ($line in ($stdout -split "`r?`n")) {
         $t = $line.Trim()
