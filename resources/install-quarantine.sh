@@ -52,6 +52,53 @@ chmod 755 "$EXECBIN/rm"
 chown root:root "$EXECBIN" /usr/local/lib/clawfactory
 chmod 755 "$EXECBIN"
 
+# --- a2. divert /usr/bin/rm to the wrapper ---------------------------------
+#
+# PATH interception alone does not work, and a clean-box validation caught it.
+# OpenClaw prepends the running node binary's directory AFTER applying
+# tools.exec.pathPrepend, and node is /usr/bin/node, so /usr/bin always precedes
+# execbin and `rm` resolved to the real binary. A real agent turn destroyed a
+# file in a granted workspace and then reported it safely quarantined. No config
+# value can win, because the winning directory is derived from node's location.
+#
+# Diverting the NAME removes PATH from the question. /bin is a usrmerge symlink
+# to /usr/bin, so this covers `/bin/rm` as well.
+#
+# Root passes straight through inside the wrapper, so apt, systemd and the
+# installer keep stock behaviour and a broker outage cannot brick the box.
+DIVERTED=/usr/bin/rm.real
+if command -v dpkg-divert >/dev/null 2>&1; then
+    if ! dpkg-divert --list /usr/bin/rm | grep -q "$DIVERTED"; then
+        # --rename moves the existing /usr/bin/rm to $DIVERTED atomically.
+        dpkg-divert --divert "$DIVERTED" --rename /usr/bin/rm \
+            || fatal "dpkg-divert of /usr/bin/rm failed; refusing to install a guard that cannot intercept"
+    fi
+else
+    fatal "dpkg-divert not found; cannot install the delete guard structurally"
+fi
+
+# The diverted binary MUST exist and be executable before the wrapper takes the
+# name, or every delete on the system breaks. Verify, and roll the divert back
+# if it does not, rather than leaving a box with no working rm.
+if [ ! -x "$DIVERTED" ]; then
+    dpkg-divert --rename --remove /usr/bin/rm 2>/dev/null || true
+    fatal "expected the real rm at $DIVERTED after the divert; rolled back"
+fi
+
+install -m 755 -o root -g root "$EXECBIN/rm" /usr/bin/rm \
+    || fatal "could not install the quarantine wrapper as /usr/bin/rm"
+
+# Paired proof, both directions, before we call this installed:
+#   root must still get the REAL rm (pass-through), and the wrapper must be what
+#   the name resolves to. A guard that silently did neither would look identical
+#   to a working one from the outside.
+_t=$(mktemp /tmp/cfrm-divert-check.XXXXXX)
+rm -f "$_t" || fatal "root rm pass-through is broken after the divert; the system delete path must keep working"
+[ -e "$_t" ] && fatal "root rm did not remove its own temp file after the divert"
+head -1 /usr/bin/rm | grep -q 'node' \
+    || fatal "/usr/bin/rm is not the wrapper after install; the divert did not take"
+echo "[quarantine] /usr/bin/rm diverted to $DIVERTED; wrapper installed at /usr/bin/rm"
+
 # --- b. store + config -----------------------------------------------------
 # 0700 root:root is the structural half of the guard: held payloads are chowned
 # to root inside a directory the agent cannot even list.

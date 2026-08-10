@@ -1,17 +1,31 @@
 #!/usr/bin/env node
 // clawfactory-quarantine-rm.js — the `rm` the AGENT sees.
 //
-// Installed as /usr/local/lib/clawfactory/execbin/rm, and that directory is put
-// on the front of the exec tool's PATH via `tools.exec.pathPrepend`. OpenClaw
-// rejects agent-supplied env.PATH overrides for host execution, so the agent
-// cannot shove this off the front of its own PATH from inside a turn.
+// Installed TWICE, deliberately:
+//   1. /usr/bin/rm, via dpkg-divert (the real binary moves to /usr/bin/rm.real)
+//   2. /usr/local/lib/clawfactory/execbin/rm, kept as defence in depth
+//
+// WHY THE DIVERT, added 2026-08-10
+// PATH-based interception alone DID NOT WORK, and validation on a clean box
+// caught it. `tools.exec.pathPrepend` does put execbin on the agent's PATH, but
+// OpenClaw prepends the directory of the running node binary AFTER applying it,
+// and node lives in /usr/bin alongside the real rm. The agent's PATH came out as
+// `/usr/bin:/usr/local/lib/clawfactory/execbin:/usr/bin:...`, so `rm` resolved
+// to /usr/bin/rm every time. A real agent turn asked to delete a file in a
+// granted workspace destroyed it permanently, and then told the user it had been
+// safely quarantined for 30 days. No config value can win that race, because the
+// directory OpenClaw prepends is chosen from the node binary's own location.
+//
+// Diverting the name itself removes PATH from the question entirely.
 //
 // WHAT THIS IS AND IS NOT
-// This is the ROUTING half of the guard, and routing is ADVISORY. It catches
-// `rm <path>`, which is how a delete is actually expressed ~always. It does not
-// catch `/bin/rm`, `unlink`, `find -delete`, `fs.rmSync`, `os.remove`, or
-// truncation via `>`. Anyone reading this file should not claim otherwise. The
-// STRUCTURAL half is the broker: once a file is held, it is held.
+// With the divert, routing is STRUCTURAL for uid 1000 with respect to the NAME
+// `rm`: /bin/rm resolves here too, because /bin is a usrmerge symlink to
+// /usr/bin. It still does not catch `unlink`, `find -delete`, `fs.rmSync`,
+// `os.remove`, or truncation via `>`, and it must not be described as if it
+// did. The other STRUCTURAL half is the broker: once a file is held, it is held.
+//
+// ROOT IS OUT OF SCOPE BY DESIGN. See the uid check in main().
 //
 // SCOPE: only paths under the configured quarantine roots (default
 // /workspaces -- the granted-folder mounts, i.e. the user's own files) are
@@ -27,7 +41,20 @@ const net = require('node:net');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const REAL_RM = '/bin/rm';
+// The real rm, AFTER the dpkg-divert performed by install-quarantine.sh.
+//
+// This must never resolve back to this file. /bin is a usrmerge symlink to
+// /usr/bin, so once the wrapper is installed at /usr/bin/rm the old constant
+// '/bin/rm' pointed at the wrapper itself and every pass-through would have
+// forked bombs of recursive rm. Resolve the diverted binary first and fall back
+// only to paths that cannot be this file.
+const REAL_RM = (() => {
+  for (const c of ['/usr/bin/rm.real', '/usr/bin/rm.distrib', '/bin/rm.real']) {
+    try { fs.accessSync(c, fs.constants.X_OK); return c; } catch { /* next */ }
+  }
+  // Not diverted (execbin-only install). /bin/rm is the genuine binary then.
+  return '/bin/rm';
+})();
 const CONFIG_PATH = '/etc/clawfactory/quarantine.json';
 const DEFAULT_SOCKET = '/run/clawfactory/quarantine.sock';
 const DEFAULT_ROOTS = ['/workspaces'];
@@ -155,6 +182,25 @@ function ask(req) {
 
 async function main() {
   const argv = process.argv.slice(2);
+
+  // ROOT PASSES THROUGH, ALWAYS AND FIRST.
+  //
+  // Since the dpkg-divert this wrapper now sits behind, EVERY rm on the system
+  // reaches this file: apt maintainer scripts, systemd units, the installer
+  // itself, and anything an administrator types. Routing those through a node
+  // process and a socket would put the whole distro's delete path behind a
+  // service that can be down, which is a far worse failure than the one this
+  // guard prevents.
+  //
+  // The guard's subject is the AGENT (uid 1000). Root was never in scope: the
+  // threat model has always been "the agent deletes the user's files", and a
+  // root that wanted to bypass this could simply call the diverted binary. So
+  // root keeps the stock behaviour, exactly as before the divert, and the
+  // system cannot be bricked by a broker outage.
+  if (typeof process.getuid === 'function' && process.getuid() === 0) {
+    process.exit(realRm(argv));
+  }
+
   // Let the real rm own its own help/version text rather than inventing ours.
   if (argv.some((a) => a === '--help' || a === '--version')) process.exit(realRm(argv));
 

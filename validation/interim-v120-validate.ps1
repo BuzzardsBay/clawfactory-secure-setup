@@ -59,8 +59,13 @@ $CombinedExe = Join-Path $RepoRoot 'Output\ClawFactory-Secure-Setup.exe'
 # line against a 32,767 limit, and Step-InstallSend 153,912, so neither Guard 1
 # nor Guard 2 was deliverable. setup.ps1 now streams the script over stdin, which
 # changes the bytes, so the artifact is re-pinned to the new signed build.
-$Sha256      = '04baf6dc5b54144e6f0b1ae61b63c5da28b508dbd5056629ad49c60b23608ca4'
-$ExpectBytes = 440578344
+# Repinned again 2026-08-10 after the Guard 1 divert fix. PATH interception did
+# not work: OpenClaw prepends node's own directory after tools.exec.pathPrepend,
+# and node lives in /usr/bin next to the real rm, so `rm` always resolved to the
+# real binary and a real agent turn destroyed a granted-workspace file while
+# reporting it quarantined. /usr/bin/rm is now dpkg-diverted to the wrapper.
+$Sha256      = 'ffb533e8d0fb1252004e23b3af5f47430bbd3df99f71939af3209c122a75cfbd'
+$ExpectBytes = 440583664
 
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $run = "{0}-{1}" -f $VmName, (Get-Date -Format 'yyyyMMdd-HHmmss')
