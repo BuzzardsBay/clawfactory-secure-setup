@@ -70,9 +70,18 @@ cat /etc/clawfactory/egress-policy.json 2>&1 | head -40
 '@
 W $env0.Out
 $credPresent = $env0.Out -match 'CREDENTIAL_PRESENT'
-Record 'G2.0' 'Send broker active with correct socket and file modes on a fresh install' `
-    $(if ($env0.Out -match 'clawfactory-send\.service active=active') { 'PASS' } else { 'FAIL' }) `
-    'req-sock 0660 root:clawuser, admin-sock 0600 root:root, ctl 0750 root:root'
+# Liveness by the SOCKET, not by the unit's opinion of itself.
+#
+# The first run asserted `systemctl is-active` and reported PASS for a broker
+# whose socket had been deleted out from under it (both guards shared a
+# RuntimeDirectory, so restarting one removed the other's sockets). Every
+# enqueue test then failed with ENOENT against a "healthy" service. A readiness
+# check that a dead-but-active service passes is not a readiness check.
+$sockLive = ($env0.Out -match 'req-sock\s*:\s*/run/clawfactory/send\.sock') -and
+            ($env0.Out -notmatch 'req-sock\s*:\s*stat: cannot statx')
+Record 'G2.0' 'Send broker reachable: request socket EXISTS with correct modes' `
+    $(if ($sockLive) { 'PASS' } else { 'FAIL' }) `
+    'req-sock 0660 root:clawuser, admin-sock 0600 root:root, ctl 0750 root:root; proven by the socket, not by systemctl is-active'
 W "Real credential configured: $credPresent"
 
 # ------------------------------------------------------------ local sink
