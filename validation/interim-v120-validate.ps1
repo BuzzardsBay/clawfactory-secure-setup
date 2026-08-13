@@ -64,8 +64,13 @@ $CombinedExe = Join-Path $RepoRoot 'Output\ClawFactory-Secure-Setup.exe'
 # and node lives in /usr/bin next to the real rm, so `rm` always resolved to the
 # real binary and a real agent turn destroyed a granted-workspace file while
 # reporting it quarantined. /usr/bin/rm is now dpkg-diverted to the wrapper.
-$Sha256      = 'ffb533e8d0fb1252004e23b3af5f47430bbd3df99f71939af3209c122a75cfbd'
-$ExpectBytes = 440583664
+# Repinned 2026-08-13. Carries ALL THREE fixes, so nothing needs hand-patching on
+# the box and the run is a genuine clean-install validation:
+#   D1 Invoke-WslBash streams over stdin (neither guard could install)
+#   D2 /usr/bin/rm diverted to the wrapper (Guard 1 intercepted nothing)
+#   D3 RuntimeDirectoryPreserve (restarting one guard killed the other's sockets)
+$Sha256      = 'd429e12e7f60883f21f5a92e0abbaeb31be948bf435de8cb5ddcdc353222d030'
+$ExpectBytes = 440583800
 
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $run = "{0}-{1}" -f $VmName, (Get-Date -Format 'yyyyMMdd-HHmmss')
