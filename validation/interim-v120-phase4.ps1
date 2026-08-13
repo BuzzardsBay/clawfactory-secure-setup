@@ -182,7 +182,19 @@ for d in /var/lib/clawfactory /var/log /home/clawuser /tmp /etc/systemd; do
   tot=$((tot+n))
 done
 echo "SCAN journal hits=$(journalctl --no-pager 2>/dev/null | grep -cF -- "$SECRET")"
-echo "SCAN ps hits=$(ps auxww 2>/dev/null | grep -cF -- "$SECRET")"
+# Snapshot ps FIRST and compare inside node. Piping ps into `grep -F -- "$SECRET"`
+# puts the secret on grep's own argv, which ps then captures, so the scan reports
+# exactly one hit that IS the scan. That false positive is indistinguishable from
+# a real credential leak, in the one test whose whole purpose is finding one.
+ps auxww > /var/tmp/ps.snap 2>/dev/null; chmod 600 /var/tmp/ps.snap
+echo "SCAN ps hits=$(node -e '
+const fs=require("fs");
+let c={};try{c=JSON.parse(fs.readFileSync("/etc/clawfactory/send-credential.json","utf8"))}catch(e){console.log(0);process.exit(0)}
+const s=c.pass||c.password||c.secret||c.appPassword||"";
+if(!s){console.log(0);process.exit(0)}
+console.log(fs.readFileSync("/var/tmp/ps.snap","utf8").split(s).length-1);
+' 2>/dev/null)"
+rm -f /var/tmp/ps.snap
 echo "SCAN env-of-broker hits=$(tr '\0' '\n' < /proc/$(pgrep -f clawfactory-sendd.js | head -1)/environ 2>/dev/null | grep -cF -- "$SECRET")"
 echo "TOTAL_HITS=$tot"
 echo '--- CONTROL: the scanner MUST find it where it legitimately lives ---'
@@ -223,17 +235,24 @@ sleep 2
 echo '--- AFTER ---'
 echo "pending files : $(ls -1 /var/lib/clawfactory/send/pending 2>/dev/null | wc -l)"
 echo "staging dirs  : $(ls -1 /var/lib/clawfactory/send/staging 2>/dev/null | wc -l)"
+# The LIVE queue, which is what "cancelled" means. Counting files in the pending
+# directory conflates live requests with retained historical records, and those
+# records are deliberately kept so a cancellation is auditable rather than
+# vanishing. The first version asserted on the file count and reported REVIEW for
+# a kill that had correctly cancelled everything live.
+echo "LIVE_PENDING_AFTER=$(node /usr/local/sbin/clawfactory-sendctl.js list 2>/dev/null | grep -o '"requestId"' | wc -l)"
 echo '--- receipts should record the cancellation rather than losing it silently ---'
 grep -lE 'cancel|kill|denied' /var/lib/clawfactory/send/receipts/*.json 2>/dev/null | wc -l | sed 's/^/cancel_receipts=/'
 echo '--- CONTROL: after the kill, a NEW request must still be acceptable ---'
 su -s /bin/bash -c "printf 'post kill\n' > /tmp/kb3.txt; clawfactory-send --to sink@example.com --subject 'KILL-CTL' --body-file /tmp/kb3.txt" clawuser 2>&1 | head -3
 '@
     W $kill.Out
-    $pendAfter = if ($kill.Out -match '(?s)--- AFTER ---.*?pending files : (\d+)') { [int]$Matches[1] } else { -1 }
+    $liveAfter = if ($kill.Out -match 'LIVE_PENDING_AFTER=(\d+)') { [int]$Matches[1] } else { -1 }
     $stagAfter = if ($kill.Out -match '(?s)--- AFTER ---.*?staging dirs  : (\d+)') { [int]$Matches[1] } else { -1 }
+    $cancelled = if ($kill.Out -match '"cancelled"\s*:\s*(\d+)') { [int]$Matches[1] } else { -1 }
     Record 'S.5' 'Kill switch cancels pending sends and purges staging' `
-        $(if ($pendAfter -eq 0 -and $stagAfter -eq 0) { 'PASS' } else { 'REVIEW' }) `
-        "pendingAfter=$pendAfter stagingAfter=$stagAfter"
+        $(if ($liveAfter -eq 0 -and $stagAfter -eq 0 -and $cancelled -gt 0) { 'PASS' } else { 'REVIEW' }) `
+        "broker reported cancelled=$cancelled; live queue after=$liveAfter; staging dirs after=$stagAfter"
     Record 'S.5c' 'CONTROL: the broker still accepts a new request after the kill' `
         $(if ($kill.Out -match 'pending') { 'PASS' } else { 'REVIEW' }) `
         'proves kill cancelled the queue rather than bricking the broker'
