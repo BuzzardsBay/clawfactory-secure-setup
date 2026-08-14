@@ -310,15 +310,46 @@ Section "6. Expired approval requests: they exist, they refuse approval two diff
 # the customer does not run.
 $ttl = Invoke-WslFile -Tag "g3-ttl-$tag" -User 'root' -Body @'
 node -e 'const c=require("/etc/clawfactory/send.json");console.log("TTL_SECONDS="+c.approvalTtlSeconds)'
+/usr/local/sbin/clawfactory-sendctl credential-summary
 '@
 W $ttl.Out
+
+# PRECONDITION, CHECKED RATHER THAN ASSUMED. A fresh box has no SMTP credential,
+# and Guard 2's fail-closed state means nothing can be enqueued at all. Every
+# assertion below then runs against an empty queue: sendctl is handed an empty
+# id, prints its usage text, and the probe scores that as a product failure.
+#
+# That is what the first run of this phase did. It reported four FAILs and one
+# PASS, and all five were meaningless, because the subject did not exist. The
+# PASS was the more dangerous of the two.
+#
+# A missing precondition is NOT a product verdict. Say so and stop.
+if ($ttl.Out -notmatch '"configured"\s*:\s*true') {
+    Record "G3.6.PRE" 'PRECONDITION: an SMTP credential is configured' 'VOID' `
+        'No SMTP credential on this box, so nothing can be queued and the expiry tests have no subject. This is Guard 2 failing closed exactly as documented, not a defect. Configure SMTP in Studio, then re-run.'
+    foreach ($id in @('G3.6a','G3.6b','G3.6c','G3.7a','G3.7b','G3.7c')) {
+        Record $id 'Expired-request and dismiss behaviour' 'VOID' 'not measured: no SMTP credential, so no request could be queued'
+    }
+    W ''
+    W 'Skipping sections 6 and 7. Re-run this phase once SMTP is configured.'
+    $skipExpiry = $true
+} else {
+    $skipExpiry = $false
+}
 $ttlSecs = if ($ttl.Out -match 'TTL_SECONDS=(\d+)') { [int]$Matches[1] } else { 600 }
+
+if (-not $skipExpiry) {
 W "--- queueing two requests, then waiting out the $ttlSecs second window ---"
 
+# A and B only. The live control C is queued AFTER the wait, not with these.
+#
+# Queuing C here would be a probe defect: the wait is longer than the TTL by
+# design, so C would expire too, and then "approve C with a wrong hash" would
+# return EEXPIRED rather than EHASH. The control would look like it had failed
+# for the same reason as the subject, which makes it useless as a control.
 $queue = Invoke-WslFile -Tag "g3-queue-$tag" -User 'root' -Body @'
 su -s /bin/bash -c 'printf "expiry test A\n" > /tmp/exp-a.txt; clawfactory-send --to sink-a@example.invalid --subject "EXPIRY-A" --body-file /tmp/exp-a.txt' clawuser 2>&1 | tail -2
 su -s /bin/bash -c 'printf "expiry test B\n" > /tmp/exp-b.txt; clawfactory-send --to sink-b@example.invalid --subject "EXPIRY-B" --body-file /tmp/exp-b.txt' clawuser 2>&1 | tail -2
-su -s /bin/bash -c 'printf "live control\n" > /tmp/exp-c.txt; clawfactory-send --to sink-c@example.invalid --subject "LIVE-CONTROL" --body-file /tmp/exp-c.txt' clawuser 2>&1 | tail -2
 echo '--- the queue as the panel sees it right now ---'
 /usr/local/sbin/clawfactory-sendctl list
 '@
@@ -334,13 +365,44 @@ for (const p of (j.pending||[])) console.log("ID "+p.subject+" "+p.id+" "+p.payl
     W $ids.Out
     $idA = if ($ids.Out -match 'ID EXPIRY-A (\S+)') { $Matches[1] } else { '' }
     $idB = if ($ids.Out -match 'ID EXPIRY-B (\S+)') { $Matches[1] } else { '' }
-    $idC = if ($ids.Out -match 'ID LIVE-CONTROL (\S+)') { $Matches[1] } else { '' }
-    $hashC = if ($ids.Out -match 'ID LIVE-CONTROL \S+ (\S+)') { $Matches[1] } else { '' }
 }
 
-W "--- ids: A=$idA B=$idB C=$idC ---"
+W "--- ids: A=$idA B=$idB ---"
+$idC = ''
+
+# SECOND GUARD, because the first one can be satisfied and this can still fail.
+# A configured credential does not guarantee the enqueue worked. Without ids,
+# every sendctl call below is handed an empty argument, prints usage, and the
+# probe reads the absence of a refusal code as a refusal that did not happen.
+if (-not $idA -or -not $idB) {
+    foreach ($id in @('G3.6a','G3.6b','G3.6c','G3.7a','G3.7b','G3.7c')) {
+        Record $id 'Expired-request and dismiss behaviour' 'VOID' `
+            "not measured: could not queue the two requests (ids A='$idA' B='$idB'). A verdict from an empty queue is not a verdict."
+    }
+    $skipExpiry = $true
+}
+}
+
+if (-not $skipExpiry) {
 W "--- waiting $($ttlSecs + 45)s for the approval window to close. This is the real TTL, not a shortened one. ---"
 Start-Sleep -Seconds ($ttlSecs + 45)
+
+# The live control, queued NOW so it is genuinely inside its window, and with an
+# attachment so the approvals panel has a card carrying a staged hash for the
+# reveal control to be checked against by hand.
+$liveC = Invoke-WslFile -Tag "g3-livec-$tag" -User 'root' -Body @'
+su -s /bin/bash -c 'printf "live control body\n" > /tmp/exp-c.txt; printf "attachment bytes for the hash reveal check\n" > /tmp/exp-c-attach.txt; clawfactory-send --to sink-c@example.invalid --subject "LIVE-CONTROL" --body-file /tmp/exp-c.txt --attach /tmp/exp-c-attach.txt' clawuser 2>&1 | tail -2
+/usr/local/sbin/clawfactory-sendctl list | node -e '
+let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);
+for (const p of (j.pending||[])) console.log("ID "+p.subject+" "+p.id+" "+p.payloadHash+" attachments="+((p.attachments||[]).length));});'
+'@
+W $liveC.Out
+$idC = if ($liveC.Out -match 'ID LIVE-CONTROL (\S+)') { $Matches[1] } else { '' }
+W "--- live control id: C=$idC ---"
+if (-not $idC) {
+    Record 'G3.6.CTL' 'PRECONDITION: a live pending request exists to act as the control' 'VOID' `
+        'could not queue the live control, so EEXPIRED and ESTATE cannot be distinguished from a blanket refusal'
+}
 
 $expired = Invoke-WslFile -Tag "g3-expired-$tag" -User 'root' -Body @"
 echo '=== EEXPIRED: approve a record that is PAST its window but has not yet been swept ==='
@@ -419,6 +481,7 @@ Record "G3.7b" 'Dismiss does NOT delete the audit record' `
 Record "G3.7c" 'CONTROL: dismiss refuses a pending request with ESTATE' `
     $(if ($ctlRefuse) { 'PASS' } else { 'FAIL' }) `
     'this control failing would void 7a: dismiss would be able to hide a live approval request'
+}
 
 # =========================================================================
 Section "8. The panels are in the INSTALLED artifact (the local search over the compiled installer is blind)"
@@ -426,8 +489,16 @@ Section "8. The panels are in the INSTALLED artifact (the local search over the 
 # own positive control failing, because the payload is compressed. So the check
 # that means anything is this one, against what actually landed on the machine.
 $asar = @'
-$p = 'C:\Users\clawadmin\AppData\Local\Programs\clawfactory-studio\resources\app.asar'
-if (-not (Test-Path $p)) { $p = (Get-ChildItem 'C:\Users\*\AppData\Local\Programs\clawfactory-studio\resources\app.asar' -ErrorAction SilentlyContinue | Select-Object -First 1).FullName }
+# The install directory is "ClawFactory Studio", with a space, which is what
+# phase 1 reports. The first version of this guessed "clawfactory-studio" and
+# found nothing, and only the positive control stopped that being read as
+# "no stale markers present". Search rather than guess.
+$p = (Get-ChildItem 'C:\Users\*\AppData\Local\Programs\*\resources\app.asar' -ErrorAction SilentlyContinue |
+        Select-Object -First 1).FullName
+if (-not $p) {
+  $p = (Get-ChildItem 'C:\' -Recurse -Filter 'app.asar' -ErrorAction SilentlyContinue -Depth 8 |
+          Where-Object { $_.FullName -like '*Studio*' } | Select-Object -First 1).FullName
+}
 if (-not $p -or -not (Test-Path $p)) { 'ASAR_NOT_FOUND'; exit }
 "ASAR=$p"
 $t = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($p))

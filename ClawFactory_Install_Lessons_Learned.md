@@ -1030,3 +1030,30 @@ established wrongly.
 4. **A wrong scope estimate is expensive in a way a wrong test result is not.** A failed test gets
    re-run. An accepted diagnosis becomes the premise of every session after it, and nothing in those
    sessions is designed to question it.
+
+## L29. A control that cannot fail is not a control, and a pass from an absent subject is worse than a failure
+
+Found 2026-08-14, Guard 3 session. Four separate results that session looked like verdicts and
+were not:
+
+- Phase 6's first run produced four FAILs and one PASS from an empty queue. A fresh box has no
+  SMTP credential, Guard 2 correctly refuses to queue anything, and `sendctl` printed its usage
+  text instead of refusing anything. The PASS was the more dangerous of the two outcomes.
+- A marker search over the compiled NSIS installer reported all absent-controls clean while
+  finding nothing at all, because the payload is compressed. Only the positive control caught it.
+- `PIN.studio` reports INFO on every successful install, because the staged payload it hashes is
+  cleaned up on success. It can only speak when something else has already broken.
+- Phase 1 printed "installer reports 33 resources" and "all 30 required resources present" on
+  adjacent lines and passed both, because each side only counted itself.
+
+The shape they share: **the measurement succeeded while the thing being measured was absent.**
+This is L28 one level down. L28 was about several weak signals agreeing with each other; this is
+about a single signal with nothing behind it.
+
+The discipline is the project's own, applied more strictly. Every assertion carries a control that
+must fail IN THE SAME RUN. When the control does not discriminate, the result is VOID, never PASS.
+And a missing precondition is not a product verdict: check it explicitly, name it, and stop.
+
+Corollary for probes that need a human: a check whose subject destroys itself on a timer (an
+approval window, a session, a lease) cannot be staged in advance and handed over. Stage it
+immediately before the person acts, or it will have expired by the time they read the instruction.
