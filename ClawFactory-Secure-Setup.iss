@@ -13,7 +13,7 @@
 ; signed per-user NSIS installer is embedded and run de-elevated after the core
 ; sandbox install (see [Files] + the InstallStudioComponent procedure in [Code]).
 ; DRY: this filename is referenced by both the [Files] entry and the [Code] launch.
-#define StudioInstaller "ClawFactory-Studio-Setup-1.1.0.exe"
+#define StudioInstaller "ClawFactory-Studio-Setup-1.2.0.exe"
 
 [Setup]
 ; [R1] Fixed AppId for stable upgrade/uninstall identity. Do not regenerate.
@@ -111,6 +111,10 @@ Source: "resources\clawfactory-send-gc.timer";          DestDir: "{app}\resource
 Source: "resources\clawfactory-fw-assert.sh";           DestDir: "{app}\resources"; Flags: ignoreversion
 Source: "resources\egress-policy.json";                 DestDir: "{app}\resources"; Flags: ignoreversion
 Source: "resources\install-send.sh";                    DestDir: "{app}\resources"; Flags: ignoreversion
+; --- v1 Guard 3: read-fetch allowlist (web off by default) ---------------------
+Source: "resources\clawfactory-read-fetch.sh";          DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\clawfactory-fetchctl.js";            DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "resources\install-read-fetch.sh";              DestDir: "{app}\resources"; Flags: ignoreversion
 ; --- v1.1.0 (JOB 3B): embedded ClawFactory Studio (the visual workbench) --------
 ; The SIGNED per-user Studio installer (~100 MB), sourced from the Studio repo's
 ; release dir at build time (gitignored; scripts\build_release.ps1 fails the build if

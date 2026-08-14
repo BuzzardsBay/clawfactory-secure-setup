@@ -795,7 +795,8 @@ function Step-Preflight {
         'send-lib.js', 'send-smtp.js', 'clawfactory-sendd.js', 'clawfactory-sendctl.js',
         'clawfactory-send.js', 'clawfactory-send.service', 'clawfactory-send-gc.service',
         'clawfactory-send-gc.timer', 'clawfactory-fw-assert.sh', 'egress-policy.json',
-        'install-send.sh'
+        'install-send.sh',
+        'clawfactory-read-fetch.sh', 'clawfactory-fetchctl.js', 'install-read-fetch.sh'
     )
     $resDir  = Join-Path $PSScriptRoot 'resources'
     $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $resDir $_)) })
@@ -1473,6 +1474,16 @@ table inet clawfactory {
     set dns_resolvers {
         type ipv4_addr
     }
+    # v1 Guard 3: destinations the USER has allowed the agent to fetch from.
+    # Separate from allowed_ipv4 on purpose. The provider set is refreshed
+    # additively by hostname and its elements carry a timeout, so nothing in it
+    # is ever deliberately removed; a user destination placed there could not be
+    # revoked. This set is flushed and rebuilt from the root-owned egress policy
+    # by clawfactory-read-fetch.sh, so removing a site in Studio removes its
+    # route. Empty on a fresh install, which is the denied state.
+    set read_fetch_ipv4 {
+        type ipv4_addr
+    }
     chain output {
         type filter hook output priority 0; policy accept;
         meta skuid != clawuser return
@@ -1494,6 +1505,10 @@ table inet clawfactory {
         ip daddr @dns_resolvers tcp dport 53 accept
         ct state established,related accept
         ip daddr @allowed_ipv4 tcp dport 443 accept
+        # v1 Guard 3. Port-scoped to 443 for the same reason the provider accept
+        # is: a widened port here would make every co-hosted address reachable on
+        # whatever was opened. The chain-shape tripwire checks both accepts.
+        ip daddr @read_fetch_ipv4 tcp dport 443 accept
         # Allow Ollama local API on port 11434 (localhost only is enforced by bind)
         ip daddr 127.0.0.1 tcp dport 11434 accept
         counter drop
@@ -1589,6 +1604,15 @@ if [ `"`$BACKEND`" = `"iptables-legacy`" ]; then
         [ -n `"`$ip`" ] || continue
         `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -d `"`$ip`" -p tcp --dport 443 -j ACCEPT
     done < /etc/clawfactory/allowed-ips.txt
+    # v1 Guard 3: the user's read-fetch destinations, same 443 scoping as the
+    # provider route. A missing file means an empty list, which is the denied
+    # state, so a lost file fails closed rather than open.
+    if [ -f /etc/clawfactory/read-fetch-ips.txt ]; then
+        while IFS= read -r ip; do
+            [ -n `"`$ip`" ] || continue
+            `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -d `"`$ip`" -p tcp --dport 443 -j ACCEPT
+        done < /etc/clawfactory/read-fetch-ips.txt
+    fi
     `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -d 127.0.0.1 -p tcp --dport 11434 -j ACCEPT
     `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -j DROP
 else
@@ -1600,6 +1624,15 @@ else
     for ip in `$CF_RESOLVERS; do
         /usr/sbin/nft add element inet clawfactory dns_resolvers `"{ `$ip }`" 2>/dev/null || true
     done
+    # v1 Guard 3: rebuild the read-fetch set. `nft -f` above flushed the whole
+    # ruleset, so this set starts empty on every boot and only the persisted
+    # list re-opens anything. No file means nothing is re-opened.
+    if [ -f /etc/clawfactory/read-fetch-ips.txt ]; then
+        while IFS= read -r ip; do
+            [ -n `"`$ip`" ] || continue
+            /usr/sbin/nft add element inet clawfactory read_fetch_ipv4 `"{ `$ip }`" 2>/dev/null || true
+        done < /etc/clawfactory/read-fetch-ips.txt
+    fi
 fi
 APPLY
 chmod +x /usr/local/sbin/clawfactory-fw-apply.sh
@@ -2056,6 +2089,16 @@ elif [ "$BACKEND" = "iptables-legacy" ]; then
             grep -qx "$ip" /etc/clawfactory/allowed-ips.txt || echo "$ip" >> /etc/clawfactory/allowed-ips.txt
         done
     done
+fi
+
+# v1 Guard 3: re-derive the user's read-fetch set from the root-owned policy on
+# the same five-hourly cycle, so a destination whose addresses have moved keeps
+# working and a destination removed in Studio actually loses its route on a
+# machine that has been up for days. The resolver flushes before it adds, so a
+# failure here denies read-fetch rather than leaving a stale hole open.
+if [ -x /usr/local/sbin/clawfactory-read-fetch.sh ]; then
+    /usr/local/sbin/clawfactory-read-fetch.sh \
+        || echo "[clawfactory-fw] read-fetch refresh FAILED; every read-fetch destination is denied until it succeeds" >&2
 fi
 REFRESH
 chmod +x /usr/local/sbin/clawfactory-allow-providers.sh
@@ -2719,6 +2762,45 @@ rm -f /tmp/install-send.sh
     Save-Checkpoint 'InstallSend'
 }
 
+function Step-InstallReadFetch {
+    # v1 Guard 3: web off by default, allowlist only.
+    #
+    # READ THIS BEFORE DESCRIBING IT ANYWHERE CUSTOMER-FACING. Guard 3 does not
+    # create the denial. The egress chain written by Step-EgressFirewall scopes
+    # itself to uid 1000 and ends in a terminal drop, so a destination in no
+    # allowlisted set was already unreachable, and that was true before this step
+    # existed. What Guard 3 adds is the user-controlled way to open and close a
+    # named hole in that denial, and it turns the previously inert read_fetch
+    # policy section into the thing that governs it.
+    #
+    # Runs AFTER Guard 2 for two hard reasons: clawfactory-fetchctl.js loads the
+    # shared egress-policy helpers out of send-lib.js, and the policy file itself
+    # is written by install-send.sh.
+    #
+    # Enforcement is by ADDRESS, not by hostname, because that is what an
+    # nftables set holds. A site sharing an address with something already
+    # reachable is reachable regardless of the list. Stated here so the next
+    # reader does not have to rediscover it from the shape of the code.
+    Write-Log INFO 'Step 15g [Guard 3]: Installing the read-fetch allowlist (web off by default; the user opens named destinations from Studio).'
+    $resourceDir = Join-Path $PSScriptRoot 'resources'
+    $lfB64 = { param($p) [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(([IO.File]::ReadAllText($p)).Replace("`r`n","`n").Replace("`r","`n"))) }
+    $fResB64  = & $lfB64 (Join-Path $resourceDir 'clawfactory-read-fetch.sh')
+    $fCtlB64  = & $lfB64 (Join-Path $resourceDir 'clawfactory-fetchctl.js')
+    $fInstB64 = & $lfB64 (Join-Path $resourceDir 'install-read-fetch.sh')
+    $drop = @"
+set -e
+mkdir -p /usr/local/sbin
+echo '$fResB64'  | base64 -d > /usr/local/sbin/clawfactory-read-fetch.sh
+echo '$fCtlB64'  | base64 -d > /usr/local/sbin/clawfactory-fetchctl.js
+echo '$fInstB64' | base64 -d > /tmp/install-read-fetch.sh
+bash /tmp/install-read-fetch.sh
+rm -f /tmp/install-read-fetch.sh
+"@
+    $rc = Invoke-WslBash -Script $drop -User 'root'
+    if ($rc -ne 0) { throw 'Failed to install the read-fetch allowlist (Guard 3). Refusing to finish: the product would offer a Web access panel with nothing behind it, and a control that is absent is worse than one that was never claimed.' }
+    Save-Checkpoint 'InstallReadFetch'
+}
+
 function Step-InstallQuarantine {
     # v1 Guard 1: recoverable deletes. Two halves, and they are NOT equally strong
     # -- the close-out and the customer copy both have to keep saying so:
@@ -3287,6 +3369,7 @@ Invoke-WithRollback {
     Step-FreezeInjectedSoul      # Defect 4: deliver + freeze the factory safety rules into the injected SOUL
     Step-InstallQuarantine       # Guard 1: recoverable deletes. Before the proxy step, whose gateway restart picks up pathPrepend
     Step-InstallSend             # Guard 2: approval-gated email. After the firewall steps: it asserts the live chain shape and refuses if it has drifted
+    Step-InstallReadFetch        # Guard 3: web off by default. After Guard 2: shares its policy file and its egress-policy helpers
     Step-InstallChatProxy        # Blocker 1: gate ClawChat's HTTP path; real gateway -> private 8788
 }
 

@@ -388,6 +388,9 @@ sudo -u clawuser XDG_RUNTIME_DIR=/run/user/1000 systemctl --user daemon-reload 2
 # Remove the ClawFactory turn-gate shim + helper scripts (Defect 3). Removing
 # /usr/bin/openclaw below drops the shim; the real .mjs is removed too.
 rm -f /usr/local/sbin/clawfactory-turn-gate.sh /usr/local/sbin/clawfactory-spend-check.js /usr/local/sbin/clawfactory-dns-resolvers.sh /usr/local/sbin/clawfactory-fw-apply.sh 2>/dev/null
+# Guard 3: the read-fetch resolver and its root-only control tool. The allowlist
+# itself lives in /etc/clawfactory, which is removed wholesale further down.
+rm -f /usr/local/sbin/clawfactory-read-fetch.sh /usr/local/sbin/clawfactory-fetchctl.js /usr/local/sbin/clawfactory-fetchctl 2>/dev/null
 # Guard 1: delete quarantine. Say how many held files go with it -- these are the
 # user's own files, and removing them silently during an uninstall is exactly the
 # surprise this guard exists to prevent.

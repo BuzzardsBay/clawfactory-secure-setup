@@ -1,5 +1,5 @@
 #!/bin/bash
-# clawfactory-fw-assert.sh -- Guard 2's firewall assertion.
+# clawfactory-fw-assert.sh -- the firewall assertion for Guard 2 and Guard 3.
 #
 # READS the live chain and fails loud if its shape has drifted. It NEVER writes
 # a rule and never touches a set element. That restraint is deliberate:
@@ -60,15 +60,33 @@ fi
 # 2. THE LOAD-BEARING CHECK. Every allowlist accept must be port-scoped to 443.
 #    If this ever widens, the "no route" half of Guard 2's claim is gone, because
 #    a co-hosted address would then reach whatever port was opened.
+#
+#    Both address sets are checked. Guard 3 added @read_fetch_ipv4, and it needs
+#    exactly the same scoping for exactly the same reason: it is an address set,
+#    so a widened port would expose every service on every listed address rather
+#    than the web page the user was thinking of when they added the site.
 while IFS= read -r line; do
     case "$line" in
         *@allowed_ipv4*accept*)
             if ! grep -qE 'tcp dport 443 accept' <<<"$line"; then
-                bad "allowlist accept is no longer scoped to tcp dport 443: $line"
+                bad "provider allowlist accept is no longer scoped to tcp dport 443: $line"
+            fi
+            ;;
+        *@read_fetch_ipv4*accept*)
+            if ! grep -qE 'tcp dport 443 accept' <<<"$line"; then
+                bad "read-fetch allowlist accept is no longer scoped to tcp dport 443: $line"
             fi
             ;;
     esac
 done <<<"$CHAIN"
+
+# 2b. Guard 3's set must EXIST. Without it there is no read-fetch accept, which
+#     is the denied state and therefore safe, but it also means the control the
+#     product describes is not present. A missing control that fails safe is
+#     still a missing control, and silence here would let it stay missing.
+if ! nft list set inet clawfactory read_fetch_ipv4 >/dev/null 2>&1; then
+    bad "set inet clawfactory read_fetch_ipv4 is missing; Guard 3 is not applied (read-fetch is denied, but the control is absent)"
+fi
 
 # 3. No accept anywhere in the chain may name an SMTP port.
 if grep -E 'accept' <<<"$CHAIN" | grep -qE 'dport[^a-z]*(25|465|587|2525)([^0-9]|$)'; then
@@ -89,9 +107,9 @@ if ! grep -qE 'counter packets [0-9]+ bytes [0-9]+ drop' <<<"$CHAIN"; then
 fi
 
 if [ "$FAIL" -eq 0 ]; then
-    note "chain shape OK (uid-scoped, allowlist accept is 443-only, SMTP dropped explicitly, terminal drop present)"
+    note "chain shape OK (uid-scoped, both allowlist accepts are 443-only, read-fetch set present, SMTP dropped explicitly, terminal drop present)"
 else
-    echo "[fw-assert] The egress chain has drifted from the shape Guard 2's claim depends on." >&2
-    echo "[fw-assert] Email containment may be weakened. Investigate before trusting the send path." >&2
+    echo "[fw-assert] The egress chain has drifted from the shape Guard 2 and Guard 3 depend on." >&2
+    echo "[fw-assert] Email containment or web containment may be weakened. Investigate before trusting either path." >&2
 fi
 exit "$FAIL"

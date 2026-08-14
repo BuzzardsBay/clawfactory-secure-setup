@@ -1014,3 +1014,117 @@ function Set-SendCredential {
     }
     return $res
 }
+
+function Dismiss-SendRequest {
+    # Clear one expired card from the approvals panel.
+    #
+    # This removes a card from a VIEW. It does not delete the audit record, and
+    # the broker refuses to dismiss anything still pending, so this cannot be
+    # used to make a live approval request disappear.
+    param(
+        [Parameter(Mandatory)][string]$Id
+    )
+    if ($Id -notmatch '^[A-Za-z0-9:.\-]+$') {
+        return [pscustomobject]@{ ok = $false; error = 'invalid send request id' }
+    }
+    $res = Invoke-SendCtl -Command "dismiss '$Id'"
+    if ($res.ok) {
+        Write-GrantAudit -Event 'send.dismissed' -Data @{ id = $Id; state = $res.state }
+    } else {
+        Write-GrantAudit -Event 'send.dismiss_failed' -Data @{ id = $Id; code = $res.code; error = $res.error }
+    }
+    return $res
+}
+
+function Set-SendPanelViewed {
+    # Advance the last-viewed mark for the approvals panel.
+    #
+    # Studio calls this when the user LEAVES the panel, not when they arrive, so
+    # that cards do not vanish underneath someone who is still reading them.
+    # Carries no security weight: it decides only what a panel draws, and an
+    # expired record is inert whether or not it is drawn.
+    return Invoke-SendCtl -Command 'mark-viewed'
+}
+
+#--- v1 Guard 3: the read-fetch allowlist -------------------------------------
+#
+# Web access is denied by default. That denial is NOT created here: the egress
+# chain scopes itself to uid 1000 and ends in a terminal drop, so a destination
+# in no allowlisted set was already unreachable. What these functions do is give
+# the user a way to open and close a NAMED hole in that denial.
+#
+# Same privileged path as the send approval functions. clawfactory-fetchctl is
+# 0750 root:root and rebuilds a root-owned nftables set. The agent has no route
+# to any part of it: it cannot run the tool, cannot write the policy file the
+# tool reads, and cannot talk to nftables.
+#
+# ENFORCEMENT IS BY RESOLVED ADDRESS, not by hostname, because that is what an
+# nftables set holds. A site sharing an address with something already reachable
+# is reachable whether or not it appears on this list. Do not describe this as
+# "only the sites you list are reachable" anywhere a customer will read it.
+
+$script:CF_FetchCtl = '/usr/local/sbin/clawfactory-fetchctl'
+
+function Invoke-FetchCtl {
+    param(
+        [Parameter(Mandatory)][string]$Command
+    )
+    $r = Invoke-ClawWslBash -User 'root' -Script "$script:CF_FetchCtl $Command 2>/dev/null"
+    $out = $r.StdOut.Trim()
+    if (-not $out) {
+        $detail = $r.StdErr.Trim()
+        if (-not $detail) { $detail = "exit=$($r.ExitCode)" }
+        return [pscustomobject]@{ ok = $false; error = "web access service did not respond ($detail)" }
+    }
+    try {
+        $line = ($out -split "`n" | Where-Object { $_.Trim() } | Select-Object -Last 1)
+        return ($line | ConvertFrom-Json)
+    } catch {
+        return [pscustomobject]@{ ok = $false; error = "unreadable web access response: $($_.Exception.Message)" }
+    }
+}
+
+function Get-ReadFetchAllow {
+    # The allowlist, plus what the firewall actually holds. The panel shows both
+    # because they disagree exactly when something is wrong.
+    return Invoke-FetchCtl -Command 'list'
+}
+
+function Add-ReadFetchHost {
+    # Allow the agent to fetch from one site.
+    #
+    # Validated here as well as in the control tool. This layer exists to keep a
+    # malformed value out of the bash string that reaches wsl.exe; the control
+    # tool validates again because it must not trust a file it did not write.
+    param(
+        [Parameter(Mandatory)][string]$SiteHost
+    )
+    $h = $SiteHost.Trim().ToLowerInvariant()
+    if ($h -notmatch '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$') {
+        return [pscustomobject]@{ ok = $false; error = "not a valid site name: give a name only, with no https:// prefix, no port and no path" }
+    }
+    $res = Invoke-FetchCtl -Command "add '$h'"
+    if ($res.ok) {
+        Write-GrantAudit -Event 'readfetch.allowed' -Data @{ host = $h; changed = $res.changed }
+    } else {
+        Write-GrantAudit -Event 'readfetch.allow_failed' -Data @{ host = $h; code = $res.code; error = $res.error }
+    }
+    return $res
+}
+
+function Remove-ReadFetchHost {
+    param(
+        [Parameter(Mandatory)][string]$SiteHost
+    )
+    $h = $SiteHost.Trim().ToLowerInvariant()
+    if ($h -notmatch '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$') {
+        return [pscustomobject]@{ ok = $false; error = 'not a valid site name' }
+    }
+    $res = Invoke-FetchCtl -Command "remove '$h'"
+    if ($res.ok) {
+        Write-GrantAudit -Event 'readfetch.revoked' -Data @{ host = $h; changed = $res.changed }
+    } else {
+        Write-GrantAudit -Event 'readfetch.revoke_failed' -Data @{ host = $h; code = $res.code; error = $res.error }
+    }
+    return $res
+}

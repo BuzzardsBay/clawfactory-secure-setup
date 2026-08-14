@@ -53,3 +53,9 @@ setup.ps1 -text diff
 # $expectedSoulHash, which is why that literal was recomputed in the same commit.
 resources/safety-rules.md text eol=lf
 resources/persona.md      text eol=lf
+
+# v1 Guard 3. clawfactory-fetchctl.js runs from its shebang inside WSL, so a
+# trailing CR is fatal rather than untidy ("bad interpreter"). setup.ps1 also
+# normalizes line endings when it transports the file, and this makes LF the
+# stored and checked-out form so the two cannot disagree. Same class as L20/L21.
+resources/clawfactory-fetchctl.js text eol=lf
