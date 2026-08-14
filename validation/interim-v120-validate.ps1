@@ -69,8 +69,15 @@ $CombinedExe = Join-Path $RepoRoot 'Output\ClawFactory-Secure-Setup.exe'
 #   D1 Invoke-WslBash streams over stdin (neither guard could install)
 #   D2 /usr/bin/rm diverted to the wrapper (Guard 1 intercepted nothing)
 #   D3 RuntimeDirectoryPreserve (restarting one guard killed the other's sockets)
-$Sha256      = 'd429e12e7f60883f21f5a92e0abbaeb31be948bf435de8cb5ddcdc353222d030'
-$ExpectBytes = 440583800
+# Repinned 2026-08-13 for the Studio panel smoke test. d429e12e was the interim
+# validation's input and is still a good build of the agent-side guards, but it
+# CANNOT save an SMTP credential from Studio: invokeEngineWithInput wrapped a
+# two-statement PowerShell expression in the grouping operator ( ), so the script
+# failed at parse time and the panel reported that the send service did not
+# respond. Smoking d429e12e would therefore have found a known defect and proved
+# nothing about the panels. This build carries the $( ) fix.
+$Sha256      = '29acdf95c6c12d4ef6e6b248527ae74b77c0bd46aca10db9a8c66c661bea2ae1'
+$ExpectBytes = 440583848
 
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $run = "{0}-{1}" -f $VmName, (Get-Date -Format 'yyyyMMdd-HHmmss')

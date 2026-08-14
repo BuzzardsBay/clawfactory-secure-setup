@@ -108,8 +108,11 @@ the payload hash with it, so it is bound to what you were shown. If anything abo
 message changed between the card rendering and your click, the approval is refused rather
 than applied to something different. A used approval cannot be replayed.
 
-After sending, the staged copies are purged and a receipt is written. The receipt records
-that a message was sent and the provider's reference for it. It does not record the body.
+After sending, the staged copies are purged and a receipt is written. A receipt records the
+outcome of a request rather than only a successful send: an expired request produces one too,
+carrying `sent: false` and the reason. For a send it also carries the provider's reference. A
+denied request does not produce a receipt; the denial is recorded on the request itself. All
+of these are readable only by root, and none of them record the body.
 
 ### Deny
 
@@ -161,8 +164,11 @@ Nothing was sent, and there is no fallback path for it to be sent by, because
 `clawfactory-send` holds no mail credential and no mail transport of its own. Your draft is
 preserved on disk so the work is not lost, and the error tells you where.
 
-**A message you approved did not arrive.** Check Approvals: an expired request stays visible
-and is marked as such. Expired means it was never sent.
+**A message did not arrive, and you are not sure whether you approved it in time.** An
+expired request does not stay in Approvals. Once the ten minutes are up it disappears from
+the panel, so an expired request and a request that was never queued look identical there.
+Expired always means it was never sent. If you need to know which happened, ask your agent to
+queue it again rather than trying to tell from the panel.
 
 **Your agent says it cannot email.** That is expected until you name the command. See
 section 3.
@@ -186,9 +192,36 @@ Stated plainly, because these are the properties the guarantee rests on:
 The mechanism described above is validated end to end, including real delivery to an
 external mailbox on a different provider.
 
-The Studio side of the flow, the Approvals card and the Email settings form, is built and
-wired but has never been exercised on an installed machine. Until that validation runs, treat
-sections 4 and 5 as describing the intended and implemented flow rather than an observed one.
-This note comes out when Studio's panels have been driven on a clean install.
+The Studio side of the flow was driven by hand on a clean install on 2026-08-13, on VM
+cfv-160. Both surfaces work. Sections 4 and 5 describe observed behaviour.
 
-*Last reviewed 2026-08-13.*
+What was exercised, and what was checked underneath it rather than taken from the interface:
+
+- **Email settings.** An SMTP account was configured through the form. The credential landed
+  root-owned at mode `600`, the agent's account was refused when it tried to read it, and the
+  reply the panel receives carries the address and server but no secret-shaped field of any
+  kind. The password was typed by a person and appears in no script or transcript.
+- **The approval card.** It shows every recipient, the destination server, who queued it, a
+  live countdown, the body in full, and each attachment with name, size and hash, without
+  expanding anything. The attachment hash is displayed truncated to its first 16 characters.
+- **Approve.** The message was transmitted and the provider returned a queue id. A receipt
+  was written.
+- **Deny.** Nothing was sent and the staged attachment bytes were discarded, verified by
+  searching the store for the exact bytes with a control proving the search was not blind.
+- **Expiry.** An unattended request expired. Nothing was sent, and staging was purged.
+
+Two corrections this run produced, both to the text above rather than to the product:
+
+1. **Section 7 was wrong about expired requests and has been corrected.** It said an expired
+   request stays visible and is marked as such. It does not: the broker omits expired requests
+   from the list the panel reads, so the panel shows "Nothing waiting" and gives the user no
+   sign the request ever existed. The security property is intact, the message was not sent,
+   but a user watching only the panel cannot tell an expired request from one that never
+   happened.
+2. **Section 4 under-described receipts and has been corrected.** A receipt is written for
+   expired requests too, recording `sent: false` with the outcome, so it is an outcome record
+   rather than only a send record. A denied request produces no receipt; the denial is
+   recorded on the request itself, root-owned at mode `600`, with the hash the decision was
+   bound to and the time it was made.
+
+*Last reviewed 2026-08-13, after the cfv-160 panel smoke test.*

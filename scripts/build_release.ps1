@@ -124,8 +124,26 @@ Write-Host ("Bundle check OK: all {0} preflight resources are in [Files]." -f $r
 # All twelve are present in this artefact and absent from the d5ff8370 one, so
 # the search discriminates rather than merely matching. See
 # docs/session_reports/2026-08-05_first_gated_build_closeout.md.
+#
+# Repinned 2026-08-13 for the Studio panel smoke test, from Studio @14b6422 to
+# the build carrying the SMTP-save parse fix. b701bfb7 could not save an SMTP
+# credential at all: invokeEngineWithInput wrapped a two-statement expression in
+# the PowerShell grouping operator ( ), which takes one pipeline, so the script
+# died at PARSE time and surfaced as "the send service did not respond". The fix
+# is the subexpression operator $( ).
+#
+# Verified before pinning, from the compiled signed installer rather than from
+# source: all twelve panel markers above are still present (so the fix dropped
+# nothing), and "-InputObject $(" is present in this artefact and ABSENT from
+# b701bfb7, while "-InputObject (" is present in both because invokeEngine
+# legitimately uses grouping and was not touched. So the search discriminates.
+# Positive control 'Workspace' in both, negative sentinel in neither.
+#
+# NOTE, carried forward deliberately: the filename is now reused for a THIRD set
+# of distinct bytes. The digest below is the authority, not the name, but the
+# name should be versioned. See the smoke-test close-out.
 $studioName   = 'ClawFactory-Studio-Setup-1.1.0.exe'
-$studioPinned = 'b701bfb734d5a307a41cf4b3cca8d34eb4f9c89b2116c7bc084fb180afefb7eb'
+$studioPinned = '62402ff65b5623414faae2e804d98c9c658aab5468090b9f226a3e1998f891d9'
 $studioFile   = Join-Path $RepoRoot "resources\$studioName"
 if (-not (Test-Path $studioFile)) {
     Fail ("resources\$studioName not found. It is gitignored; copy it in from the Studio repo's " +

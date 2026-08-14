@@ -981,3 +981,52 @@ Three things make this worth its own lesson:
 4. **A component is not shipped until the SHIPPING INSTALLER has installed it on a clean box.**
    Not "the mechanism works", not "the dev box has it". Both guards were recorded as shipped and
    neither could be delivered.
+
+## L28 -- three weak signals that agree with each other feel like proof and are not
+
+**Discovered:** v1.2.0 Studio wiring scope session (2026-08-13), reviewing D4 from the interim
+validation close-out.
+
+The interim validation was the most rigorous session this project has run. It found four product
+defects, fixed three, and proved both guards by execution rather than by status report. It also
+produced a confident, wrong diagnosis about scope: **D4, "Studio ships as a scaffold, so the
+customer-facing half of both guards is dead."** That claim shaped three subsequent sessions and an
+estimate of three to three and a half sessions of wiring work. The panels were already wired end to
+end, in source and inside the packaged `app.asar`, including the routing, the IPC handlers, the typed
+engines, the PowerShell functions and the root ctl, with matching reply shapes throughout.
+
+The diagnosis rested on three observations, and its persuasive force came from the fact that all
+three pointed the same way:
+
+| Observation | What it was read as | What it actually was |
+| --- | --- | --- |
+| Studio displays "this panel is not wired in the desktop shell scaffold yet" | the panels are unwired | the banner belongs to the HOME route (`Status.tsx:37-41`) and reports the genuinely unwired `api.version()`. No code path in the three panels can emit it |
+| A port scan finds no Studio backend listening | there is no backend | the architecture has no listener by design. Studio is Electron IPC, in-process. The fully working grants panel has no listener either |
+| The installed Studio reports `v0.1.0` | a stale payload shipped | a hardcoded literal at `App.tsx:37` |
+
+Each observation was true. Each was consistent with the scaffold hypothesis. None of them tested it,
+because each measured a proxy rather than the thing. And because they agreed, they were treated as
+mutual corroboration, which is exactly the reading that makes a wrong diagnosis feel settled.
+
+**The shape to recognise:** a conclusion assembled from several independent-looking weak signals that
+agree with each other. Agreement between weak signals is not strength. Three observations that share
+an unexamined common assumption fail together, and they fail while looking like convergent evidence.
+The feeling of "everything points the same way" is the symptom, not the confirmation.
+
+This project already owns the discipline that would have caught it, and applied it everywhere else in
+the same session: **every block assertion carries a control that must fail.** The scaffold hypothesis
+made a directly testable prediction, that opening the Approvals panel shows an error banner. Nobody
+opened it. Thirty minutes of clicking would have refuted in one step what three proxy measurements
+established wrongly.
+
+**Rules:**
+1. **Test the claim, not a proxy for it.** If the claim is "the panel does not work", the test is
+   opening the panel. Structural evidence about listeners, version strings and banner text is
+   circumstantial no matter how much of it accumulates.
+2. **When several observations agree, ask what they share.** All three here shared "I have not run
+   the thing." Correlated signals are one signal with a confidence multiplier attached.
+3. **Apply the control rule to diagnoses, not only to security assertions.** A diagnosis with no
+   observation that could have refuted it is a hypothesis wearing a verdict's clothes.
+4. **A wrong scope estimate is expensive in a way a wrong test result is not.** A failed test gets
+   re-run. An accepted diagnosis becomes the premise of every session after it, and nothing in those
+   sessions is designed to question it.
