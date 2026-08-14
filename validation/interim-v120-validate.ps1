@@ -88,8 +88,15 @@ $CombinedExe = Join-Path $RepoRoot 'Output\ClawFactory-Secure-Setup.exe'
 # version is still 1.2.0, so this artifact is the THIRD distinct payload to
 # carry that version. The digest below is the authority. Bumping the installer
 # version is the real fix and is a release decision, not this session's.
-$Sha256      = '1df51d53ffd2cf48862d3e5cb9863bebc39b8b3138ff0e3760d15d64dc738716'
-$ExpectBytes = 440594208
+#
+# Repinned again after cfv-161: 1df51d53 aborted its own install at
+# Step-InstallSend. A comment inside setup.ps1's double-quoted fw-apply
+# here-string contained a backtick-n sequence, which PowerShell expanded to a
+# real newline, so the tail of the comment was written to the generated script
+# as a command. fw-apply exited 127 and install-send.sh refused to continue. The
+# installer failing closed is correct behaviour and is why this was caught.
+$Sha256      = '6282a228e620d7d580f7bedadb0a96c9b166f037f2dd83645911b5fcf90603f0'
+$ExpectBytes = 440596328
 
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $run = "{0}-{1}" -f $VmName, (Get-Date -Format 'yyyyMMdd-HHmmss')
@@ -304,7 +311,17 @@ try {
     if ($at -lt 3) {
         Say "Seeding provider key and arming the auto-logon session..."
         $pw = -join ((65..90)+(97..122)+(48..57)+(33,35,37,42) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
+        # CHECKED, because the next thing this does is write $pw into Winlogon's
+        # DefaultPassword and reboot. If the reset silently fails, the account
+        # keeps its provisioning password while Winlogon is told the new one:
+        # auto-logon then fails, no interactive session exists, the runner never
+        # starts, and the poll below burns 75 minutes before anyone finds out.
+        # That is what cfv-162 did. An unchecked az call is L6 and this was the
+        # one place in the chain still missing the check.
         az vm user update -g $ResourceGroup -n $VmName --username $AdminUser --password $pw --output none
+        if ($LASTEXITCODE -ne 0) {
+            throw "az vm user update exited $LASTEXITCODE. Refusing to arm auto-logon with a password the account may not have."
+        }
         $seedPs = @"
 `$ErrorActionPreference='Stop'
 Add-Type -Namespace CFW -Name Cred -MemberDefinition @'
@@ -373,6 +390,19 @@ if(-not [CFW.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
             $p = Invoke-Rc "if (Test-Path C:\cfv\PHASE1_DONE.txt) { 'PHASE1_DONE' } else { `$m=(Get-ChildItem C:\cfv\*.marker -EA SilentlyContinue | ForEach-Object Name) -join ','; `$hb=if (Test-Path C:\cfv\jobs\_runner.heartbeat) { Get-Content C:\cfv\jobs\_runner.heartbeat -Raw } else { 'no-runner' }; `"PENDING markers=`$m runner=`$hb`" }" 'poll'
             if ($p -match 'PHASE1_DONE') { $done = $true; Say "Phase 1 finished on the VM." Green; break }
             if ($i % 4 -eq 0) { Say "  ...running ($i/100, ~$([int]($i*0.75))min) $p" DarkGray }
+
+            # FAIL FAST ON A SESSION THAT NEVER CAME UP. The runner is started by
+            # wrapper.cmd, which RunOnce launches only after an interactive
+            # logon. So a persistent 'no-runner' does not mean a slow install, it
+            # means nothing is running at all and never will be. cfv-162 polled
+            # this state for 48 minutes. Sixteen polls is twelve minutes, which
+            # is well past any normal boot.
+            if ($p -match 'runner=no-runner' -and $i -ge 16) {
+                throw ("No interactive session after ~12 min: the runner heartbeat never appeared, so wrapper.cmd never ran. " +
+                       "This is an auto-logon failure, not a slow install. Check AutoAdminLogon / DefaultPassword under " +
+                       "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon and the Security event log for a failed logon. " +
+                       "Do not wait out the full 75 minutes: nothing is going to start.")
+            }
         }
         if (-not $done) { throw "Phase 1 did not report PHASE1_DONE within ~75 min. Resume with -Resume before blaming the product." }
         Set-Phase 'phase1done'

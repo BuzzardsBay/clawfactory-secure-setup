@@ -66,13 +66,25 @@ $PIN = @{
     persona       = '0557d07004d4d067d8cd9e7cee7b2a3a783e0ac8ff4c492c0c152d7e35ff63a0'
     workspaceSoul = '441b6279f6613c313e87e9e9e034f97a220540cddbf1cf738bb9a86c37a5a257'
     rootfs        = '1483cc5c1dce13064f774834cbffdff226559fd522a67a381a8ea77d63fb4109'
-    studio        = 'b701bfb734d5a307a41cf4b3cca8d34eb4f9c89b2116c7bc084fb180afefb7eb'
+    # Repinned 2026-08-14 to the Guard 3 build's Studio 1.2.0 payload. It had sat
+    # at b701bfb7 since this file was created and was never moved, so it was
+    # already two Studio builds stale before this session touched it. That is a
+    # harness defect with a consequence: a decorative pin cannot detect the drift
+    # it exists to detect. See the close-out.
+    studio        = '540bb30b6f163ae2fb3b381d4491e5b6a25b2973add7d69615fb078a8b156fb9'
     version       = '1.2.0'
 }
 
-# The 30 names are transcribed from setup.ps1 Step-Preflight $required. Held
-# here as an independent copy ON PURPOSE: if the installer's list and this list
-# ever disagree, that disagreement is itself the finding.
+# The names are transcribed from setup.ps1 Step-Preflight $required. Held here as
+# an independent copy ON PURPOSE: if the installer's list and this list ever
+# disagree, that disagreement is itself the finding.
+#
+# 2026-08-14: it disagreed, and this file did not notice. The run reported "all
+# 30 present" while the installer reported 33, because this probe only ever
+# enumerates its own copy and nothing compared the two counts. An independent
+# copy that is never reconciled is not independence, it is a second stale list.
+# The three Guard 3 resources are added below and the counts are now compared
+# explicitly rather than left for a reader to spot.
 $REQUIRED30 = @(
     'safety-rules.md', 'persona.md', 'openclaw-shim.sh', 'clawfactory-turn-gate.sh',
     'clawfactory-spend-check.js', 'install-turn-gate.sh', 'freeze-injected-soul.sh',
@@ -85,7 +97,9 @@ $REQUIRED30 = @(
     'send-lib.js', 'send-smtp.js', 'clawfactory-sendd.js', 'clawfactory-sendctl.js',
     'clawfactory-send.js', 'clawfactory-send.service', 'clawfactory-send-gc.service',
     'clawfactory-send-gc.timer', 'clawfactory-fw-assert.sh', 'egress-policy.json',
-    'install-send.sh'
+    'install-send.sh',
+    # v1 Guard 3
+    'clawfactory-read-fetch.sh', 'clawfactory-fetchctl.js', 'install-read-fetch.sh'
 )
 
 Section "ClawFactory v1.2.0 INTERIM validation, Phase 1 (install). $(Get-Date -Format s)"
@@ -161,6 +175,7 @@ if ($setupLog -and (Test-Path $setupLog)) {
     # Step-Preflight must actually have run and passed. Its own line is recorded
     # here as the installer's CLAIM; check P1.3 below is the independent proof.
     if ($log -match 'Preflight: all (\d+) security resources present') {
+        $script:InstallerResourceCount = [int]$Matches[1]
         Record 'P1.2' 'Step-Preflight ran and passed (installer claim)' 'PASS' "installer reports $($Matches[1]) resources"
     } else {
         Record 'P1.2' 'Step-Preflight ran and passed (installer claim)' 'FAIL' 'no preflight success line in setup.log'
@@ -170,8 +185,8 @@ if ($setupLog -and (Test-Path $setupLog)) {
     Record 'P1.2' 'Step-Preflight ran and passed (installer claim)' 'FAIL' 'no setup.log to read'
 }
 
-# ------------------------------------- 4. 30 resources, verified independently
-Section "4. All 30 required resources on disk, enumerated by this probe"
+# --------------------------- 4. every required resource, verified independently
+Section "4. All $($REQUIRED30.Count) required resources on disk, enumerated by this probe"
 $appDir = 'C:\Program Files\ClawFactory'
 $resDir = Join-Path $appDir 'resources'
 W "Resource dir: $resDir (exists=$(Test-Path $resDir))"
@@ -183,9 +198,20 @@ foreach ($r in $REQUIRED30) {
 }
 W "Independently confirmed present: $($present.Count) / $($REQUIRED30.Count)"
 if ($missing.Count) { W "MISSING: $($missing -join ', ')" }
-Record 'P1.3' 'All 30 required resources on disk (independent enumeration)' `
-    $(if ($missing.Count -eq 0 -and $REQUIRED30.Count -eq 30) { 'PASS' } else { 'FAIL' }) `
-    "present=$($present.Count)/30 missing=$(if($missing.Count){$missing -join ','}else{'none'})"
+Record 'P1.3' "All $($REQUIRED30.Count) required resources on disk (independent enumeration)" `
+    $(if ($missing.Count -eq 0) { 'PASS' } else { 'FAIL' }) `
+    "present=$($present.Count)/$($REQUIRED30.Count) missing=$(if($missing.Count){$missing -join ','}else{'none'})"
+
+# THE CHECK THIS FILE CLAIMED TO BE AND WAS NOT. Holding an independent copy of
+# the list is only independence if the two copies are actually compared. On
+# 2026-08-14 this probe reported "all 30 present" while the installer reported
+# 33, and nothing noticed, because each side only ever counted itself. A guard
+# resource could therefore be added to the product and silently never checked
+# here, which is precisely the drift the copy exists to catch.
+$claimed = $script:InstallerResourceCount
+Record 'P1.3b' 'Installer resource count and this probe agree (the copies are reconciled)' `
+    $(if (-not $claimed) { 'VOID' } elseif ($claimed -eq $REQUIRED30.Count) { 'PASS' } else { 'FAIL' }) `
+    "installer claims $claimed; this probe enumerates $($REQUIRED30.Count). A mismatch means one of the two lists is stale."
 
 # Paired control: a name that MUST be absent. If this "finds" a file, the
 # enumeration is not discriminating and the 30/30 above is a void result.
