@@ -1624,9 +1624,15 @@ else
     for ip in `$CF_RESOLVERS; do
         /usr/sbin/nft add element inet clawfactory dns_resolvers `"{ `$ip }`" 2>/dev/null || true
     done
-    # v1 Guard 3: rebuild the read-fetch set. `nft -f` above flushed the whole
+    # v1 Guard 3: rebuild the read-fetch set. The nft -f above flushed the whole
     # ruleset, so this set starts empty on every boot and only the persisted
     # list re-opens anything. No file means nothing is re-opened.
+    #
+    # NO BACKTICKS IN THIS HERE-STRING, EVER, not even inside a comment. It is
+    # double-quoted, so PowerShell reads the backtick as an escape character.
+    # Backtick-n around a tidy code-quoted nft reference became a real newline
+    # plus the command ft -f. That is not hypothetical: it shipped, fw-apply
+    # exited 127, and the installer aborted at Step-InstallSend.
     if [ -f /etc/clawfactory/read-fetch-ips.txt ]; then
         while IFS= read -r ip; do
             [ -n `"`$ip`" ] || continue
