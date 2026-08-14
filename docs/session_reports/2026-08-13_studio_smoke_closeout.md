@@ -383,9 +383,15 @@ handoff.
 
 **Credential hygiene.** The SMTP app password was typed by Bret into the Studio panel and
 never entered a script, a transcript, or the model's context. A throwaway account was used
-rather than a live one, after the question was raised. It authenticated to the provider for
-real during the approve test, so it must be revoked; that is flagged to Bret and is his
-action.
+rather than a live one, after the question was raised; an app password for a live business
+account had been generated first and was set aside.
+
+It authenticated to the provider for real during the approve test. **Bret's decision is to
+keep it rather than revoke it, for reuse in later validation runs.** Recorded here so the next
+session knows a working credential already exists and does not generate a fresh one by habit.
+The exposure is bounded by the account being a throwaway with no other use, and the only copy
+outside Bret's keeping was on `cfv-160`, which no longer exists. Revoking remains available at
+any time and nothing in the harness depends on that specific value.
 
 ---
 
