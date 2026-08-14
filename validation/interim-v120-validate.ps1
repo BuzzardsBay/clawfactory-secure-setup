@@ -76,8 +76,20 @@ $CombinedExe = Join-Path $RepoRoot 'Output\ClawFactory-Secure-Setup.exe'
 # failed at parse time and the panel reported that the send service did not
 # respond. Smoking d429e12e would therefore have found a known defect and proved
 # nothing about the panels. This build carries the $( ) fix.
-$Sha256      = '29acdf95c6c12d4ef6e6b248527ae74b77c0bd46aca10db9a8c66c661bea2ae1'
-$ExpectBytes = 440583848
+# Repinned 2026-08-14 for Guard 3 and the five Studio polish items. This build
+# adds the read-fetch allowlist (a second nft set, its root-owned resolver, the
+# root-only control tool, and the Web access panel) and carries the expired
+# approval cards, the full attachment hash, the real version in the Studio
+# header, and the PolyForm footer. Studio moved to 1.2.0, so the embedded
+# installer is now ClawFactory-Studio-Setup-1.2.0.exe rather than a third
+# payload wearing the 1.1.0 name.
+#
+# NOTE, and it is the same hazard one level up: the ClawFactory installer
+# version is still 1.2.0, so this artifact is the THIRD distinct payload to
+# carry that version. The digest below is the authority. Bumping the installer
+# version is the real fix and is a release decision, not this session's.
+$Sha256      = '1df51d53ffd2cf48862d3e5cb9863bebc39b8b3138ff0e3760d15d64dc738716'
+$ExpectBytes = 440594208
 
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $run = "{0}-{1}" -f $VmName, (Get-Date -Format 'yyyyMMdd-HHmmss')

@@ -139,11 +139,18 @@ Write-Host ("Bundle check OK: all {0} preflight resources are in [Files]." -f $r
 # legitimately uses grouping and was not touched. So the search discriminates.
 # Positive control 'Workspace' in both, negative sentinel in neither.
 #
-# NOTE, carried forward deliberately: the filename is now reused for a THIRD set
-# of distinct bytes. The digest below is the authority, not the name, but the
-# name should be versioned. See the smoke-test close-out.
-$studioName   = 'ClawFactory-Studio-Setup-1.1.0.exe'
-$studioPinned = '62402ff65b5623414faae2e804d98c9c658aab5468090b9f226a3e1998f891d9'
+# RESOLVED 2026-08-14: the filename now carries the version again. It had been
+# reused for three distinct payloads, because electron-builder interpolates
+# ${version} from desktop/package.json and that had sat at 1.1.0 across two
+# rebuilds. Bumping Studio to 1.2.0 fixes the name, the header the user sees and
+# the package metadata in one move, since all three read the same field. The
+# digest below remains the authority; the name is now merely honest as well.
+#
+# Repinned 2026-08-14 for Guard 3 and the five smoke-test polish items: the new
+# Web access panel, expired approval requests, the full attachment hash, the real
+# version in the header, and the PolyForm footer.
+$studioName   = 'ClawFactory-Studio-Setup-1.2.0.exe'
+$studioPinned = '540bb30b6f163ae2fb3b381d4491e5b6a25b2973add7d69615fb078a8b156fb9'
 $studioFile   = Join-Path $RepoRoot "resources\$studioName"
 if (-not (Test-Path $studioFile)) {
     Fail ("resources\$studioName not found. It is gitignored; copy it in from the Studio repo's " +
