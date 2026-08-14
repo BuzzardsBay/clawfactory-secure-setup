@@ -36,10 +36,12 @@ function usage() {
     [
       'usage: clawfactory-sendctl <command>',
       '',
-      '  list                        pending requests as JSON (full payload)',
+      '  list                        pending requests, plus what expired since the panel was last viewed',
       '  status <id>                 one request',
       '  approve <id> [payloadHash]  approve and send. Single use.',
       '  deny <id>                   deny and purge staging',
+      '  dismiss <id>                clear an expired card from the panel. Keeps the audit record',
+      '  mark-viewed                 advance the last-viewed mark for the panel',
       '  gc                          expire and reap',
       '  kill                        kill switch: cancel pending, purge staging',
       '  credential-summary          what is configured, never the secret',
@@ -114,6 +116,13 @@ async function main() {
     case 'deny':
       if (!rest[0]) return usage(), process.exit(2);
       req = { op: 'deny', requestId: rest[0] };
+      break;
+    case 'dismiss':
+      if (!rest[0]) return usage(), process.exit(2);
+      req = { op: 'dismiss', requestId: rest[0] };
+      break;
+    case 'mark-viewed':
+      req = { op: 'mark-viewed' };
       break;
     case 'gc':
       req = { op: 'gc' };

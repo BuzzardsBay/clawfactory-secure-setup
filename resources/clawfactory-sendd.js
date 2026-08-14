@@ -331,27 +331,97 @@ async function handleStatus(req) {
 
 // --- the approval path (admin socket only) ----------------------------------
 
+/** One record as the approval card renders it. Shared by the pending list and
+ *  the expired list so the two cannot drift into showing different fields. */
+function cardView(r) {
+  return {
+    id: r.id,
+    createdAt: r.createdAt,
+    expiresAt: r.expiresAt,
+    expired: lib.isExpired(r),
+    destination: r.destination,
+    recipients: r.recipients,
+    subject: r.subject,
+    // The full body, so the approval card can show the payload itself rather
+    // than the model's summary of it.
+    body: r.bodyPreview,
+    bodySha256: r.bodySha256,
+    attachments: (r.attachments || []).map((a) => ({ name: a.name, size: a.size, sha256: a.sha256 })),
+    payloadHash: r.payloadHash,
+    requestedBy: r.requestedBy,
+  };
+}
+
+/**
+ * What the approvals panel draws.
+ *
+ * `pending` is unchanged and is the only actionable list.
+ *
+ * `expired` was added because the panel used to say "Nothing waiting" after a
+ * request lapsed, so a user who stepped away could not tell an expired request
+ * from one that was never queued. These are reported SEPARATELY rather than
+ * mixed into `pending` with a flag, because a renderer that forgets to check a
+ * flag would draw an approve button on a dead request. Two arrays cannot be
+ * confused that way: nothing in `expired` is approvable, and handleApprove
+ * refuses it on state regardless of what any panel decides to draw.
+ *
+ * Filtered to what expired SINCE the user last looked, and to what they have
+ * not dismissed. Records are never removed here; the audit record is untouched
+ * and the retention timer remains the only thing that deletes anything.
+ */
 async function handleList() {
-  const recs = lib.listPending(cfg).filter((r) => r.state === 'pending');
+  const all = lib.listPending(cfg);
+  const { lastViewedAt } = lib.readViewState(cfg);
+  const since = lastViewedAt ? Date.parse(lastViewedAt) : 0;
+
+  const expired = all.filter((r) => {
+    if (r.state !== 'expired') return false;
+    if (r.dismissedAt) return false;
+    // Fall back to expiresAt for a record written before expiredAt was stamped,
+    // so an upgrade does not hide the very thing this was added to show.
+    const at = Date.parse(r.expiredAt || r.expiresAt);
+    return !Number.isNaN(at) && at > since;
+  });
+
   return {
     ok: true,
-    pending: recs.map((r) => ({
-      id: r.id,
-      createdAt: r.createdAt,
-      expiresAt: r.expiresAt,
-      expired: lib.isExpired(r),
-      destination: r.destination,
-      recipients: r.recipients,
-      subject: r.subject,
-      // The full body, so the approval card can show the payload itself rather
-      // than the model's summary of it.
-      body: r.bodyPreview,
-      bodySha256: r.bodySha256,
-      attachments: (r.attachments || []).map((a) => ({ name: a.name, size: a.size, sha256: a.sha256 })),
-      payloadHash: r.payloadHash,
-      requestedBy: r.requestedBy,
-    })),
+    pending: all.filter((r) => r.state === 'pending').map(cardView),
+    expired: expired.map((r) => ({ ...cardView(r), state: 'expired', expiredAt: r.expiredAt || r.expiresAt })),
+    lastViewedAt: lastViewedAt || null,
   };
+}
+
+/**
+ * Remove one expired card from the view. It does NOT delete the audit record:
+ * the record keeps its state, its timestamps and its decision history, and the
+ * retention timer stays the only thing that removes anything from the store.
+ *
+ * Refuses a pending request outright. Dismiss exists to clear something dead,
+ * and letting it hide a live approval request would turn a cosmetic control
+ * into a way to make a real decision disappear.
+ */
+async function handleDismiss(req) {
+  const id = String(req.requestId || '');
+  return lib.withStoreLock(cfg, async () => {
+    const rec = lib.readPending(cfg, id);
+    if (!rec) return { ok: false, code: 'ENOENT', error: 'no such request' };
+    if (rec.state === 'pending') {
+      return { ok: false, code: 'ESTATE', error: 'this request is still pending; approve or deny it rather than dismissing it' };
+    }
+    rec.dismissedAt = new Date().toISOString();
+    lib.writePending(cfg, rec);
+    log(`dismissed ${id} from the panel (record retained, state ${rec.state})`);
+    return { ok: true, requestId: id, state: rec.state, dismissedAt: rec.dismissedAt };
+  });
+}
+
+/** Advance the last-viewed mark. Studio calls this when the user leaves the
+ *  panel, not when they arrive, so cards do not vanish underneath someone who
+ *  is still reading them. */
+async function handleMarkViewed() {
+  const at = new Date().toISOString();
+  lib.writeViewState(cfg, at);
+  return { ok: true, lastViewedAt: at };
 }
 
 /** Recompute the hash from the STAGED copies. This is what makes a mutation
@@ -396,6 +466,10 @@ async function handleApprove(req) {
     // so an approval racing the expiry boundary denies.
     if (lib.isExpired(rec)) {
       rec.state = 'expired';
+      // Stamped so the panel can tell what lapsed since the user last looked.
+      // expiresAt says when the window closed; expiredAt says when that was
+      // noticed and recorded, and the two differ by up to one gc interval.
+      rec.expiredAt = new Date().toISOString();
       lib.writePending(cfg, rec);
       lib.purgeStaging(cfg, id);
       lib.writeIntent(cfg, rec);
@@ -507,6 +581,7 @@ async function handleGc() {
     for (const rec of lib.listPending(cfg)) {
       if (rec.state === 'pending' && lib.isExpired(rec, now)) {
         rec.state = 'expired';
+        rec.expiredAt = new Date(now).toISOString();
         lib.writePending(cfg, rec);
         lib.writeIntent(cfg, rec);
         lib.amendReceipt(cfg, rec.id, { sent: false, outcome: 'expired' });
@@ -571,6 +646,8 @@ async function handleRequestChannel(req) {
     case 'approve':
     case 'deny':
     case 'list':
+    case 'dismiss':
+    case 'mark-viewed':
     case 'credential-set':
       return { ok: false, code: 'EPERM', error: `${req.op} is not available on the request channel` };
     default:
@@ -588,6 +665,10 @@ async function handleAdminChannel(req) {
       return handleApprove(req);
     case 'deny':
       return handleDeny(req);
+    case 'dismiss':
+      return handleDismiss(req);
+    case 'mark-viewed':
+      return handleMarkViewed();
     case 'status':
       return handleStatus(req);
     case 'gc':
@@ -609,7 +690,13 @@ async function handleAdminChannel(req) {
         // here keeps credential and policy from drifting apart: there is no way
         // to hold a credential pointing somewhere the policy does not permit,
         // and no way to leave a stale destination authorized after a repoint.
-        const dest = lib.setSendDestination(cfg, req.host, req.port);
+        //
+        // Under the store lock since v1 Guard 3, because the egress policy file
+        // now has a second writer. clawfactory-fetchctl.js read-modify-writes the
+        // same file to manage read_fetch, and it takes this same lock. Without
+        // that, a save racing an add could drop one of the two writes, and the
+        // one that gets dropped here is the user's authorized send destination.
+        const dest = await lib.withStoreLock(cfg, async () => lib.setSendDestination(cfg, req.host, req.port));
         log(`credential set; authorized destination ${dest.host}:${dest.port}`);
         // Summary only. The secret is never echoed back, not even masked: a mask
         // still confirms length and prefix.

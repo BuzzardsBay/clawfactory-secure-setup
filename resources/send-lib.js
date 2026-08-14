@@ -215,11 +215,14 @@ function canonicalPayload(p) {
 // --- policy -----------------------------------------------------------------
 
 /**
- * The egress policy file. One root-owned file, two sections:
- *   read_fetch   -- research destinations (Guard 3 consumes this; Guard 2 only
- *                   carries it so Guard 3 is config plus UI rather than a
- *                   second full guard)
- *   send_actions -- approval-gated destinations. Guard 2 enforces this one.
+ * The egress policy file. One root-owned file, two sections, both enforced but
+ * by different mechanisms and with different strengths:
+ *   read_fetch   -- destinations the agent may fetch from. Guard 3 enforces it
+ *                   in the FIREWALL, by rebuilding the nft set read_fetch_ipv4
+ *                   from this list. Written only by clawfactory-fetchctl.js,
+ *                   which takes the same store lock this file's helpers use.
+ *   send_actions -- approval-gated destinations. Guard 2 enforces this one in
+ *                   the BROKER, as described below.
  *
  * ENFORCEMENT NOTE, and it is load-bearing for the close-out. Destination
  * scoping for the broker is enforced HERE, in root-owned broker code reading a
@@ -267,7 +270,8 @@ function findSendDestination(cfg, host, port) {
  * permit, and no way to leave a stale destination authorized after the user
  * repoints their mail.
  *
- * The read_fetch section is preserved untouched. Guard 3 owns it.
+ * The read_fetch section is preserved untouched. Guard 3 owns it, and its writer
+ * takes the same store lock, so neither side can drop the other's section.
  */
 function setSendDestination(cfg, host, port) {
   let raw = {};
@@ -521,6 +525,50 @@ function purgeStaging(cfg, id) {
 
 const isExpired = (rec, now = Date.now()) => now >= Date.parse(rec.expiresAt);
 
+// --- panel view state -------------------------------------------------------
+
+/**
+ * When the user last looked at the approvals panel.
+ *
+ * This exists because of a defect found by using the product: an approval window
+ * lapsed while the user was away and the panel then showed "Nothing waiting", so
+ * an expired request and one that was never queued looked identical. The fix is
+ * anchored to the user's ABSENCE rather than to a clock, which is why the mark
+ * is a last-viewed timestamp and not a second, shorter retention window.
+ *
+ * Carries no security weight whatsoever. An expired record is inert: its staging
+ * is already purged and handleApprove refuses it on state. This only decides
+ * what a panel draws, and it is kept root-owned purely because it lives in the
+ * root-owned store next to records the agent must not read.
+ */
+const viewStatePath = (cfg) => path.join(cfg.store, '.view-state.json');
+
+function readViewState(cfg) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(viewStatePath(cfg), 'utf8'));
+    return { lastViewedAt: raw && raw.lastViewedAt ? String(raw.lastViewedAt) : null };
+  } catch {
+    // Never viewed, or unreadable. Showing everything unseen is the harmless
+    // direction to fail in: the cost is one redundant card, and the cost of the
+    // other direction is the silence this was written to fix.
+    return { lastViewedAt: null };
+  }
+}
+
+function writeViewState(cfg, lastViewedAt) {
+  const p = viewStatePath(cfg);
+  const tmp = `${p}.tmp`;
+  const fd = fs.openSync(tmp, 'w', 0o600);
+  try {
+    fs.writeSync(fd, `${JSON.stringify({ lastViewedAt }, null, 2)}\n`);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tmp, p);
+  return { lastViewedAt };
+}
+
 module.exports = {
   CONFIG_PATH,
   DEFAULTS,
@@ -550,6 +598,9 @@ module.exports = {
   stagingUsedBytes,
   purgeStaging,
   isExpired,
+  viewStatePath,
+  readViewState,
+  writeViewState,
   SEP_SECTION,
   SEP_ITEM,
   SEP_ENTRY,
