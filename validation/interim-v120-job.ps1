@@ -91,8 +91,14 @@ function Retrieve-VmFile {
 }
 
 # ---- 1/2. stage the phase script (and any extras) and fetch them on the VM ----
+# The phase runner goes with EVERY phase, unconditionally, because every phase
+# dot-sources it and a phase staged without it dies at its first Record call.
+# Making that the caller's job would put a silent, total-evidence-loss failure
+# one forgotten argument away.
 Say "Staging $JobName..."
+$libPath = Join-Path $PSScriptRoot 'interim-v120-phaselib.ps1'
 $all = @($PhaseScript) + $ExtraFiles
+if ($all -notcontains $libPath) { $all += $libPath }
 $staged = @($all | ForEach-Object { Push-File $_ })
 $fetch = "`$ErrorActionPreference='Stop'; New-Item -ItemType Directory -Path C:\cfv\jobs -Force | Out-Null; "
 foreach ($s in $staged) {
@@ -151,3 +157,29 @@ Say "Evidence gate PASSED for $JobName." Green
 Write-Host "`n===== $JobName EVIDENCE =====" -ForegroundColor Cyan
 if ($transcript) { Get-Content $transcript } elseif ($outFile) { Get-Content $outFile }
 Say "Evidence in $dir" Green
+
+# A VOID phase is a MISSING MEASUREMENT. The one way this whole exercise fails is
+# a reader skimming a wall of transcript and taking "no FAIL lines" for a pass,
+# so the phase verdict is restated here, last, in colour, after the evidence.
+if ($resJson -and (Test-Path $resJson)) {
+    $pv = $null
+    try { $pv = (Get-Content $resJson -Raw | ConvertFrom-Json) } catch { }
+    if ($pv -and $pv.PhaseVerdict) {
+        Write-Host ''
+        switch ($pv.PhaseVerdict) {
+            'VOID' {
+                Write-Host "===== $JobName PHASE VERDICT: VOID ($($pv.VoidKind)) =====" -ForegroundColor Red
+                Say 'This phase measured nothing trustworthy. It is NOT a pass and NOT a product failure.' Red
+                foreach ($r in @($pv.VoidReasons)) { Say "  VOID because: $r" Red }
+            }
+            'FAIL' { Write-Host "===== $JobName PHASE VERDICT: FAIL =====" -ForegroundColor Red }
+            default {
+                Write-Host "===== $JobName PHASE VERDICT: PASS =====" -ForegroundColor Green
+                Say ("controls fired=" + @($pv.Controls | Where-Object Fired).Count + "/" + @($pv.Controls).Count +
+                     "; preconditions met=" + @($pv.Preconditions | Where-Object Met).Count + "/" + @($pv.Preconditions).Count) Green
+            }
+        }
+    } else {
+        Say 'No PhaseVerdict in the results file. This phase predates the runner or did not complete.' Yellow
+    }
+}

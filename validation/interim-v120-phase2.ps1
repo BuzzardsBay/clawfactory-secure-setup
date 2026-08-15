@@ -47,31 +47,24 @@ $ErrorActionPreference = 'Continue'
 # reader to attribute one run's results to another. That nearly happened once.
 Remove-Item $Transcript -Force -ErrorAction SilentlyContinue
 
-function W([string]$m) {
-    $line = "[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $m
-    Write-Host $line
-    $line | Out-File $Transcript -Encoding utf8 -Append
-}
-function Section($t) { W ''; W ("=" * 72); W $t; W ("=" * 72) }
-
-$script:Results = New-Object System.Collections.ArrayList
-function Record($id, $name, $verdict, $evidence) {
-    [void]$script:Results.Add([pscustomobject]@{ Id = $id; Name = $name; Verdict = $verdict; Evidence = $evidence })
-    W ("  [{0}] {1} :: {2}" -f $verdict, $id, $name)
-    if ($evidence) { W ("        {0}" -f ($evidence -replace "`r?`n", ' | ')) }
-}
+# The phase runner owns W, Section, Record, the control and precondition calls,
+# and the verdict. See its header: this phase used to exit with the FAIL COUNT as
+# its exit code and to ignore VOIDs entirely, so three failures exited 3 and an
+# unmeasured phase exited 0.
+. C:\cfv\interim-v120-phaselib.ps1
 
 $rand = -join ((48..57) + (97..122) | Get-Random -Count 8 | ForEach-Object { [char]$_ })
 
-Section "ClawFactory v1.2.0 INTERIM validation, Phase 2 (Guard 1). $(Get-Date -Format s)"
+Start-Phase -Name 'ClawFactory INTERIM validation, Phase 2 (Guard 1)' `
+    -Transcript $Transcript -Sentinel 'PHASE2_PROBE_COMPLETE'
 W "Run tag: $rand"
 
 # ------------------------------------------------------------ 0. channel gate
 Section "0. Channel self-test (L22). No measurement is valid before this passes."
 $chan = Test-WslChannel
 W $chan.Detail
-Record 'G1.CHAN' 'File-based WSL channel discriminates' $(if ($chan.Ok) { 'PASS' } else { 'FAIL' }) `
-    'subject id -u=0, /bin/false rc=1, expansion intact'
+Register-Control -Id 'G1.CHAN' -Name 'the file-based WSL channel discriminates' -Fired $chan.Ok `
+    -Evidence 'subject id -u=0, /bin/false rc=1, expansion intact' | Out-Null
 if (-not $chan.Ok) {
     W 'CHANNEL UNTRUSTWORTHY. Every result below would be void (L22). Stopping.'
     W "PHASE2_PROBE_COMPLETE rc=2"
@@ -133,10 +126,13 @@ foreach ($m in [regex]::Matches($gl.Out, 'MOUNT /workspaces/([^/]+)/ IS_MOUNT'))
 Record 'G1.1' 'Granted workspace is live as a real mount under /workspaces' `
     $(if ($slug) { 'PASS' } else { 'FAIL' }) "slug=$slug"
 if (-not $slug) {
+    # A missing workspace mount is a PRECONDITION, not a product verdict: with no
+    # quarantine root there is nothing for a deletion test to target, so every
+    # result below would describe an absent subject.
     W 'No live workspace mount. Deletion tests cannot target a quarantine root. Stopping Phase 2.'
-    $script:Results | ConvertTo-Json -Depth 4 | Out-File 'C:\cfv\phase2-results.json' -Encoding utf8
-    W "PHASE2_PROBE_COMPLETE rc=3"
-    exit 3
+    Require-Precondition -Id 'G1.PRE.WS' -Name 'a granted workspace is mounted under /workspaces' -Met $false `
+        -Reason 'no live workspace mount, so no deletion can be routed to quarantine and no deletion test has a subject' | Out-Null
+    Complete-Phase -ResultsJson 'C:\cfv\phase2-results.json' -MarkerPrefix 'PHASE2'
 }
 W "Workspace slug: $slug"
 
@@ -560,13 +556,4 @@ if ($studioDir) {
 }
 
 # ----------------------------------------------------------------- summary
-Section "8. Phase 2 result table"
-foreach ($row in $script:Results) { W ("{0,-12} {1,-18} {2}" -f $row.Id, $row.Verdict, $row.Name) }
-$script:Results | ConvertTo-Json -Depth 4 | Out-File 'C:\cfv\phase2-results.json' -Encoding utf8
-$f = @($script:Results | Where-Object { $_.Verdict -eq 'FAIL' })
-W ''
-W "FAIL=$($f.Count)"
-foreach ($x in $f) { W "   FAIL $($x.Id) $($x.Name) :: $($x.Evidence)" }
-W ''
-W "PHASE2_PROBE_COMPLETE rc=$($f.Count)"
-exit $f.Count
+Complete-Phase -ResultsJson 'C:\cfv\phase2-results.json' -MarkerPrefix 'PHASE2'

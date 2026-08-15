@@ -43,17 +43,10 @@ param(
 $ErrorActionPreference = 'Continue'
 . C:\cfv\interim-v120-wslchan.ps1
 
-function W([string]$m) {
-    $line = "[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $m
-    Write-Host $line; $line | Out-File $Transcript -Encoding utf8 -Append
-}
-function Section($t) { W ''; W ("=" * 72); W $t; W ("=" * 72) }
-$script:Results = New-Object System.Collections.ArrayList
-function Record($id, $name, $verdict, $evidence) {
-    [void]$script:Results.Add([pscustomobject]@{ Id = $id; Name = $name; Verdict = $verdict; Evidence = $evidence; Step = $Step })
-    W ("  [{0}] {1} :: {2}" -f $verdict, $id, $name)
-    if ($evidence) { W ("        {0}" -f ($evidence -replace "`r?`n", ' | ')) }
-}
+# The phase runner owns W, Section, Record, the control and precondition calls,
+# and the verdict. This script used to exit 0 unconditionally at the end of every
+# step, so a FAIL in a hand-driven panel check reached the driver as a pass.
+. C:\cfv\interim-v120-phaselib.ps1
 function Load-State {
     if (Test-Path $StateFile) { return (Get-Content $StateFile -Raw | ConvertFrom-Json) }
     return [pscustomobject]@{}
@@ -90,16 +83,21 @@ rm -f /tmp/w.json
     }
     return @{ Ok = $false; Attempts = $Attempts; Last = $w.Out }
 }
+# Steps run one at a time either side of a human's click, so the aggregate file
+# accumulates across them rather than being rewritten by the last step to finish.
 function Append-Results {
     $f = 'C:\cfv\panels-results.json'
     $all = if (Test-Path $f) { @(Get-Content $f -Raw | ConvertFrom-Json) } else { @() }
-    $all += $script:Results
+    $all += @($script:CF_Results | ForEach-Object {
+        [pscustomobject]@{ Id = $_.Id; Name = $_.Name; Verdict = $_.Verdict; Evidence = $_.Evidence; Step = $Step }
+    })
     [IO.File]::WriteAllText($f, ($all | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
 }
 
-Section "Studio panel smoke, step '$Step'. $(Get-Date -Format s)"
+Start-Phase -Name "Studio panel smoke, step '$Step'" `
+    -Transcript $Transcript -Sentinel 'PANELS_PROBE_COMPLETE'
 $chan = Test-WslChannel
-Record 'PNL.CHAN' 'File-based WSL channel discriminates' $(if ($chan.Ok) { 'PASS' } else { 'FAIL' }) $chan.Detail
+Register-Control -Id 'PNL.CHAN' -Name 'the file-based WSL channel discriminates' -Fired $chan.Ok -Evidence $chan.Detail | Out-Null
 if (-not $chan.Ok) { W 'CHANNEL UNTRUSTWORTHY, stopping (L22).'; W "PANELS_PROBE_COMPLETE rc=2"; exit 2 }
 
 $state = Load-State
@@ -467,7 +465,4 @@ journalctl -u clawfactory-send.service --no-pager -n 25 2>&1 | tail -25
 }
 
 Append-Results
-W ''
-W ("Step '$Step' results: " + (($script:Results | Group-Object Verdict | ForEach-Object { "$($_.Name)=$($_.Count)" }) -join ' '))
-W "PANELS_PROBE_COMPLETE rc=0"
-exit 0
+Complete-Phase -ResultsJson "C:\cfv\panels-results-$Step.json" -MarkerPrefix "PANELS_$Step"

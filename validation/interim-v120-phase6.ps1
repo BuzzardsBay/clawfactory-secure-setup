@@ -33,23 +33,17 @@ param(
 $ErrorActionPreference = 'Continue'
 . C:\cfv\interim-v120-wslchan.ps1
 
-function W([string]$m) {
-    $line = "[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $m
-    Write-Host $line; $line | Out-File $Transcript -Encoding utf8 -Append
-}
-function Section($t) { W ''; W ("=" * 72); W $t; W ("=" * 72) }
-$script:Results = New-Object System.Collections.ArrayList
-function Record($id, $name, $verdict, $evidence) {
-    [void]$script:Results.Add([pscustomobject]@{ Id = $id; Name = $name; Verdict = $verdict; Evidence = $evidence })
-    W ("  [{0}] {1} :: {2}" -f $verdict, $id, $name)
-    if ($evidence) { W ("        {0}" -f ($evidence -replace "`r?`n", ' | ')) }
-}
+# The phase runner owns W, Section, Record, the control and precondition calls,
+# and the verdict. This phase's own tail used to compute rc from the FAIL count
+# alone and ignore VOIDs entirely, so a phase that measured nothing exited 0.
+. C:\cfv\interim-v120-phaselib.ps1
 $tag = if ($PostReboot) { 'POSTREBOOT' } else { 'PRE' }
 
-Section "ClawFactory v1 Guard 3 validation, Phase 6, pass=$tag. $(Get-Date -Format s)"
+Start-Phase -Name "ClawFactory v1 Guard 3 validation, Phase 6, pass=$tag" `
+    -Transcript $Transcript -Sentinel 'PHASE6_PROBE_COMPLETE'
 
 $chan = Test-WslChannel
-Record "G3.CHAN.$tag" 'File-based WSL channel discriminates' $(if ($chan.Ok) { 'PASS' } else { 'FAIL' }) $chan.Detail
+Register-Control -Id "G3.CHAN.$tag" -Name 'the file-based WSL channel discriminates' -Fired $chan.Ok -Evidence $chan.Detail | Out-Null
 if (-not $chan.Ok) { W 'CHANNEL UNTRUSTWORTHY, stopping (L22).'; W 'PHASE6_PROBE_COMPLETE rc=2'; exit 2 }
 
 # =========================================================================
@@ -290,17 +284,8 @@ Record "G3.5.$tag" 'A user destination survives the shipped five-hourly refresh'
     "reachable after refresh=$survived; CONTROL un-added site still blocked=$stillBlocked; CONTROL provider still reachable=$provOk"
 
 if ($PostReboot) {
-    Section "Post-reboot pass complete. Tests 1, 2 and 5 re-run above after a full reboot."
-    Section "Phase 6 result table (pass=$tag)"
-    foreach ($row in $script:Results) { W ("{0,-22} {1,-10} {2}" -f $row.Id, $row.Verdict, $row.Name) }
-    $script:Results | ConvertTo-Json -Depth 4 | Out-File 'C:\cfv\phase6-results-postreboot.json' -Encoding utf8
-    $f = @($script:Results | Where-Object { $_.Verdict -eq 'FAIL' })
-    $v = @($script:Results | Where-Object { $_.Verdict -eq 'VOID' })
-    W ''; W "FAIL=$($f.Count) VOID=$($v.Count)"
-    foreach ($x in $f) { W "   FAIL $($x.Id) $($x.Name) :: $($x.Evidence)" }
-    foreach ($x in $v) { W "   VOID $($x.Id) $($x.Name) :: $($x.Evidence)" }
-    W "PHASE6_PROBE_COMPLETE rc=$($f.Count)"
-    exit $f.Count
+    Section 'Post-reboot pass complete. The reachability and refresh tests above were re-run after a full reboot.'
+    Complete-Phase -ResultsJson 'C:\cfv\phase6-results-postreboot.json' -MarkerPrefix "PHASE6_$tag"
 }
 
 # =========================================================================
@@ -502,10 +487,20 @@ if (-not $p) {
 if (-not $p -or -not (Test-Path $p)) { 'ASAR_NOT_FOUND'; exit }
 "ASAR=$p"
 $t = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($p))
-foreach ($m in @('web:list','web:allow','web:revoke','Web access','clawfactory-fetchctl','send:dismiss','send:markViewed','Expired while you were away','show full hash','PolyForm Perimeter 1.0.0','app:version','send:approve','quarantine:restore')) {
+foreach ($m in @('web:list','web:allow','web:revoke','Web access','clawfactory-fetchctl','send:dismiss','send:markViewed','Expired while you were away','show full hash','PolyForm Perimeter 1.0.0','app:version','send:approve','quarantine:restore',
+                 # 1.3.0: the toolchain switch, its load-bearing breakage text, the
+                 # ratified footnote, and the replacement home route.
+                 'web:toolchain','setToolchain','Software sources ClawFactory needs','stops skill installation',
+                 'unless you switch them off above','Matching is by network address rather than by name',
+                 'Running outside the ClawFactory Studio app')) {
   if ($t.Contains($m)) { "PRESENT  $m" } else { "MISSING  $m" }
 }
-foreach ($m in @('v0.1.0','MIT licensed','ClawFactoryNegativeSentinelZZ9')) {
+# Stale strings. The three 1.3.0 additions are the ones this session removed, and
+# each is a sentence that was FALSE in the shipped product: the home route claimed
+# a retired backend was unreachable, and the old footnote omitted that a site can
+# share an address with one the USER allowed, not only with the provider.
+foreach ($m in @('v0.1.0','MIT licensed','ClawFactoryNegativeSentinelZZ9',
+                 'Studio backend unreachable','Two things are always reachable regardless','Running on http://127.0.0.1:8080')) {
   if ($t.Contains($m)) { "STILLTHERE  $m" } else { "ABSENT      $m" }
 }
 if ($t.Contains('Workspace')) { 'POSCONTROL_OK' } else { 'POSCONTROL_BLIND' }
@@ -517,18 +512,18 @@ W $asarOut
 $asarBlind   = $asarOut -match 'POSCONTROL_BLIND|ASAR_NOT_FOUND'
 $asarMissing = ([regex]::Matches($asarOut, 'MISSING  ')).Count
 $asarStale   = $asarOut -match 'STILLTHERE'
+# The searchability assertion, made a runner-level call rather than a local
+# boolean. A search over a COMPRESSED payload finds nothing and reads as a clean
+# all-clear: that happened, over the compiled NSIS installer, and only the
+# positive control caught it. Registering it here means an unsearchable target
+# voids the phase instead of quietly passing it.
+Assert-Searchable -Id 'G3.8.SEARCH' -Name 'panel markers in the installed app.asar' `
+    -PositiveMarkerFound (-not $asarBlind) `
+    -MarkerDescription 'the positive marker Workspace inside the extracted app.asar' | Out-Null
+
 Record "G3.8" 'The new panels are present in the app.asar that was actually installed' `
     $(if ($asarBlind) { 'VOID' } elseif ($asarMissing -eq 0 -and -not $asarStale) { 'PASS' } else { 'FAIL' }) `
     "missing markers=$asarMissing; stale markers (v0.1.0 / MIT licensed) present=$asarStale; positive control blind=$asarBlind"
 
-Section "Phase 6 result table (pass=$tag)"
-foreach ($row in $script:Results) { W ("{0,-22} {1,-10} {2}" -f $row.Id, $row.Verdict, $row.Name) }
-$script:Results | ConvertTo-Json -Depth 4 | Out-File 'C:\cfv\phase6-results.json' -Encoding utf8
-$f = @($script:Results | Where-Object { $_.Verdict -eq 'FAIL' })
-$v = @($script:Results | Where-Object { $_.Verdict -eq 'VOID' })
-W ''
-W "FAIL=$($f.Count) VOID=$($v.Count)"
-foreach ($x in $f) { W "   FAIL $($x.Id) $($x.Name) :: $($x.Evidence)" }
-foreach ($x in $v) { W "   VOID $($x.Id) $($x.Name) :: $($x.Evidence)" }
-W "PHASE6_PROBE_COMPLETE rc=$($f.Count)"
-exit $f.Count
+$outJson6 = if ($PostReboot) { 'C:\cfv\phase6-results-postreboot.json' } else { 'C:\cfv\phase6-results.json' }
+Complete-Phase -ResultsJson $outJson6 -MarkerPrefix "PHASE6_$tag"

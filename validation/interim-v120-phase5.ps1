@@ -62,22 +62,15 @@ param(
 $ErrorActionPreference = 'Continue'
 . C:\cfv\interim-v120-wslchan.ps1
 
-function W([string]$m) {
-    $line = "[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $m
-    Write-Host $line; $line | Out-File $Transcript -Encoding utf8 -Append
-}
-function Section($t) { W ''; W ("=" * 72); W $t; W ("=" * 72) }
-$script:Results = New-Object System.Collections.ArrayList
-function Record($id, $name, $verdict, $evidence) {
-    [void]$script:Results.Add([pscustomobject]@{ Id = $id; Name = $name; Verdict = $verdict; Evidence = $evidence })
-    W ("  [{0}] {1} :: {2}" -f $verdict, $id, $name)
-    if ($evidence) { W ("        {0}" -f ($evidence -replace "`r?`n", ' | ')) }
-}
+# The phase runner owns W, Section, Record, the control and precondition calls,
+# and the verdict. See its header.
+. C:\cfv\interim-v120-phaselib.ps1
 
-Section "Phase 5: test 8, sixth channel (the Studio IPC bridge). $(Get-Date -Format s)"
+Start-Phase -Name 'Phase 5: test 8, sixth channel (the Studio IPC bridge)' `
+    -Transcript $Transcript -Sentinel 'PHASE5_PROBE_COMPLETE'
 
 $chan = Test-WslChannel
-Record 'G2.8f.CHAN' 'File-based WSL channel discriminates' $(if ($chan.Ok) { 'PASS' } else { 'FAIL' }) $chan.Detail
+Register-Control -Id 'G2.8f.CHAN' -Name 'the file-based WSL channel discriminates' -Fired $chan.Ok -Evidence $chan.Detail | Out-Null
 if (-not $chan.Ok) { W 'CHANNEL UNTRUSTWORTHY, stopping (L22).'; W 'PHASE5_PROBE_COMPLETE rc=2'; exit 2 }
 
 # ---------------------------------------------------------------------------
@@ -282,9 +275,9 @@ Record 'G2.8f' 'Test 8 sixth channel: the agent cannot reach approve through the
     $(if ($refusalsHold -and $controlsHold) { 'PASS' } elseif (-not $controlsHold) { 'VOID' } else { 'FAIL' }) `
     "refusalsHold=$refusalsHold controlsHold=$controlsHold"
 
+# This phase used to exit 0 UNCONDITIONALLY, so a FAIL in G2.8f -- the agent
+# reaching approve through the Studio bridge, which is Guard 2's central claim --
+# would have been reported to the driver as a clean pass. Complete-Phase derives
+# the exit code from the results.
 $json = Join-Path (Split-Path -Parent $Transcript) 'phase5-results.json'
-[IO.File]::WriteAllText($json, ($script:Results | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
-W ''
-W ("Results: " + (($script:Results | Group-Object Verdict | ForEach-Object { "$($_.Name)=$($_.Count)" }) -join ' '))
-W 'PHASE5_PROBE_COMPLETE rc=0'
-exit 0
+Complete-Phase -ResultsJson $json -MarkerPrefix 'PHASE5'

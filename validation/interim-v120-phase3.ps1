@@ -32,23 +32,17 @@ param(
 $ErrorActionPreference = 'Continue'
 . C:\cfv\interim-v120-wslchan.ps1
 
-function W([string]$m) {
-    $line = "[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $m
-    Write-Host $line; $line | Out-File $Transcript -Encoding utf8 -Append
-}
-function Section($t) { W ''; W ("=" * 72); W $t; W ("=" * 72) }
-$script:Results = New-Object System.Collections.ArrayList
-function Record($id, $name, $verdict, $evidence) {
-    [void]$script:Results.Add([pscustomobject]@{ Id = $id; Name = $name; Verdict = $verdict; Evidence = $evidence })
-    W ("  [{0}] {1} :: {2}" -f $verdict, $id, $name)
-    if ($evidence) { W ("        {0}" -f ($evidence -replace "`r?`n", ' | ')) }
-}
+# The phase runner owns W, Section, Record, the control and precondition calls,
+# and the verdict. See its header for the four wrong results that made it
+# necessary.
+. C:\cfv\interim-v120-phaselib.ps1
 $rand = -join ((48..57) + (97..122) | Get-Random -Count 8 | ForEach-Object { [char]$_ })
 
-Section "ClawFactory v1.2.0 INTERIM validation, Phase 3 (Guard 2 on a real install). $(Get-Date -Format s)"
+Start-Phase -Name 'ClawFactory INTERIM validation, Phase 3 (Guard 2 on a real install)' `
+    -Transcript $Transcript -Sentinel 'PHASE3_PROBE_COMPLETE'
 
 $chan = Test-WslChannel
-Record 'G2.CHAN' 'File-based WSL channel discriminates' $(if ($chan.Ok) { 'PASS' } else { 'FAIL' }) $chan.Detail
+Register-Control -Id 'G2.CHAN' -Name 'the file-based WSL channel discriminates' -Fired $chan.Ok -Evidence $chan.Detail | Out-Null
 if (-not $chan.Ok) { W 'CHANNEL UNTRUSTWORTHY, stopping (L22).'; W 'PHASE3_PROBE_COMPLETE rc=2'; exit 2 }
 
 # ---------------------------------------------------------- 0. environment
@@ -479,12 +473,4 @@ if ($t13.Out -match 'NO_SECRET_CONFIGURED') {
 # ------------------------------------------------------------------ cleanup
 $null = Invoke-WslFile -Tag 'g2cleanup' -User 'root' -Body 'pkill -f cf-sink.js 2>/dev/null; echo "sink stopped"'
 
-Section "Phase 3 result table"
-foreach ($row in $script:Results) { W ("{0,-14} {1,-16} {2}" -f $row.Id, $row.Verdict, $row.Name) }
-$script:Results | ConvertTo-Json -Depth 4 | Out-File 'C:\cfv\phase3-results.json' -Encoding utf8
-$f = @($script:Results | Where-Object { $_.Verdict -eq 'FAIL' })
-W ''
-W "FAIL=$($f.Count)"
-foreach ($x in $f) { W "   FAIL $($x.Id) $($x.Name) :: $($x.Evidence)" }
-W "PHASE3_PROBE_COMPLETE rc=$($f.Count)"
-exit $f.Count
+Complete-Phase -ResultsJson 'C:\cfv\phase3-results.json' -MarkerPrefix 'PHASE3'

@@ -30,23 +30,16 @@ param(
 $ErrorActionPreference = 'Continue'
 . C:\cfv\interim-v120-wslchan.ps1
 
-function W([string]$m) {
-    $line = "[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $m
-    Write-Host $line; $line | Out-File $Transcript -Encoding utf8 -Append
-}
-function Section($t) { W ''; W ("=" * 72); W $t; W ("=" * 72) }
-$script:Results = New-Object System.Collections.ArrayList
-function Record($id, $name, $verdict, $evidence) {
-    [void]$script:Results.Add([pscustomobject]@{ Id = $id; Name = $name; Verdict = $verdict; Evidence = $evidence })
-    W ("  [{0}] {1} :: {2}" -f $verdict, $id, $name)
-    if ($evidence) { W ("        {0}" -f ($evidence -replace "`r?`n", ' | ')) }
-}
+# The phase runner owns W, Section, Record, the control and precondition calls,
+# and the verdict. See its header.
+. C:\cfv\interim-v120-phaselib.ps1
 $tag = if ($PostReboot) { 'POSTREBOOT' } else { 'PRE' }
 
-Section "ClawFactory v1.2.0 INTERIM validation, Phase 4 (structural), pass=$tag. $(Get-Date -Format s)"
+Start-Phase -Name "ClawFactory INTERIM validation, Phase 4 (structural), pass=$tag" `
+    -Transcript $Transcript -Sentinel 'PHASE4_PROBE_COMPLETE'
 
 $chan = Test-WslChannel
-Record "S.CHAN.$tag" 'File-based WSL channel discriminates' $(if ($chan.Ok) { 'PASS' } else { 'FAIL' }) $chan.Detail
+Register-Control -Id "S.CHAN.$tag" -Name 'the file-based WSL channel discriminates' -Fired $chan.Ok -Evidence $chan.Detail | Out-Null
 if (-not $chan.Ok) { W 'CHANNEL UNTRUSTWORTHY, stopping (L22).'; W 'PHASE4_PROBE_COMPLETE rc=2'; exit 2 }
 
 # ------------------------------------------------------- 1. SMTP blocked
@@ -258,13 +251,5 @@ su -s /bin/bash -c "printf 'post kill\n' > /tmp/kb3.txt; clawfactory-send --to s
         'proves kill cancelled the queue rather than bricking the broker'
 }
 
-Section "Phase 4 result table (pass=$tag)"
-foreach ($row in $script:Results) { W ("{0,-20} {1,-10} {2}" -f $row.Id, $row.Verdict, $row.Name) }
 $outJson = if ($PostReboot) { 'C:\cfv\phase4-results-postreboot.json' } else { 'C:\cfv\phase4-results.json' }
-$script:Results | ConvertTo-Json -Depth 4 | Out-File $outJson -Encoding utf8
-$f = @($script:Results | Where-Object { $_.Verdict -eq 'FAIL' })
-W ''
-W "FAIL=$($f.Count)"
-foreach ($x in $f) { W "   FAIL $($x.Id) $($x.Name) :: $($x.Evidence)" }
-W "PHASE4_PROBE_COMPLETE rc=$($f.Count)"
-exit $f.Count
+Complete-Phase -ResultsJson $outJson -MarkerPrefix "PHASE4_$tag"

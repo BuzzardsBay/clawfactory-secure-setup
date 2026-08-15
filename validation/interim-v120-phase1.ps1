@@ -32,29 +32,19 @@ param(
 
 $ErrorActionPreference = 'Continue'
 . C:\cfv\interim-v120-wslchan.ps1
-
-# --- Producer-owned transcript. The wrapper's redirect is the other channel;
-# two independent channels, because cfv-149 lost 100 percent of its evidence
+# W, Section, Marker, Record, Register-Control, Require-Precondition,
+# Assert-Searchable, Compare-Independent and Complete-Phase all live here now.
+# The VOID rules are properties of that runner rather than habits of this file:
+# see its header for why four wrong results shipped while every habit was in
+# place. Two independent channels are still kept -- the producer transcript and
+# the wrapper's redirect -- because cfv-149 lost 100 percent of its evidence
 # relying on one.
-function W([string]$m) {
-    $line = "[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $m
-    Write-Host $line
-    $line | Out-File $Transcript -Encoding utf8 -Append
-}
-function Section($t) { W ''; W ("=" * 72); W $t; W ("=" * 72) }
-function Marker($n) { New-Item -ItemType File -Path "C:\cfv\$n.marker" -Force | Out-Null }
+. C:\cfv\interim-v120-phaselib.ps1
+
 function Finish($code) {
     W ''
     W "PHASE1_PROBE_COMPLETE rc=$code"
     exit $code
-}
-
-# --- Result ledger. Every check lands here so the report is a table, not prose.
-$script:Results = New-Object System.Collections.ArrayList
-function Record($id, $name, $verdict, $evidence) {
-    [void]$script:Results.Add([pscustomobject]@{ Id = $id; Name = $name; Verdict = $verdict; Evidence = $evidence })
-    W ("  [{0}] {1} :: {2}" -f $verdict, $id, $name)
-    if ($evidence) { W ("        {0}" -f ($evidence -replace "`r?`n", ' | ')) }
 }
 
 # --- The seven build-time pins, as literals. These are transcribed from the
@@ -66,13 +56,35 @@ $PIN = @{
     persona       = '0557d07004d4d067d8cd9e7cee7b2a3a783e0ac8ff4c492c0c152d7e35ff63a0'
     workspaceSoul = '441b6279f6613c313e87e9e9e034f97a220540cddbf1cf738bb9a86c37a5a257'
     rootfs        = '1483cc5c1dce13064f774834cbffdff226559fd522a67a381a8ea77d63fb4109'
-    # Repinned 2026-08-14 to the Guard 3 build's Studio 1.2.0 payload. It had sat
-    # at b701bfb7 since this file was created and was never moved, so it was
-    # already two Studio builds stale before this session touched it. That is a
-    # harness defect with a consequence: a decorative pin cannot detect the drift
-    # it exists to detect. See the close-out.
-    studio        = '540bb30b6f163ae2fb3b381d4491e5b6a25b2973add7d69615fb078a8b156fb9'
-    version       = '1.2.0'
+
+    # THE STUDIO PIN, REPLACED 2026-08-15, and the reason matters more than the value.
+    #
+    # This used to be the digest of the STAGED Studio INSTALLER in
+    # <app>\stage\*.exe. That check was VACUOUS on the happy path: the installer
+    # de-elevates and runs the staged payload at ssPostInstall and the stage is
+    # not retained afterwards, so on any SUCCESSFUL install the file was already
+    # gone and the check recorded INFO. It could only ever derive a digest when
+    # the install had ALREADY failed early enough to leave the stage behind,
+    # which is precisely when nobody needs a payload pin. A check that cannot
+    # detect the drift it exists to detect is not coverage, and leaving it in
+    # place to be counted as coverage is worse than not having it.
+    #
+    # What replaces it is the digest of the INSTALLED app.asar, which is where
+    # the shipped Studio payload actually lands:
+    #     %LOCALAPPDATA%\Programs\ClawFactory Studio\resources\app.asar
+    # That file exists on every successful install, so the check fires on the
+    # happy path, which is the whole point.
+    #
+    # On derivability, checked rather than assumed: the electron-builder NSIS
+    # installer carries exactly ONE embedded archive (a 7z payload, signature
+    # found at a single offset in the 1.2.0 artifact), and 7z is lossless, so the
+    # installed app.asar is the same bytes as the one this digest is taken from
+    # in desktop\release\win-unpacked\resources\app.asar. If the VM ever reports
+    # a mismatch here on an otherwise-clean install, that is a HARNESS finding to
+    # diagnose, not a product failure to report.
+    studioAsar    = 'dc24d41618545f6043d3160e7d4d3d93dd28eb90e620da0c44eb62fac2b6d7dd'
+
+    version       = '1.3.0'
 }
 
 # The names are transcribed from setup.ps1 Step-Preflight $required. Held here as
@@ -85,7 +97,12 @@ $PIN = @{
 # copy that is never reconciled is not independence, it is a second stale list.
 # The three Guard 3 resources are added below and the counts are now compared
 # explicitly rather than left for a reader to spot.
-$REQUIRED30 = @(
+#
+# 2026-08-15: renamed from $REQUIRED30. The name carried a count, the count moved
+# to 33 and then 34, and a name that states a stale number is the same defect as
+# a label that states one (see PIN.bundle below). The count is now only ever read
+# from the list itself.
+$REQUIRED = @(
     'safety-rules.md', 'persona.md', 'openclaw-shim.sh', 'clawfactory-turn-gate.sh',
     'clawfactory-spend-check.js', 'install-turn-gate.sh', 'freeze-injected-soul.sh',
     'clawfactory-proxy.js', 'clawfactory-proxy.service', 'install-chat-proxy.sh',
@@ -99,12 +116,15 @@ $REQUIRED30 = @(
     'clawfactory-send-gc.timer', 'clawfactory-fw-assert.sh', 'egress-policy.json',
     'install-send.sh',
     # v1 Guard 3
-    'clawfactory-read-fetch.sh', 'clawfactory-fetchctl.js', 'install-read-fetch.sh'
+    'clawfactory-read-fetch.sh', 'clawfactory-fetchctl.js', 'install-read-fetch.sh',
+    # v1 Guard 3, the toolchain access toggle
+    'clawfactory-toolchain.sh'
 )
 
-Section "ClawFactory v1.2.0 INTERIM validation, Phase 1 (install). $(Get-Date -Format s)"
+Start-Phase -Name "ClawFactory v$($PIN.version) INTERIM validation, Phase 1 (install)" `
+    -Transcript $Transcript -Sentinel 'PHASE1_PROBE_COMPLETE'
 W "Artifact: $CombinedExe"
-W "NOTE: this is an INTERIM validation of a Guards 1+2 build. It is NOT the release gate."
+W "NOTE: this is an INTERIM validation. It is NOT the release gate."
 
 # ---------------------------------------------------------------- 1. baseline
 Section "1. Clean-box state BEFORE install"
@@ -186,21 +206,31 @@ if ($setupLog -and (Test-Path $setupLog)) {
 }
 
 # --------------------------- 4. every required resource, verified independently
-Section "4. All $($REQUIRED30.Count) required resources on disk, enumerated by this probe"
+Section "4. All $($REQUIRED.Count) required resources on disk, enumerated by this probe"
 $appDir = 'C:\Program Files\ClawFactory'
 $resDir = Join-Path $appDir 'resources'
 W "Resource dir: $resDir (exists=$(Test-Path $resDir))"
 $missing = @()
 $present = @()
-foreach ($r in $REQUIRED30) {
+foreach ($r in $REQUIRED) {
     $p = Join-Path $resDir $r
     if (Test-Path -LiteralPath $p) { $present += $r } else { $missing += $r }
 }
-W "Independently confirmed present: $($present.Count) / $($REQUIRED30.Count)"
+W "Independently confirmed present: $($present.Count) / $($REQUIRED.Count)"
 if ($missing.Count) { W "MISSING: $($missing -join ', ')" }
-Record 'P1.3' "All $($REQUIRED30.Count) required resources on disk (independent enumeration)" `
+
+# The enumeration means nothing unless this probe can tell present from absent.
+# Registered as a POSITIVE CONTROL rather than recorded as an ordinary check: if
+# a real resource cannot be found, the whole phase is measuring a broken
+# Test-Path and every result below it is void.
+$sentinelReal = 'safety-rules.md'
+$canSeePresent = Test-Path -LiteralPath (Join-Path $resDir $sentinelReal)
+Register-Control -Id 'P1.3.CTL' -Name "the enumeration can see a resource that IS there ($sentinelReal)" `
+    -Fired $canSeePresent -Evidence "Test-Path on $sentinelReal returned $canSeePresent" | Out-Null
+
+Record 'P1.3' "All $($REQUIRED.Count) required resources on disk (independent enumeration)" `
     $(if ($missing.Count -eq 0) { 'PASS' } else { 'FAIL' }) `
-    "present=$($present.Count)/$($REQUIRED30.Count) missing=$(if($missing.Count){$missing -join ','}else{'none'})"
+    "present=$($present.Count)/$($REQUIRED.Count) missing=$(if($missing.Count){$missing -join ','}else{'none'})"
 
 # THE CHECK THIS FILE CLAIMED TO BE AND WAS NOT. Holding an independent copy of
 # the list is only independence if the two copies are actually compared. On
@@ -208,27 +238,33 @@ Record 'P1.3' "All $($REQUIRED30.Count) required resources on disk (independent 
 # 33, and nothing noticed, because each side only ever counted itself. A guard
 # resource could therefore be added to the product and silently never checked
 # here, which is precisely the drift the copy exists to catch.
-$claimed = $script:InstallerResourceCount
-Record 'P1.3b' 'Installer resource count and this probe agree (the copies are reconciled)' `
-    $(if (-not $claimed) { 'VOID' } elseif ($claimed -eq $REQUIRED30.Count) { 'PASS' } else { 'FAIL' }) `
-    "installer claims $claimed; this probe enumerates $($REQUIRED30.Count). A mismatch means one of the two lists is stale."
+#
+# Now a runner-level call, so the comparison cannot be dropped by a future edit
+# and an absent installer count records VOID rather than reading as agreement.
+Compare-Independent -Id 'P1.3b' -Name 'Installer resource count and this probe agree (the copies are reconciled)' `
+    -Mine $REQUIRED.Count -Reported $script:InstallerResourceCount `
+    -MineLabel 'this probe enumerates' -ReportedLabel 'the installer claims' | Out-Null
 
-# Paired control: a name that MUST be absent. If this "finds" a file, the
-# enumeration is not discriminating and the 30/30 above is a void result.
+# Paired NEGATIVE control: a name that MUST be absent. If this "finds" a file,
+# the enumeration is not discriminating and the count above is a void result.
 $ctlName = 'this-resource-does-not-exist-b7f31c.md'
 $ctlHit  = Test-Path -LiteralPath (Join-Path $resDir $ctlName)
 Record 'P1.3c' 'CONTROL: absent resource must not be found' `
     $(if (-not $ctlHit) { 'PASS' } else { 'FAIL' }) "probe for $ctlName returned $ctlHit"
 
-# ------------------------------------------- 5. seven pins, each by execution
-Section "5. Seven build-time pins, RE-DERIVED on the installed machine"
+# ------------------------------------------- 5. the pins, each by execution
+Section "5. Build-time pins, RE-DERIVED on the installed machine"
 
 $chan = Test-WslChannel
 W "WSL channel self-test: Ok=$($chan.Ok)"
 W $chan.Detail
-Record 'P1.CHAN' 'File-based WSL channel discriminates (subject passes, control fails)' `
-    $(if ($chan.Ok) { 'PASS' } else { 'FAIL' }) `
-    'subject id -u=0, /bin/false rc=1, variable expansion intact'
+# The channel IS the instrument for every in-distro pin below, so it is a
+# positive control rather than an ordinary check. L22: an inline probe once
+# reported that clawuser had connected to smtp.gmail.com on two ports, which the
+# channel had fabricated, and it would have been filed as a ship-blocking hole in
+# a firewall that was working correctly.
+Register-Control -Id 'P1.CHAN' -Name 'the file-based WSL channel discriminates (subject passes, control fails)' `
+    -Fired $chan.Ok -Evidence 'subject id -u=0, /bin/false rc=1, variable expansion intact' | Out-Null
 if (-not $chan.Ok) {
     W 'CHANNEL IS NOT TRUSTWORTHY. Every WSL-side pin result below would be a void result (L22). Halting pin checks.'
     Marker 'PHASE1_CHANNEL_FAIL'
@@ -309,23 +345,33 @@ echo "MNT_C_PRESENT=$([ -d /mnt/c ] && echo yes || echo no)"
     }
 }
 
-# 5e. Studio payload -- the staged installer the combined build embedded.
-$studioStage = Get-ChildItem (Join-Path $appDir 'stage') -Filter '*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($studioStage) {
-    $sActual = (Get-FileHash $studioStage.FullName -Algorithm SHA256).Hash.ToLower()
-    Cmp 'PIN.studio' 'Pin 5of7 embedded Studio payload' $sActual $PIN.studio
+# 5e. The Studio payload, checked where it ACTUALLY LANDS.
+#
+# The old check hashed the staged Studio INSTALLER in <app>\stage and was vacuous
+# on every successful install, because the stage is not retained past
+# ssPostInstall. It has been deleted rather than left in place: an INFO row that
+# reads like coverage is worse than an absent check, because it gets counted.
+#
+# The installed app.asar is the shipped payload. It exists on every successful
+# install, so this fires on the happy path, which is the entire point.
+$asarPaths = @(
+    "$env:LOCALAPPDATA\Programs\ClawFactory Studio\resources\app.asar",
+    'C:\Users\clawadmin\AppData\Local\Programs\ClawFactory Studio\resources\app.asar'
+)
+$asar = $asarPaths | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if ($asar) {
+    $asarActual = (Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash.ToLower()
+    W "Installed app.asar: $asar ($((Get-Item -LiteralPath $asar).Length) B)"
+    Cmp 'PIN.studio.asar' 'Studio pin: the INSTALLED app.asar matches the build-time digest' $asarActual $PIN.studioAsar
 } else {
-    # Absence is not automatically a failure: the stage dir may be cleaned after
-    # Studio installs. Check whether Studio actually landed before judging.
-    $studioInstalled = @(
-        "$env:LOCALAPPDATA\Programs\ClawFactory Studio",
-        "C:\Users\clawadmin\AppData\Local\Programs\ClawFactory Studio"
-    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-    Record 'PIN.studio' 'Pin 5of7 embedded Studio payload' 'INFO' `
-        "stage payload not retained post-install; Studio present at: $(if($studioInstalled){$studioInstalled}else{'NOT FOUND'})"
+    # Studio absent is a real failure of the combined installer's de-elevated
+    # post-install step, not a harness gap, so it is a FAIL and it says which.
+    Record 'PIN.studio.asar' 'Studio pin: the INSTALLED app.asar matches the build-time digest' 'FAIL' `
+        ("no app.asar under any of: " + ($asarPaths -join ' ; ') +
+         ". Studio did not land, so the combined installer's ExecAsOriginalUser post-install step did not complete.")
 }
 
-# 5f. Version -- the installed product must report 1.2.0.
+# 5f. Version -- the installed product must report the pinned version.
 $verSources = @()
 $rk = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
 foreach ($k in (Get-ChildItem $rk -ErrorAction SilentlyContinue)) {
@@ -337,30 +383,25 @@ foreach ($k in (Get-ChildItem $rk -ErrorAction SilentlyContinue)) {
 }
 W "Uninstall-key versions: $($verSources -join ' ; ')"
 $verOk = ($verSources -join ' ') -match [regex]::Escape($PIN.version)
-Record 'PIN.version' 'Pin 6of7 installed version reports 1.2.0' `
+# The version is read from $PIN rather than written into the label, for the same
+# reason PIN.bundle's count now is: a label that states a number the check does
+# not read is a label that goes stale silently.
+Record 'PIN.version' "Installed version reports $($PIN.version)" `
     $(if ($verOk) { 'PASS' } else { 'FAIL' }) ($verSources -join ' ; ')
 
-# 5g. Bundle -- already established by P1.3, restated as the seventh pin.
-Record 'PIN.bundle' 'Pin 7of7 bundle completeness (all 30 preflight resources shipped)' `
-    $(if ($missing.Count -eq 0) { 'PASS' } else { 'FAIL' }) "missing=$(if($missing.Count){$missing -join ','}else{'none'})"
+# 5g. Bundle -- already established by P1.3, restated as a pin.
+#
+# The label used to say 30 while the check counted 33. Both numbers now come from
+# $REQUIRED.Count, so the sentence a reader sees and the number the code compares
+# cannot drift apart. That was the whole defect: nothing was wrong with the
+# check, only with the sentence describing it, and a wrong sentence is what a
+# reader carries away.
+Record 'PIN.bundle' "Bundle completeness (all $($REQUIRED.Count) preflight resources shipped)" `
+    $(if ($missing.Count -eq 0) { 'PASS' } else { 'FAIL' }) `
+    "expected $($REQUIRED.Count), found $($present.Count), missing=$(if($missing.Count){$missing -join ','}else{'none'})"
 
 # --------------------------------------------------------------- 6. summary
-Section "6. Phase 1 result table"
-foreach ($row in $script:Results) {
-    W ("{0,-22} {1,-6} {2}" -f $row.Id, $row.Verdict, $row.Name)
-}
-$fails = @($script:Results | Where-Object { $_.Verdict -eq 'FAIL' })
-$voids = @($script:Results | Where-Object { $_.Verdict -eq 'VOID' })
-W ''
-W "PASS=$(@($script:Results | Where-Object Verdict -eq 'PASS').Count) FAIL=$($fails.Count) VOID=$($voids.Count) INFO=$(@($script:Results | Where-Object Verdict -eq 'INFO').Count)"
-$script:Results | ConvertTo-Json -Depth 4 | Out-File 'C:\cfv\phase1-results.json' -Encoding utf8
-
-if ($fails.Count -gt 0) {
-    W ''
-    W "PHASE 1 FAILED. Failing checks:"
-    foreach ($f in $fails) { W "   FAIL $($f.Id) $($f.Name) :: $($f.Evidence)" }
-    Marker 'PHASE1_FAIL'
-    Finish 1
-}
-Marker 'PHASE1_PASS'
-Finish 0
+# Complete-Phase owns the verdict now. It voids the phase if no positive control
+# was registered, if one did not fire, or if a precondition was unmet, and it
+# exits 4 for VOID so a driver cannot read a missing measurement as a pass.
+Complete-Phase -ResultsJson 'C:\cfv\phase1-results.json' -MarkerPrefix 'PHASE1'
