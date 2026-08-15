@@ -128,8 +128,15 @@ $CombinedExe = Join-Path $RepoRoot 'Output\ClawFactory-Secure-Setup.exe'
 # the changed 1.3.0 rebuild, exactly as designed, and complying with it instead
 # of deleting the row is the discipline the gate exists to enforce. The 1.3.0 row
 # stays in released-versions.tsv, annotated as superseded.
-$Sha256      = 'dd421637bafc279803c9319525cbdaa07699dcdccee44c5b03618abf644c4c88'
-$ExpectBytes = 440598152
+# Repinned to 1.3.2 after cfv-164 measured the toolchain toggle failing to close
+# the route it advertises. The removal of the toolchain hosts from the
+# always-open provider allowlist had been done in ONE of the three places a
+# hostname can enter that set, so the addresses were re-seeded at install and the
+# switch could not revoke them. 1.3.2 removes them from $baseHosts as well, and
+# resolves each toolchain host three times to cope with a rotating pool. Full
+# detail in the close-out, section 8.3.
+$Sha256      = 'ac0e6cf09675fae0c820fab06ab3d3938e88d9f0fdd690bd28ffcc32b34827a7'
+$ExpectBytes = 440603888
 
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $run = "{0}-{1}" -f $VmName, (Get-Date -Format 'yyyyMMdd-HHmmss')

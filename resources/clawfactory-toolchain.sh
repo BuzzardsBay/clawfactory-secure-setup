@@ -60,9 +60,41 @@ MAX_IPS=512
 # duplication that bit the provider list, which was copied into two blocks of
 # setup.ps1 and had to be kept in step by hand.
 #
-# clawhub.ai is what skill installation talks to. The GitHub and npm entries are
-# what the agent fetches code through. The panel copy names both consequences.
-TOOLCHAIN_HOSTS="clawhub.ai api.github.com raw.githubusercontent.com objects.githubusercontent.com registry.npmjs.org"
+# clawhub.ai and api.clawhub.ai are what skill installation talks to. The GitHub
+# and npm entries are what the agent fetches code through. The panel copy names
+# both consequences.
+#
+# THIS LIST MUST BE THE EXACT COMPLEMENT of what was removed from $baseHosts and
+# AUX_HOSTS in setup.ps1. A host in both places is unrevocable (its address is
+# re-seeded into @allowed_ipv4, where nothing removes it) and the switch silently
+# fails to close it. A host in neither is unreachable even with the switch ON.
+# Measured on cfv-164: github.com, codeload.github.com and api.clawhub.ai were
+# missing here while still present in $baseHosts, so the switch could not close
+# them and the validation caught it.
+TOOLCHAIN_HOSTS="clawhub.ai api.clawhub.ai \
+api.github.com github.com raw.githubusercontent.com objects.githubusercontent.com codeload.github.com \
+registry.npmjs.org"
+
+# How many times to resolve each host before building the set.
+#
+# A ROTATING POOL is why this is not 1. api.github.com answers with a different
+# address on roughly every other lookup (measured on cfv-164: 140.82.116.6 and
+# 20.29.134.17 across five lookups), so a set built from ONE lookup misses the
+# address the next connection actually uses, and the host is intermittently
+# unreachable while the switch reads ON.
+#
+# The provider set does not have this problem, but only by accident: it is
+# refreshed ADDITIVELY with element timeouts, so it accumulates a pool over hours.
+# This set is flushed and rebuilt every run, which is what makes revocation work
+# at all, and the cost of that is losing the accumulation. Resolving several times
+# and taking the union buys back most of the pool WITHOUT giving up revocation,
+# because the union is still discarded and rebuilt on the next run.
+#
+# Three is a deliberate compromise. It is enough to catch an alternating pool,
+# cheap enough to run on a five-hourly timer, and it is not a substitute for the
+# residual being documented: no number of lookups makes address matching into
+# hostname matching.
+RESOLVE_PASSES=3
 
 note() { echo "[toolchain] $*"; }
 loud() { echo "[toolchain] $*" >&2; }
@@ -158,7 +190,16 @@ if [ "$ENABLED" = "1" ]; then
         case "$h" in
             *[!a-z0-9.-]*|-*|.*|"") loud "skipping unexpected toolchain host: $h"; continue ;;
         esac
-        GOT="$(getent ahostsv4 "$h" 2>/dev/null | awk '{print $1}' | sort -u)"
+        # Several passes, unioned. See RESOLVE_PASSES above: a single lookup misses
+        # half of a rotating pool, and the host is then intermittently unreachable
+        # while the switch reads ON.
+        GOT=""
+        p=0
+        while [ "$p" -lt "$RESOLVE_PASSES" ]; do
+            GOT="$GOT $(getent ahostsv4 "$h" 2>/dev/null | awk '{print $1}')"
+            p=$((p + 1))
+        done
+        GOT="$(printf '%s\n' $GOT | sed '/^$/d' | sort -u)"
         if [ -z "$GOT" ]; then
             loud "cannot resolve $h; it stays denied"
             continue

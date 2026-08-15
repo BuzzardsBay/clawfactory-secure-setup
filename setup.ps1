@@ -53,7 +53,7 @@ Set-StrictMode -Version 3.0
 # It sat at 1.0.34 from 2026-05 through v1.1.1, roughly fifteen releases, because
 # nothing referenced it and nothing compared it. It is still unreferenced today;
 # the assertion exists so that stops being possible rather than staying luck.
-$InstallerVersion      = '1.3.1'
+$InstallerVersion      = '1.3.2'
 # [R2] OpenClaw install.sh is BUNDLED into the installer (resources\openclaw-install.sh).
 # No network call to openclaw.ai/install.sh during install — that URL tracks "latest" and
 # changed twice in 24 hours on 2026-05-09/10. Hash is computed at install time and written
@@ -1392,12 +1392,42 @@ function Step-EgressFirewall {
     # Allowlist includes only the SELECTED provider's host(s) plus infra essentials.
     Write-Log INFO "Step 7 [R3]: Installing WSL egress firewall (clawuser-scoped, provider=$Provider)."
     $baseHosts     = @(
-        # Git / source hosts
-        'api.github.com','github.com','raw.githubusercontent.com','codeload.github.com',
-        # OpenClaw + ClawHub
-        'openclaw.ai','docs.openclaw.ai','clawhub.ai','api.clawhub.ai',
-        # npm + Node.js (for skills and updates)
-        'registry.npmjs.org','nodejs.org','deb.nodesource.com',
+        # v1 Guard 3, the toolchain access toggle. THE GIT, CLAWHUB AND NPM HOSTS
+        # THAT USED TO BE HERE ARE GONE, and this is the load-bearing half of that
+        # feature rather than tidying.
+        #
+        # They were: api.github.com, github.com, raw.githubusercontent.com,
+        # codeload.github.com, clawhub.ai, api.clawhub.ai, registry.npmjs.org.
+        # They now live in TOOLCHAIN_HOSTS inside clawfactory-toolchain.sh, which
+        # maintains its own nft set that the user can switch off.
+        #
+        # WHY THIS LIST MATTERS AS MUCH AS THE REFRESH LIST, learned by execution
+        # on cfv-164. Removing them from AUX_HOSTS alone was NOT enough: this list
+        # seeds @allowed_ipv4 at install AND is persisted to
+        # /etc/clawfactory/allowed-ips.txt, which the boot path re-applies. So the
+        # addresses came straight back into the set nothing can revoke, and the
+        # validation measured the consequence directly: with the toolchain set
+        # EMPTY, registry.npmjs.org and raw.githubusercontent.com were still
+        # reachable for uid 1000. The toggle looked installed and could not
+        # actually close the route it advertises.
+        #
+        # There are THREE places a hostname can enter the unrevocable set: here,
+        # AUX_HOSTS at install, and AUX_HOSTS in the refresh script. A revocable
+        # host must be absent from all three. Missing one is silent.
+        #
+        # Nothing is lost when the toggle is ON, which is the default: the same
+        # addresses are resolved into @toolchain_ipv4 instead. Install-time work
+        # is unaffected either way, because apt and npm run as ROOT during install
+        # and the chain returns for any uid that is not the agent's.
+        #
+        # openclaw.ai and docs.openclaw.ai STAY here deliberately. They are the
+        # product's own site rather than a software source, the panel copy does not
+        # name them, and a switch that silently cut them would be wider than what
+        # the user was told they were turning off.
+        'openclaw.ai','docs.openclaw.ai',
+        # Node.js runtime downloads. Install-time, as root, and not what the
+        # toolchain switch advertises.
+        'nodejs.org','deb.nodesource.com',
         # (Docker Hub hosts removed with Docker itself -- SECFIX_CLOSE_DOORS decision A.
         #  Nothing pulls images any more, so the allowlist no longer opens egress to them.)
         # v1.0.3: Ubuntu apt repos. apt-as-root currently bypasses the firewall
