@@ -51,11 +51,22 @@ echo "=== the plugin manifest ==="
 cat "$P/openclaw.plugin.json" 2>/dev/null | head -60
 echo
 echo "=== does the plugin CODE reference a baseUrl or base_url option ==="
-grep -oE '(baseUrl|base_url|baseURL)[^,;)]{0,60}' "$P"/*.js 2>/dev/null | head -20
-echo "PLUGIN_CODE_BASEURL_HITS=$(grep -c -E 'baseUrl|base_url|baseURL' "$P"/*.js 2>/dev/null | paste -sd+ | bc 2>/dev/null || echo 0)"
+grep -rhoE '(baseUrl|base_url|baseURL)[^,;)]{0,70}' "$P" 2>/dev/null | sort -u | head -20
+# grep -h -o piped to wc -l. NOT `grep -c ... | paste -sd+ | bc`: with multiple
+# files grep -c emits "path:N" per file, so the sum expression was malformed, bc
+# is not installed anyway, and the whole substitution produced an EMPTY string.
+# That made the count -1, the positive control did not fire, and the phase went
+# VOID. Which is exactly right, and is why this is being fixed rather than
+# argued with: without the runner this would have reported a confident FAIL
+# saying the plugin has no baseUrl support, which the grep output on the line
+# above flatly contradicts.
+echo "PLUGIN_CODE_BASEURL_HITS=$(grep -rhoE 'baseUrl|base_url|baseURL' "$P" 2>/dev/null | wc -l | tr -d ' ')"
 echo
 echo "=== CONTROL: a string that must NOT appear in the same files ==="
-echo "CONTROL_HITS=$(grep -c 'ClawFactoryNegativeSentinelZZ9' "$P"/*.js 2>/dev/null | paste -sd+ | bc 2>/dev/null || echo 0)"
+echo "CONTROL_HITS=$(grep -rhoE 'ClawFactoryNegativeSentinelZZ9' "$P" 2>/dev/null | wc -l | tr -d ' ')"
+echo
+echo "=== WHICH key does it read? This is the actual question. ==="
+grep -rhoE '.{0,50}(baseUrl|base_url|baseURL).{0,50}' "$P" 2>/dev/null | sort -u | head -12
 '@
 W $r.Out
 $codeHits = if ($r.Out -match 'PLUGIN_CODE_BASEURL_HITS=(\d+)') { [int]$Matches[1] } else { -1 }
