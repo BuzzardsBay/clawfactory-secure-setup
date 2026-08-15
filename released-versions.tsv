@@ -34,4 +34,5 @@
 #
 version	artifact	digest_kind	sha256	bytes	date_utc	note
 1.2.0	ClawFactory-Secure-Setup.exe	signed	6282a228e620d7d580f7bedadb0a96c9b166f037f2dd83645911b5fcf90603f0	440596328	2026-08-14	backfilled from the Guard 3 close-out; the third distinct payload shipped at this version, which is why this ledger exists
-1.3.0	ClawFactory-Secure-Setup.exe	unsigned	26e7b29178c2c475ac0c74f6197c3d4a34b45d7709a023156a01164647bd945d	440587611	2026-08-15	written by scripts/build_release.ps1 after all gates passed and the artifact was signed
+1.3.0	ClawFactory-Secure-Setup.exe	unsigned	26e7b29178c2c475ac0c74f6197c3d4a34b45d7709a023156a01164647bd945d	440587611	2026-08-15	written by scripts/build_release.ps1 after all gates passed and the artifact was signed. SUPERSEDED BEFORE VALIDATION, never released: a toolchain policy section that was present but not an object read as ON instead of denying, which contradicted the documented fail-closed rule. The row is KEPT rather than deleted, and the fix shipped as 1.3.1. Deleting it to let a changed 1.3.0 rebuild through would be exactly the 2am shortcut this ledger exists to prevent.
+1.3.1	ClawFactory-Secure-Setup.exe	unsigned	af2fb2e82a04d0c4cf5853a2ea51be472de585947f2b0e7d89760bac94f7f712	440582502	2026-08-15	written by scripts/build_release.ps1 after all gates passed and the artifact was signed

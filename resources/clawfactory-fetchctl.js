@@ -151,8 +151,15 @@ function applyToolchain() {
  *  key means, the panel would draw a switch in the wrong position and the user
  *  would flip it the wrong way. */
 function toolchainEnabled(raw) {
-  const t = raw && raw.toolchain;
-  if (!t || typeof t !== 'object' || t.enabled === undefined || t.enabled === null) return true;
+  const t = raw ? raw.toolchain : undefined;
+  // ABSENT is ON (a policy predating the feature); MALFORMED is OFF (a fault is
+  // not a preference); a boolean is itself. Must stay byte-for-byte equivalent
+  // to the decision in clawfactory-toolchain.sh, because if the panel and the
+  // enforcement disagreed about what a given file means, the panel would draw
+  // the switch in the wrong position and the user would flip it the wrong way.
+  if (t === undefined || t === null) return true;
+  if (typeof t !== 'object' || Array.isArray(t)) return false;
+  if (t.enabled === undefined || t.enabled === null) return true;
   return t.enabled === true;
 }
 

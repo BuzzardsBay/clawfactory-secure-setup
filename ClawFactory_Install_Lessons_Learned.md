@@ -1057,3 +1057,43 @@ And a missing precondition is not a product verdict: check it explicitly, name i
 Corollary for probes that need a human: a check whose subject destroys itself on a timer (an
 approval window, a session, a lease) cannot be staged in advance and handed over. Stage it
 immediately before the person acts, or it will have expired by the time they read the instruction.
+
+## L30. A periodic refresh can re-open a route the user just closed, and it will do it hours later
+
+Found 2026-08-15, building the toolchain access toggle. Not a bug that shipped: the design was
+chosen specifically to avoid it, and this records why so nobody undoes it.
+
+ClawFactory refreshes its provider allowlist every five hours by re-resolving a list of hostnames
+and ADDING the results to an nft set whose elements carry a timeout. That is additive by
+construction. Nothing is ever removed from it deliberately, and nothing can be: an address added by
+hostname has no owner, so there is no way to tell "the user revoked this" from "the resolver has
+not got to it yet".
+
+The software sources the agent needs (skill hub, GitHub, npm) lived in that set. Making them
+user-switchable by writing a flag and deleting the addresses would have produced a control that:
+
+- worked when tested, because the deletion is immediate
+- passed validation, because validation runs in the minutes after the change
+- silently reverted up to five hours later, on a customer machine, with nobody watching
+
+**That failure mode is invisible to any test that finishes in under five hours**, which is every
+test we run. It would have been discovered by a customer, as "I turned this off and it came back",
+and it would have looked like a lie rather than a bug.
+
+The rule, which is L11.1 generalised beyond its original case:
+
+1. **A revocable thing and an additively-refreshed thing cannot share a container.** If a user can
+   turn it off, it needs its own set, flushed and rebuilt from the authoritative policy on every
+   run. Two sets is not tidiness; it is the only way removal works.
+2. **The refresh must call the revocation path unconditionally**, including when the feature is
+   off. Skipping it when off leaves anything that drifted back in place. The resolver reads the
+   policy itself and flushes before it adds, so calling it always is both correct and safe.
+3. **Test against the real timer, not a simulation.** The test starts the shipped systemd unit,
+   because the question is what that unit does, not what a reimplementation of it does.
+4. **That test needs a control proving the refresh actually ran.** "The addresses did not come
+   back" is trivially true if the refresh did nothing at all. The control is that the refresh DID
+   add provider addresses in the same run: it worked, it just did not undo the user's choice.
+
+The general shape, worth carrying beyond firewalls: **any control the user can turn off must be
+tested against every scheduled job that could turn it back on.** Ask of each new switch, "what runs
+on a timer that touches this state?", and if the answer is anything, that timer gets its own test.

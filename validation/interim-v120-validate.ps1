@@ -116,8 +116,20 @@ $CombinedExe = Join-Path $RepoRoot 'Output\ClawFactory-Secure-Setup.exe'
 # released-versions.tsv records the UNSIGNED digest instead, because signing
 # embeds a countersigned timestamp and a signed digest is therefore different on
 # every run over identical input.
-$Sha256      = '3621c600380f5dcc781f7311eeb998bc02051a6fc2c1b097ed750147a856c778'
-$ExpectBytes = 440603256
+# Repinned again, minutes later, to 1.3.1. The 1.3.0 build above was SUPERSEDED
+# BEFORE VALIDATION and never released. Testing the toggle's policy reader across
+# every shape it can meet found that a `toolchain` section which was PRESENT but
+# not an object read as ON rather than denying, which contradicted the
+# fail-closed rule stated in that very file. Not reachable by the agent, which
+# cannot write the policy, but a control whose code disagrees with its own
+# comment is not one to ship in a security product.
+#
+# Bumping rather than editing the ledger is the point. The version gate refused
+# the changed 1.3.0 rebuild, exactly as designed, and complying with it instead
+# of deleting the row is the discipline the gate exists to enforce. The 1.3.0 row
+# stays in released-versions.tsv, annotated as superseded.
+$Sha256      = 'dd421637bafc279803c9319525cbdaa07699dcdccee44c5b03618abf644c4c88'
+$ExpectBytes = 440598152
 
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $run = "{0}-{1}" -f $VmName, (Get-Date -Format 'yyyyMMdd-HHmmss')

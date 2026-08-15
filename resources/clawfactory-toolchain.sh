@@ -104,12 +104,27 @@ if [ ! -x "$NODE" ]; then
 elif STATE="$("$NODE" -e '
 const fs = require("node:fs");
 const raw = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-const t = raw && raw.toolchain;
-// Absent section or absent key: default ON, which is the documented fresh-install
-// state and what a policy file predating this feature means. Only an explicit
-// false turns it off. Anything else that is not a boolean is treated as OFF and
-// announced, because a malformed value is a fault and a fault denies.
-if (!t || typeof t !== "object" || t.enabled === undefined || t.enabled === null) {
+const t = raw ? raw.toolchain : undefined;
+// THREE cases, and keeping them apart is the whole point. Collapsing "absent"
+// into "malformed" would break upgrades; collapsing "malformed" into "absent"
+// would let a garbage value open a firewall, which is the direction that costs
+// something.
+//
+//   ABSENT     -> ON. A policy file written before this feature has no toolchain
+//                 key, and the documented meaning of that is the pre-feature
+//                 behaviour, which was reachable.
+//   MALFORMED  -> OFF. Present but the wrong shape is a FAULT, not a preference,
+//                 and a fault denies. This includes a non-object toolchain value
+//                 and a non-boolean enabled: the string "true" is NOT true here,
+//                 because something that writes a string into this field is not
+//                 something whose intent should be guessed.
+//   BOOLEAN    -> exactly what it says.
+if (t === undefined || t === null) {
+  process.stdout.write("TOOLCHAIN=on-default");
+} else if (typeof t !== "object" || Array.isArray(t)) {
+  process.stderr.write("[toolchain] the toolchain policy section is not an object; treating as OFF\n");
+  process.stdout.write("TOOLCHAIN=off-malformed");
+} else if (t.enabled === undefined || t.enabled === null) {
   process.stdout.write("TOOLCHAIN=on-default");
 } else if (t.enabled === true) {
   process.stdout.write("TOOLCHAIN=on");
