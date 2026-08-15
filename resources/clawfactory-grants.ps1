@@ -1128,3 +1128,40 @@ function Remove-ReadFetchHost {
     }
     return $res
 }
+
+#--- v1 Guard 3: the toolchain access toggle ----------------------------------
+#
+# The software sources ClawFactory needs (the skill hub, GitHub, npm) used to sit
+# in the always-open provider allowlist, where nothing could ever revoke them.
+# They now have their own nft set, flushed and rebuilt on every run, so this
+# switch actually closes the route rather than appearing to.
+#
+# It DEFAULTS ON. Off would break skill installation and the agent's code
+# fetching on a fresh box, which is a functional regression rather than a safety
+# win, and the product's claim sentence already names the software sources. The
+# switch only ever NARROWS what is reachable.
+#
+# IT NEVER TOUCHES THE PROVIDER ROUTE, which lives in a different set. An agent
+# that cannot reach its model is a bricked product, and there is deliberately no
+# switch for that half.
+
+function Set-ToolchainAccess {
+    # Open or close the software-source route.
+    #
+    # Validated here as well as in the IPC layer and again in the root control
+    # tool. Three layers, none trusting the one above it, same as the read-fetch
+    # host path. The value is a strict boolean rather than anything coerced: a
+    # string that PowerShell would happily treat as truthy is exactly how a
+    # switch ends up in the opposite position from the one the user chose.
+    param(
+        [Parameter(Mandatory)][bool]$Enabled
+    )
+    $word = if ($Enabled) { 'on' } else { 'off' }
+    $res = Invoke-FetchCtl -Command "toolchain $word"
+    if ($res.ok) {
+        Write-GrantAudit -Event 'toolchain.set' -Data @{ enabled = $Enabled; changed = $res.changed }
+    } else {
+        Write-GrantAudit -Event 'toolchain.set_failed' -Data @{ enabled = $Enabled; code = $res.code; error = $res.error }
+    }
+    return $res
+}

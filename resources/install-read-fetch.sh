@@ -7,8 +7,13 @@
 #
 # Installs:
 #   /usr/local/sbin/clawfactory-read-fetch.sh   0755  the resolver, root-owned
+#   /usr/local/sbin/clawfactory-toolchain.sh    0755  the toolchain resolver
 #   /usr/local/sbin/clawfactory-fetchctl.js     0750  the only write path
 #   /usr/local/sbin/clawfactory-fetchctl        0750  node wrapper for Studio
+#
+# The toolchain access toggle installs here rather than in its own step because
+# it is the same guard: same policy file, same control tool, same nft table, same
+# tripwire. A separate installer would only add a second thing to forget.
 #
 # WHAT GUARD 3 ADDS, STATED PRECISELY, because the wrong description is easy to
 # write and hard to unwrite. It does NOT create the denial. The egress chain
@@ -35,12 +40,13 @@ note()  { echo "[install-read-fetch] $*"; }
 NODE="$(command -v node || echo /usr/bin/node)"
 [ -x "$NODE" ] || fatal "node is required and was not found"
 
-# --- a. the resolver and the control tool ----------------------------------
-for f in /usr/local/sbin/clawfactory-read-fetch.sh /usr/local/sbin/clawfactory-fetchctl.js; do
+# --- a. the resolvers and the control tool ----------------------------------
+for f in /usr/local/sbin/clawfactory-read-fetch.sh /usr/local/sbin/clawfactory-toolchain.sh /usr/local/sbin/clawfactory-fetchctl.js; do
     [ -f "$f" ] || fatal "missing $f (the installer did not drop it)"
     chown root:root "$f"
 done
 chmod 755 /usr/local/sbin/clawfactory-read-fetch.sh
+chmod 755 /usr/local/sbin/clawfactory-toolchain.sh
 # 0750, matching clawfactory-sendctl.js. The agent must not even be able to read
 # the write path, let alone run it.
 chmod 750 /usr/local/sbin/clawfactory-fetchctl.js
@@ -65,13 +71,30 @@ chmod 750 /usr/local/sbin/clawfactory-fetchctl
 const fs = require("node:fs");
 const p = "/etc/clawfactory/egress-policy.json";
 const raw = JSON.parse(fs.readFileSync(p, "utf8"));
+let dirty = false;
 if (!raw.read_fetch || !Array.isArray(raw.read_fetch.allow)) {
   raw.read_fetch = { allow: [] };
-  fs.writeFileSync(p + ".tmp", JSON.stringify(raw, null, 2) + "\n", { mode: 0o644 });
-  fs.renameSync(p + ".tmp", p);
+  dirty = true;
   process.stdout.write("read_fetch section repaired to an empty allowlist\n");
 } else {
   process.stdout.write("read_fetch section present with " + raw.read_fetch.allow.length + " destination(s)\n");
+}
+// The toolchain switch. An UPGRADE over a policy file that predates this feature
+// has no toolchain key, and the documented reading of an absent key is ON, so
+// seeding it true here changes nothing about behaviour and only makes the state
+// explicit on disk. A REINSTALL over a file where the user switched it OFF must
+// leave that alone: re-enabling it would silently re-open a route the user
+// closed, which is the one thing this feature must never do.
+if (!raw.toolchain || typeof raw.toolchain !== "object" || typeof raw.toolchain.enabled !== "boolean") {
+  raw.toolchain = { enabled: true };
+  dirty = true;
+  process.stdout.write("toolchain section seeded to the default (enabled)\n");
+} else {
+  process.stdout.write("toolchain section present and PRESERVED: enabled=" + raw.toolchain.enabled + "\n");
+}
+if (dirty) {
+  fs.writeFileSync(p + ".tmp", JSON.stringify(raw, null, 2) + "\n", { mode: 0o644 });
+  fs.renameSync(p + ".tmp", p);
 }
 ' || fatal "the egress policy file is not readable as JSON; refusing to continue"
 
@@ -81,6 +104,7 @@ chmod 644 /etc/clawfactory/egress-policy.json
 # --- c. apply once, so the set is populated from the policy rather than left
 #        to the first timer tick ------------------------------------------
 /usr/local/sbin/clawfactory-read-fetch.sh || fatal "the read-fetch resolver failed on its first run"
+/usr/local/sbin/clawfactory-toolchain.sh || fatal "the toolchain resolver failed on its first run"
 
 # --- d. prove the control is actually in the live chain --------------------
 # A fresh install has an EMPTY read-fetch list, so "no read-fetch destination is
@@ -95,6 +119,27 @@ if [ "$BACKEND" = "nftables" ]; then
         | grep -qE '@read_fetch_ipv4 tcp dport 443 accept' \
         || fatal "the read-fetch accept is missing or is not scoped to tcp dport 443"
     note "live chain carries @read_fetch_ipv4 with a 443-scoped accept"
+
+    # The toolchain toggle, checked the same way and for the same reason. Its
+    # default state is ON, so unlike read-fetch this one CAN be checked by
+    # outcome as well as by mechanism: a fresh install should have resolved
+    # addresses into the set. Both are checked, because a populated set with no
+    # accept rule is a list nothing enforces.
+    nft list set inet clawfactory toolchain_ipv4 >/dev/null 2>&1 \
+        || fatal "set inet clawfactory toolchain_ipv4 is missing from the live ruleset; the toolchain toggle would claim a control it does not have"
+    nft list chain inet clawfactory output 2>/dev/null \
+        | grep -qE '@toolchain_ipv4 tcp dport 443 accept' \
+        || fatal "the toolchain accept is missing or is not scoped to tcp dport 443"
+    TC_N="$(wc -l < /etc/clawfactory/toolchain-ips.txt 2>/dev/null | tr -d ' ')"
+    [ -n "$TC_N" ] || TC_N=0
+    if [ "$TC_N" -eq 0 ]; then
+        # Not fatal. A build box with no DNS at this point in the install would
+        # resolve nothing, and refusing to install over that would be worse than
+        # saying so: the next five-hourly refresh repairs it, and the failure
+        # direction is denial rather than exposure.
+        note "WARNING: the toolchain switch is on but resolved 0 addresses. Skill installation, GitHub and npm will be unreachable until the next refresh."
+    fi
+    note "live chain carries @toolchain_ipv4 with a 443-scoped accept ($TC_N address(es))"
 else
     note "backend=$BACKEND: the read-fetch list is applied as individual ACCEPT rules by fw-apply.sh"
 fi
@@ -106,4 +151,5 @@ if [ -x /usr/local/sbin/clawfactory-fw-assert.sh ]; then
 fi
 
 note "Guard 3 installed. Read-fetch destinations: $(wc -l < /etc/clawfactory/read-fetch-ips.txt | tr -d ' ') address(es) from the policy allowlist."
-note "A fresh install has an empty allowlist, which means the agent can fetch nothing beyond the provider and toolchain route."
+note "A fresh install has an empty allowlist, which means the agent can fetch nothing beyond the provider route and the software sources."
+note "Toolchain switch: $(node -e 'const p=require("/etc/clawfactory/egress-policy.json");process.stdout.write(String(!p.toolchain||p.toolchain.enabled!==false))' 2>/dev/null || echo unknown) with $(wc -l < /etc/clawfactory/toolchain-ips.txt 2>/dev/null | tr -d ' ') address(es). Switching it off in Studio stops skill installation, GitHub and npm, and never affects the AI provider."

@@ -18,9 +18,25 @@
     "",
     "WHAT read_fetch DOES NOT CLAIM. Matching is by resolved ADDRESS, because that is what",
     "an nftables set holds. A host that shares an address with something already reachable",
-    "is reachable whether or not it is listed here, and the provider and toolchain route is",
-    "always reachable. Guard 3's claim is about destinations the user has NOT approved being",
+    "is reachable whether or not it is listed here, and the provider route is always",
+    "reachable. Guard 3's claim is about destinations the user has NOT approved being",
     "denied; it is not a claim that only the listed hostnames are reachable.",
+    "",
+    "toolchain IS THE USER'S SWITCH OVER THE SOFTWARE-SOURCE ROUTE, and it DEFAULTS ON.",
+    "clawfactory-toolchain.sh enforces it through the nft set @toolchain_ipv4, which it",
+    "flushes and rebuilds on every run, including the five-hourly refresh. The hosts it",
+    "covers are the skill hub, GitHub and npm; the list itself is a root-owned constant in",
+    "that script, not a value anyone edits here.",
+    "",
+    "WHY ON RATHER THAN OFF. Off would ship a product where skill installation, npm and",
+    "GitHub fail on a fresh box, which is a functional regression rather than a safety win.",
+    "It buys no honesty either: the product's claim sentence names the software sources",
+    "explicitly. The switch only ever NARROWS what is reachable, so the claim holds in both",
+    "positions. An ABSENT toolchain key means a policy file written before this feature and",
+    "is read as ON; an unreadable file denies, because a fault is not a preference.",
+    "",
+    "THE PROVIDER ROUTE IS NOT AFFECTED BY THIS SWITCH and must never be. It lives in",
+    "@allowed_ipv4, and an agent that cannot reach its model is a bricked product.",
     "",
     "send_actions IS EMPTY BY DEFAULT AND THAT IS THE FAIL-CLOSED STATE. No destination is",
     "permitted until the user configures SMTP in Studio, which is the act that authorizes",
@@ -40,8 +56,12 @@
   ],
   "version": 1,
   "read_fetch": {
-    "_note": "Enforced by Guard 3 through the nft set read_fetch_ipv4. Empty means the agent can fetch nothing beyond the provider and toolchain route. Managed from Studio; the agent has no write path.",
+    "_note": "Enforced by Guard 3 through the nft set read_fetch_ipv4. Empty means the agent can fetch nothing beyond the provider route and, while the toolchain switch is on, the software sources. Managed from Studio; the agent has no write path.",
     "allow": []
+  },
+  "toolchain": {
+    "_note": "Enforced by clawfactory-toolchain.sh through the nft set toolchain_ipv4. true means the agent can reach the skill hub, GitHub and npm. false closes that route and STOPS SKILL INSTALLATION. Never affects the AI provider. Managed from Studio; the agent has no write path.",
+    "enabled": true
   },
   "send_actions": []
 }

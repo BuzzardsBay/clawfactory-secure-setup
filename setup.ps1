@@ -53,7 +53,7 @@ Set-StrictMode -Version 3.0
 # It sat at 1.0.34 from 2026-05 through v1.1.1, roughly fifteen releases, because
 # nothing referenced it and nothing compared it. It is still unreferenced today;
 # the assertion exists so that stops being possible rather than staying luck.
-$InstallerVersion      = '1.2.0'
+$InstallerVersion      = '1.3.0'
 # [R2] OpenClaw install.sh is BUNDLED into the installer (resources\openclaw-install.sh).
 # No network call to openclaw.ai/install.sh during install — that URL tracks "latest" and
 # changed twice in 24 hours on 2026-05-09/10. Hash is computed at install time and written
@@ -796,7 +796,8 @@ function Step-Preflight {
         'clawfactory-send.js', 'clawfactory-send.service', 'clawfactory-send-gc.service',
         'clawfactory-send-gc.timer', 'clawfactory-fw-assert.sh', 'egress-policy.json',
         'install-send.sh',
-        'clawfactory-read-fetch.sh', 'clawfactory-fetchctl.js', 'install-read-fetch.sh'
+        'clawfactory-read-fetch.sh', 'clawfactory-fetchctl.js', 'install-read-fetch.sh',
+        'clawfactory-toolchain.sh'
     )
     $resDir  = Join-Path $PSScriptRoot 'resources'
     $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $resDir $_)) })
@@ -1484,6 +1485,17 @@ table inet clawfactory {
     set read_fetch_ipv4 {
         type ipv4_addr
     }
+    # v1 Guard 3, the toolchain access toggle. The software sources the agent
+    # needs (skill hub, GitHub, npm) used to sit in allowed_ipv4 with the model
+    # providers, which meant a user could never close that route: allowed_ipv4 is
+    # refreshed additively by hostname with element timeouts, so an address in it
+    # cannot be revoked and the switch would silently not take. Same reasoning
+    # that gave read_fetch its own set, applied a second time. Flushed and
+    # rebuilt from the root-owned policy by clawfactory-toolchain.sh on every
+    # run. Populated on a fresh install, because the toggle defaults ON.
+    set toolchain_ipv4 {
+        type ipv4_addr
+    }
     chain output {
         type filter hook output priority 0; policy accept;
         meta skuid != clawuser return
@@ -1509,6 +1521,12 @@ table inet clawfactory {
         # is: a widened port here would make every co-hosted address reachable on
         # whatever was opened. The chain-shape tripwire checks both accepts.
         ip daddr @read_fetch_ipv4 tcp dport 443 accept
+        # v1 Guard 3, the toolchain access toggle. Port-scoped to 443 for exactly
+        # the same reason both accepts above are: a widened port here would make
+        # every co-hosted address reachable on whatever was opened, and GitHub's
+        # content CDN is shared with a great deal else. The chain-shape tripwire
+        # checks all three accepts by name and fails the unit if any drifts.
+        ip daddr @toolchain_ipv4 tcp dport 443 accept
         # Allow Ollama local API on port 11434 (localhost only is enforced by bind)
         ip daddr 127.0.0.1 tcp dport 11434 accept
         counter drop
@@ -1613,6 +1631,14 @@ if [ `"`$BACKEND`" = `"iptables-legacy`" ]; then
             `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -d `"`$ip`" -p tcp --dport 443 -j ACCEPT
         done < /etc/clawfactory/read-fetch-ips.txt
     fi
+    # v1 Guard 3, the toolchain access toggle. A missing or empty file means an
+    # empty list, which is the denied state, so a lost file fails closed.
+    if [ -f /etc/clawfactory/toolchain-ips.txt ]; then
+        while IFS= read -r ip; do
+            [ -n `"`$ip`" ] || continue
+            `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -d `"`$ip`" -p tcp --dport 443 -j ACCEPT
+        done < /etc/clawfactory/toolchain-ips.txt
+    fi
     `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -d 127.0.0.1 -p tcp --dport 11434 -j ACCEPT
     `"`$IPT`" -A OUTPUT -m owner --uid-owner clawuser -j DROP
 else
@@ -1638,6 +1664,17 @@ else
             [ -n `"`$ip`" ] || continue
             /usr/sbin/nft add element inet clawfactory read_fetch_ipv4 `"{ `$ip }`" 2>/dev/null || true
         done < /etc/clawfactory/read-fetch-ips.txt
+    fi
+    # v1 Guard 3, the toolchain access toggle. Same shape and the same fail-closed
+    # property: the flush above emptied this set too, and only the persisted list
+    # re-opens anything. clawfactory-toolchain.sh TRUNCATES that file when the
+    # user switches the toggle off, so a closed route stays closed across a
+    # reboot rather than being re-opened by a stale file.
+    if [ -f /etc/clawfactory/toolchain-ips.txt ]; then
+        while IFS= read -r ip; do
+            [ -n `"`$ip`" ] || continue
+            /usr/sbin/nft add element inet clawfactory toolchain_ipv4 `"{ `$ip }`" 2>/dev/null || true
+        done < /etc/clawfactory/toolchain-ips.txt
     fi
 fi
 APPLY
@@ -1990,9 +2027,23 @@ fi
 # IP-based allowlisting cannot separate two hostnames served by one front-end.
 # Closing that needs a root-owned outbound injector so clawuser needs no Google
 # IP at all. Do not "fix" it by dropping the shared IPs -- that breaks Gemini.
-AUX_HOSTS="api.anthropic.com console.anthropic.com api.openai.com auth.openai.com api.x.ai \
-clawhub.ai api.github.com raw.githubusercontent.com objects.githubusercontent.com \
-registry.npmjs.org"
+#
+# v1 Guard 3, the toolchain access toggle. This list used to carry five MORE
+# hostnames: clawhub.ai, api.github.com, raw.githubusercontent.com,
+# objects.githubusercontent.com and registry.npmjs.org. They have been REMOVED
+# from it and now live in clawfactory-toolchain.sh, which maintains its own nft
+# set that the user can switch off.
+#
+# The removal is the load-bearing half of that feature, not tidying. This set is
+# refreshed ADDITIVELY by hostname every five hours and its elements carry a
+# timeout, so nothing is ever removed from it deliberately. Leaving the toolchain
+# hosts here would mean the user's switch appeared to work and was quietly undone
+# by the timer within five hours. Do not move them back.
+#
+# What remains here is the model providers only, and they stay always-open: an
+# agent that cannot reach its model is a bricked product, so there is deliberately
+# no switch for this half.
+AUX_HOSTS="api.anthropic.com console.anthropic.com api.openai.com auth.openai.com api.x.ai"
 if nft list table inet clawfactory >/dev/null 2>&1; then
     for h in $AUX_HOSTS; do
         for ip in $(getent ahostsv4 "$h" | awk '{print $1}' | sort -u); do
@@ -2072,9 +2123,13 @@ set -e
 # IP-based allowlisting cannot separate two hostnames served by one front-end.
 # Closing that needs a root-owned outbound injector so clawuser needs no Google
 # IP at all. Do not "fix" it by dropping the shared IPs -- that breaks Gemini.
-AUX_HOSTS="api.anthropic.com console.anthropic.com api.openai.com auth.openai.com api.x.ai \
-clawhub.ai api.github.com raw.githubusercontent.com objects.githubusercontent.com \
-registry.npmjs.org"
+#
+# v1 Guard 3, the toolchain access toggle. The five toolchain hostnames were
+# REMOVED from this list; see the matching comment at the install-time copy. They
+# are maintained by clawfactory-toolchain.sh in a set the user can switch off,
+# and re-adding them here would silently defeat that switch on the next tick of
+# this very timer.
+AUX_HOSTS="api.anthropic.com console.anthropic.com api.openai.com auth.openai.com api.x.ai"
 BACKEND="$(cat /etc/clawfactory/fw-backend 2>/dev/null || echo nftables)"
 if [ "$BACKEND" = "nftables" ]; then
     nft list table inet clawfactory >/dev/null 2>&1 || exit 0
@@ -2105,6 +2160,24 @@ fi
 if [ -x /usr/local/sbin/clawfactory-read-fetch.sh ]; then
     /usr/local/sbin/clawfactory-read-fetch.sh \
         || echo "[clawfactory-fw] read-fetch refresh FAILED; every read-fetch destination is denied until it succeeds" >&2
+fi
+
+# v1 Guard 3, the toolchain access toggle. Re-derive the toolchain set on the
+# same five-hourly cycle so an address that MOVES keeps working.
+#
+# THIS IS THE STEP THAT HONOURS THE USER'S SWITCH, and getting it wrong is the
+# single most likely way this feature could appear to work and not work. The
+# resolver reads the toggle itself and flushes before it adds, so with the toggle
+# OFF this call REMOVES anything that drifted back in rather than re-adding the
+# toolchain addresses. It is called unconditionally for exactly that reason:
+# skipping it when the toggle is off would leave a stale address reachable.
+#
+# The toolchain hosts are deliberately absent from AUX_HOSTS above, so the loop
+# that runs before this one cannot put them back into allowed_ipv4, where nothing
+# could ever remove them.
+if [ -x /usr/local/sbin/clawfactory-toolchain.sh ]; then
+    /usr/local/sbin/clawfactory-toolchain.sh \
+        || echo "[clawfactory-fw] toolchain refresh FAILED; the toolchain route is denied until it succeeds" >&2
 fi
 REFRESH
 chmod +x /usr/local/sbin/clawfactory-allow-providers.sh
@@ -2787,23 +2860,25 @@ function Step-InstallReadFetch {
     # nftables set holds. A site sharing an address with something already
     # reachable is reachable regardless of the list. Stated here so the next
     # reader does not have to rediscover it from the shape of the code.
-    Write-Log INFO 'Step 15g [Guard 3]: Installing the read-fetch allowlist (web off by default; the user opens named destinations from Studio).'
+    Write-Log INFO 'Step 15g [Guard 3]: Installing the read-fetch allowlist and the toolchain access toggle (web off by default; the user opens named destinations from Studio, and controls the software-source route from the same panel).'
     $resourceDir = Join-Path $PSScriptRoot 'resources'
     $lfB64 = { param($p) [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(([IO.File]::ReadAllText($p)).Replace("`r`n","`n").Replace("`r","`n"))) }
     $fResB64  = & $lfB64 (Join-Path $resourceDir 'clawfactory-read-fetch.sh')
+    $fTcB64   = & $lfB64 (Join-Path $resourceDir 'clawfactory-toolchain.sh')
     $fCtlB64  = & $lfB64 (Join-Path $resourceDir 'clawfactory-fetchctl.js')
     $fInstB64 = & $lfB64 (Join-Path $resourceDir 'install-read-fetch.sh')
     $drop = @"
 set -e
 mkdir -p /usr/local/sbin
 echo '$fResB64'  | base64 -d > /usr/local/sbin/clawfactory-read-fetch.sh
+echo '$fTcB64'   | base64 -d > /usr/local/sbin/clawfactory-toolchain.sh
 echo '$fCtlB64'  | base64 -d > /usr/local/sbin/clawfactory-fetchctl.js
 echo '$fInstB64' | base64 -d > /tmp/install-read-fetch.sh
 bash /tmp/install-read-fetch.sh
 rm -f /tmp/install-read-fetch.sh
 "@
     $rc = Invoke-WslBash -Script $drop -User 'root'
-    if ($rc -ne 0) { throw 'Failed to install the read-fetch allowlist (Guard 3). Refusing to finish: the product would offer a Web access panel with nothing behind it, and a control that is absent is worse than one that was never claimed.' }
+    if ($rc -ne 0) { throw 'Failed to install the read-fetch allowlist and the toolchain toggle (Guard 3). Refusing to finish: the product would offer a Web access panel with nothing behind it, and a control that is absent is worse than one that was never claimed.' }
     Save-Checkpoint 'InstallReadFetch'
 }
 

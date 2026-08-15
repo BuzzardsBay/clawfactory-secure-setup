@@ -6,14 +6,14 @@
 ; refuses any binary build_release.ps1 did not stamp.
 
 #define MyAppName      "ClawFactory Secure Setup"
-#define MyAppVersion   "1.2.0"
+#define MyAppVersion   "1.3.0"
 #define MyAppPublisher "Frontier Automation Systems LLC"
 #define MyAppURL       "https://openclaw.ai"
 ; v1.1.0 (JOB 3B): the combined installer also bundles ClawFactory Studio, whose
 ; signed per-user NSIS installer is embedded and run de-elevated after the core
 ; sandbox install (see [Files] + the InstallStudioComponent procedure in [Code]).
 ; DRY: this filename is referenced by both the [Files] entry and the [Code] launch.
-#define StudioInstaller "ClawFactory-Studio-Setup-1.2.0.exe"
+#define StudioInstaller "ClawFactory-Studio-Setup-1.3.0.exe"
 
 [Setup]
 ; [R1] Fixed AppId for stable upgrade/uninstall identity. Do not regenerate.
@@ -115,6 +115,12 @@ Source: "resources\install-send.sh";                    DestDir: "{app}\resource
 Source: "resources\clawfactory-read-fetch.sh";          DestDir: "{app}\resources"; Flags: ignoreversion
 Source: "resources\clawfactory-fetchctl.js";            DestDir: "{app}\resources"; Flags: ignoreversion
 Source: "resources\install-read-fetch.sh";              DestDir: "{app}\resources"; Flags: ignoreversion
+; --- v1 Guard 3: the toolchain access toggle -----------------------------------
+; The software sources the agent needs (skill hub, GitHub, npm) moved out of the
+; always-open provider allowlist and into their own nft set, which this resolver
+; flushes and rebuilds from the root-owned policy so the user's switch can
+; actually revoke. Installed by install-read-fetch.sh, which is the same guard.
+Source: "resources\clawfactory-toolchain.sh";           DestDir: "{app}\resources"; Flags: ignoreversion
 ; --- v1.1.0 (JOB 3B): embedded ClawFactory Studio (the visual workbench) --------
 ; The SIGNED per-user Studio installer (~100 MB), sourced from the Studio repo's
 ; release dir at build time (gitignored; scripts\build_release.ps1 fails the build if

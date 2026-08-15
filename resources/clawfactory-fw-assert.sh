@@ -61,10 +61,12 @@ fi
 #    If this ever widens, the "no route" half of Guard 2's claim is gone, because
 #    a co-hosted address would then reach whatever port was opened.
 #
-#    Both address sets are checked. Guard 3 added @read_fetch_ipv4, and it needs
-#    exactly the same scoping for exactly the same reason: it is an address set,
-#    so a widened port would expose every service on every listed address rather
-#    than the web page the user was thinking of when they added the site.
+#    ALL THREE address sets are checked. Guard 3 added @read_fetch_ipv4 and the
+#    toolchain toggle added @toolchain_ipv4, and each needs exactly the same
+#    scoping for exactly the same reason: they are address sets, so a widened
+#    port would expose every service on every listed address rather than the web
+#    page the user was thinking of. The toolchain set is the worst case of the
+#    three, because GitHub's content CDN is shared with a great deal else.
 while IFS= read -r line; do
     case "$line" in
         *@allowed_ipv4*accept*)
@@ -77,6 +79,11 @@ while IFS= read -r line; do
                 bad "read-fetch allowlist accept is no longer scoped to tcp dport 443: $line"
             fi
             ;;
+        *@toolchain_ipv4*accept*)
+            if ! grep -qE 'tcp dport 443 accept' <<<"$line"; then
+                bad "toolchain allowlist accept is no longer scoped to tcp dport 443: $line"
+            fi
+            ;;
     esac
 done <<<"$CHAIN"
 
@@ -86,6 +93,22 @@ done <<<"$CHAIN"
 #     still a missing control, and silence here would let it stay missing.
 if ! nft list set inet clawfactory read_fetch_ipv4 >/dev/null 2>&1; then
     bad "set inet clawfactory read_fetch_ipv4 is missing; Guard 3 is not applied (read-fetch is denied, but the control is absent)"
+fi
+
+# 2c. The toolchain set and its accept must BOTH exist, checked by name.
+#
+#     Two separate failures are possible and they are not the same problem, so
+#     they are reported separately. A missing SET means the toggle has nothing to
+#     switch: the toolchain route is denied, which is safe, but a user who
+#     switches it on gets nothing and no error. A missing ACCEPT RULE with the
+#     set present is worse in the other direction: the set fills up on every
+#     refresh and nothing ever reads it, so the product holds a list it does not
+#     enforce, which is the shape of a control that looks present and is not.
+if ! nft list set inet clawfactory toolchain_ipv4 >/dev/null 2>&1; then
+    bad "set inet clawfactory toolchain_ipv4 is missing; the toolchain toggle is not applied (the toolchain route is denied, but the control is absent)"
+fi
+if ! grep -qE '@toolchain_ipv4 tcp dport 443 accept' <<<"$CHAIN"; then
+    bad "the toolchain accept rule is missing from the live chain; the toolchain set is not being enforced by anything"
 fi
 
 # 3. No accept anywhere in the chain may name an SMTP port.
@@ -107,7 +130,7 @@ if ! grep -qE 'counter packets [0-9]+ bytes [0-9]+ drop' <<<"$CHAIN"; then
 fi
 
 if [ "$FAIL" -eq 0 ]; then
-    note "chain shape OK (uid-scoped, both allowlist accepts are 443-only, read-fetch set present, SMTP dropped explicitly, terminal drop present)"
+    note "chain shape OK (uid-scoped, all three allowlist accepts are 443-only, read-fetch and toolchain sets present with their accepts, SMTP dropped explicitly, terminal drop present)"
 else
     echo "[fw-assert] The egress chain has drifted from the shape Guard 2 and Guard 3 depend on." >&2
     echo "[fw-assert] Email containment or web containment may be weakened. Investigate before trusting either path." >&2
