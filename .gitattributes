@@ -59,3 +59,10 @@ resources/persona.md      text eol=lf
 # normalizes line endings when it transports the file, and this makes LF the
 # stored and checked-out form so the two cannot disagree. Same class as L20/L21.
 resources/clawfactory-fetchctl.js text eol=lf
+
+# The released-artifact ledger is PARSED by scripts/build_release.ps1 (split on
+# tab, one row per shipped artifact) and appended to with an explicit LF. Pinning
+# it means a clone on a differently configured machine reads the same rows rather
+# than picking up stray CRs in the digest field and failing to match a version it
+# has genuinely already shipped.
+released-versions.tsv text eol=lf

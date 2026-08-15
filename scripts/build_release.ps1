@@ -3,8 +3,12 @@ Produces a release-ready, signed ClawFactory installer:
   1. Runs seven pre-build gates (SOUL, bundle, Studio, version, persona,
      workspace SOUL, rootfs). Each fails the build on drift; none auto-correct.
   2. Compiles ClawFactory-Secure-Setup.iss with Inno Setup (ISCC.exe)
-  3. Stamps the compiled bytes so sign_installer.ps1 will accept them
-  4. Signs Output\ClawFactory-Secure-Setup.exe via scripts\sign_installer.ps1
+  3. Enforces the second half of the VERSION gate, which cannot run any earlier:
+     the compiled digest must not contradict a version already in
+     released-versions.tsv. Refusal happens here, before the signature.
+  4. Stamps the compiled bytes so sign_installer.ps1 will accept them
+  5. Signs Output\ClawFactory-Secure-Setup.exe via scripts\sign_installer.ps1
+  6. Appends the shipped artifact to released-versions.tsv, on success only
 
 This is the build command, not merely the release one. ISCC.exe on its own still
 compiles a perfectly good local dev build; that output simply cannot be signed,
@@ -149,8 +153,24 @@ Write-Host ("Bundle check OK: all {0} preflight resources are in [Files]." -f $r
 # Repinned 2026-08-14 for Guard 3 and the five smoke-test polish items: the new
 # Web access panel, expired approval requests, the full attachment hash, the real
 # version in the header, and the PolyForm footer.
-$studioName   = 'ClawFactory-Studio-Setup-1.2.0.exe'
-$studioPinned = '540bb30b6f163ae2fb3b381d4491e5b6a25b2973add7d69615fb078a8b156fb9'
+#
+# Repinned 2026-08-15 for Studio 1.3.0: the toolchain access switch on the Web
+# access panel, the ratified replacement footnote, the header spacing fix, and the
+# removal of the "Studio backend unreachable" banner from the home route.
+#
+# Verified before pinning, from the packaged app.asar rather than from source,
+# and the search DISCRIMINATES in both directions:
+#   present  -- Software sources ClawFactory needs, stops skill installation,
+#               unless you switch them off above, Matching is by network address
+#               rather than by name, setToolchain, web:toolchain,
+#               Running outside the ClawFactory Studio app
+#   absent   -- Studio backend unreachable, Two things are always reachable
+#               regardless, Running on http://127.0.0.1:8080, MIT licensed, v0.1.0
+#   controls -- Workspace and Web access both present, so an "absent" above is a
+#               real absence rather than an unreadable payload
+# See docs/session_reports/2026-08-15_guard3_followups_closeout.md.
+$studioName   = 'ClawFactory-Studio-Setup-1.3.0.exe'
+$studioPinned = '46288d06aaf1e786e30310e4bc316e40af04513b013a97f51d24dafb6759fa79'
 $studioFile   = Join-Path $RepoRoot "resources\$studioName"
 if (-not (Test-Path $studioFile)) {
     Fail ("resources\$studioName not found. It is gitignored; copy it in from the Studio repo's " +
@@ -185,7 +205,47 @@ if ($issVer.Groups[1].Value -ne $psVer.Groups[1].Value) {
           "`$InstallerVersion is $($psVer.Groups[1].Value). The .iss value is the one the customer " +
           "sees, so set `$InstallerVersion to $($issVer.Groups[1].Value) and rebuild.")
 }
-Write-Host "Version OK: $($issVer.Groups[1].Value) (.iss and setup.ps1 agree)"
+$buildVersion = $issVer.Groups[1].Value
+Write-Host "Version OK: $buildVersion (.iss and setup.ps1 agree)"
+
+# --- Same gate, second half: the version must not already name OTHER BYTES -----
+# The check above only proves the two literals agree with each other. Both can
+# agree and still be a number that has already shipped meaning something else,
+# which is exactly what happened: 1.2.0 named three distinct payloads and the two
+# literals agreed every time. Agreement between two copies of a stale value is
+# not freshness.
+#
+# So this reads the repo-tracked ledger and, if this version has already shipped,
+# remembers its digest. The comparison itself cannot happen yet -- the digest of
+# the compiled bytes does not exist until ISCC has run -- so it is enforced below,
+# after the compile and BEFORE the signature. That placement is deliberate and it
+# is the same posture as the build stamp: an unsigned dev compile stays cheap, and
+# the route that can reach a customer is the one that is gated.
+$ledgerPath = Join-Path $RepoRoot 'released-versions.tsv'
+$script:LedgerRows = @()
+if (Test-Path $ledgerPath) {
+    foreach ($line in (Get-Content -LiteralPath $ledgerPath)) {
+        if ($line -match '^\s*#' -or -not $line.Trim()) { continue }
+        $c = $line -split "`t"
+        if ($c.Count -lt 6 -or $c[0] -eq 'version') { continue }
+        $script:LedgerRows += [pscustomobject]@{
+            Version = $c[0].Trim(); Artifact = $c[1].Trim(); Kind = $c[2].Trim()
+            Sha256  = $c[3].Trim().ToLower(); Bytes = $c[4].Trim(); Date = $c[5].Trim()
+            Note    = $(if ($c.Count -ge 7) { $c[6].Trim() } else { '' })
+        }
+    }
+    Write-Host "Ledger OK: released-versions.tsv carries $($script:LedgerRows.Count) prior artifact row(s)."
+} else {
+    # Absent is allowed on a first run, and it is announced rather than silent. A
+    # gate that quietly does nothing when its data file is missing is a gate that
+    # can be disabled by deleting a file nobody notices.
+    Write-Host "Ledger: released-versions.tsv is ABSENT. This build will create it. No prior version can be checked."
+}
+$script:PriorForThisVersion = @($script:LedgerRows | Where-Object { $_.Version -eq $buildVersion })
+if ($script:PriorForThisVersion.Count -gt 0) {
+    Write-Host "Ledger: version $buildVersion has shipped before. The compiled digest will be checked against it."
+    foreach ($p in $script:PriorForThisVersion) { Write-Host "  prior: $($p.Version) $($p.Kind) $($p.Sha256) $($p.Bytes) B  $($p.Date)" }
+}
 
 # --- Pre-build gate: the persona and the COMPOSED workspace SOUL -------------
 # v1 makes the agent's injected SOUL a build-time constant: factory safety rules
@@ -316,10 +376,36 @@ if (-not (Test-Path $installerPath)) {
 # ADVISORY against an attacker and STRUCTURAL against process drift, and it
 # should never be described as more than that.
 $unsignedHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLower()
+$unsignedBytes = (Get-Item -LiteralPath $installerPath).Length
+
+# --- Version gate, enforcement half: this version must not name OTHER BYTES ----
+# Runs here because the compiled digest does not exist any earlier, and before the
+# signature because an unsigned binary cannot reach a customer.
+foreach ($prior in $script:PriorForThisVersion) {
+    if ($prior.Kind -ne 'unsigned') {
+        # A backfilled row records a SIGNED digest, which is not comparable with
+        # the unsigned bytes measured here. Saying so is the honest outcome; a
+        # mismatch reported from two different measurements would be a false
+        # alarm, and treating it as a match would be worse.
+        Write-Host ("Ledger: prior row for $buildVersion carries a $($prior.Kind) digest, which is not comparable " +
+                    "with the unsigned bytes this gate measures. Not compared. Reason: $($prior.Note)")
+        continue
+    }
+    if ($prior.Sha256 -eq $unsignedHash) {
+        Write-Host "Ledger OK: $buildVersion rebuilt byte-for-byte identically to its recorded artifact."
+        continue
+    }
+    Fail ("VERSION REUSE: $buildVersion has already shipped as $($prior.Sha256) ($($prior.Bytes) B, $($prior.Date)) " +
+          "and this build produced $unsignedHash ($unsignedBytes B). The same version number would name two " +
+          "different payloads, which is the defect released-versions.tsv exists to prevent. " +
+          "Bump MyAppVersion in ClawFactory-Secure-Setup.iss (and `$InstallerVersion in setup.ps1 to match) and " +
+          "rebuild. The unsigned output is left at $installerPath for inspection; it has NOT been signed.")
+}
+
 $stampPath    = "$installerPath.buildstamp"
 $stamp = [ordered]@{
     producer      = 'scripts/build_release.ps1'
-    version       = $issVer.Groups[1].Value
+    version       = $buildVersion
     unsignedSha256 = $unsignedHash
     unsignedBytes = (Get-Item -LiteralPath $installerPath).Length
     gatesPassed   = @('soul', 'bundle', 'studio', 'version', 'persona', 'workspace-soul', 'rootfs')
@@ -336,6 +422,33 @@ $signScript = Join-Path $RepoRoot "scripts\sign_installer.ps1"
 & $signScript -InstallerPath $installerPath
 if ($LASTEXITCODE -ne 0) {
     Fail "Signing failed. $installerPath is UNSIGNED -- do not upload it to a GitHub Release."
+}
+
+# --- Append to the ledger, on success only -----------------------------------
+# After signing, because a build that failed to sign did not ship and recording
+# it would poison the gate for the next real attempt at this version. Skipped
+# when this exact version and digest are already recorded, so a re-run of an
+# identical build does not grow the file without saying anything new.
+$already = @($script:LedgerRows | Where-Object { $_.Version -eq $buildVersion -and $_.Sha256 -eq $unsignedHash -and $_.Kind -eq 'unsigned' })
+if ($already.Count -gt 0) {
+    Write-Host "Ledger: this exact version and digest are already recorded; nothing appended."
+} else {
+    if (-not (Test-Path $ledgerPath)) {
+        Fail ("released-versions.tsv is missing at signing time. It is repo-tracked and the gate depends on it; " +
+              "refusing to silently recreate it, because a gate whose history can be erased by deleting a file " +
+              "is not a gate.")
+    }
+    $row = @($buildVersion, 'ClawFactory-Secure-Setup.exe', 'unsigned', $unsignedHash, $unsignedBytes,
+             (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd'),
+             'written by scripts/build_release.ps1 after all gates passed and the artifact was signed') -join "`t"
+    # Append with an explicit LF and no BOM. PS 5.1's Add-Content defaults to the
+    # system ANSI codepage and Set-Content -Encoding utf8 writes a BOM; either
+    # would corrupt a file that .gitattributes pins and that other tools parse.
+    $existing = [IO.File]::ReadAllText($ledgerPath)
+    if ($existing.Length -gt 0 -and -not $existing.EndsWith("`n")) { $existing += "`n" }
+    [IO.File]::WriteAllText($ledgerPath, ($existing + $row + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "Ledger: appended $buildVersion $unsignedHash ($unsignedBytes B)."
+    Write-Host "  COMMIT released-versions.tsv with this build. An unrecorded release defeats the gate."
 }
 
 Write-Host ""

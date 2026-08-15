@@ -1,0 +1,37 @@
+# ClawFactory released-artifact ledger.
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# The version number stopped identifying the payload. 1.2.0 named THREE distinct
+# ClawFactory installers, and before that the Studio filename sat at 1.1.0 across
+# two rebuilds because electron-builder interpolates ${version} from
+# desktop/package.json and nobody moved it. Each time the digest was the real
+# authority and the version was decoration.
+#
+# Bumping a number fixes one instance. This file makes the recurrence STRUCTURAL:
+# scripts/build_release.ps1 refuses to sign a build whose version already appears
+# here against a DIFFERENT digest, and appends a row on every build that signs.
+# Reusing a version for new content stops being possible rather than being
+# something a tired person has to remember at 2am.
+#
+# WHAT THE DIGEST IS, AND WHY THE KIND COLUMN EXISTS
+# ---------------------------------------------------
+# The gate compares the UNSIGNED compiled bytes. Signing embeds a countersigned
+# timestamp, so a signed file's digest differs on every run over identical input
+# and could never be compared against anything. The unsigned digest is the one an
+# Inno compile makes deterministic.
+#
+# Rows written by the gate are kind=unsigned. Rows BACKFILLED from close-outs
+# carry kind=signed, because a signed digest is the only value those close-outs
+# recorded and the unsigned bytes no longer exist to re-derive. A backfilled row
+# is an audit record, NOT a comparison baseline: the gate refuses to compare
+# against kind=signed and says so, rather than reporting a mismatch that is really
+# just two different things being measured. Only rows the gate wrote are evidence
+# the gate saw them.
+#
+# Columns, tab-separated:
+#   version  artifact  digest_kind  sha256  bytes  date_utc  note
+#
+version	artifact	digest_kind	sha256	bytes	date_utc	note
+1.2.0	ClawFactory-Secure-Setup.exe	signed	6282a228e620d7d580f7bedadb0a96c9b166f037f2dd83645911b5fcf90603f0	440596328	2026-08-14	backfilled from the Guard 3 close-out; the third distinct payload shipped at this version, which is why this ledger exists
+1.3.0	ClawFactory-Secure-Setup.exe	unsigned	26e7b29178c2c475ac0c74f6197c3d4a34b45d7709a023156a01164647bd945d	440587611	2026-08-15	written by scripts/build_release.ps1 after all gates passed and the artifact was signed
