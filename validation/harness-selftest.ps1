@@ -45,9 +45,27 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$RepoRoot   = Split-Path -Parent $PSScriptRoot
-$PhaseLib   = Join-Path $RepoRoot 'validation\interim-v120-phaselib.ps1'
-if (-not (Test-Path $PhaseLib)) { throw "harness-selftest: cannot find $PhaseLib" }
+
+# The library lives in two different places depending on where this runs, so both
+# are tried and the search is reported rather than assumed.
+#
+#   ON THE VM   C:\cfv\harness-selftest.ps1 beside C:\cfv\interim-v120-phaselib.ps1
+#   IN THE REPO <repo>\validation\harness-selftest.ps1, same directory
+#
+# The first version of this resolved only the repo layout, as
+# (Split-Path -Parent $PSScriptRoot) + '\validation\...'. On the VM that becomes
+# C:\validation\..., which does not exist, and the self-test died before running
+# a single check. It failed LOUDLY, which is the behaviour to keep: a self-test
+# that silently skipped when it could not find its subject would be the exact
+# defect it exists to catch, one level up.
+$candidates = @(
+    (Join-Path $PSScriptRoot 'interim-v120-phaselib.ps1'),
+    (Join-Path (Split-Path -Parent $PSScriptRoot) 'validation\interim-v120-phaselib.ps1')
+)
+$PhaseLib = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $PhaseLib) {
+    throw ("harness-selftest: cannot find interim-v120-phaselib.ps1. Looked in: " + ($candidates -join ' ; '))
+}
 
 New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
 # The library writes markers to C:\cfv unconditionally; make sure that exists so
