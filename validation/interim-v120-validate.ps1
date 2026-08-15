@@ -95,8 +95,29 @@ $CombinedExe = Join-Path $RepoRoot 'Output\ClawFactory-Secure-Setup.exe'
 # real newline, so the tail of the comment was written to the generated script
 # as a command. fw-apply exited 127 and install-send.sh refused to continue. The
 # installer failing closed is correct behaviour and is why this was caught.
-$Sha256      = '6282a228e620d7d580f7bedadb0a96c9b166f037f2dd83645911b5fcf90603f0'
-$ExpectBytes = 440596328
+# Repinned 2026-08-15 for v1.3.0. Three changes ride this artifact:
+#
+#   1. THE VERSION IS NOW 1.3.0, which resolves the hazard the note above
+#      described rather than merely restating it. The number identifies the
+#      payload again, and released-versions.tsv now refuses a build that would
+#      reuse a version for different bytes. Proven in both directions: a fresh
+#      version was permitted and appended, and a deliberate rebuild at 1.3.0 with
+#      a changed setup.ps1 was refused before signing, naming both digests.
+#   2. The toolchain access toggle: a THIRD nft set, toolchain_ipv4, holding the
+#      software sources (skill hub, GitHub, npm) that used to sit in the
+#      always-open provider allowlist where nothing could revoke them. Default
+#      ON, user-switchable from the Web access panel, honoured by the five-hourly
+#      refresh.
+#   3. Studio 1.3.0: the switch and its breakage text, the ratified replacement
+#      footnote, the header spacing fix, and the removal of the false "Studio
+#      backend unreachable" banner from the home route.
+#
+# The digest below is of the SIGNED artifact, which is what lands on the VM.
+# released-versions.tsv records the UNSIGNED digest instead, because signing
+# embeds a countersigned timestamp and a signed digest is therefore different on
+# every run over identical input.
+$Sha256      = '3621c600380f5dcc781f7311eeb998bc02051a6fc2c1b097ed750147a856c778'
+$ExpectBytes = 440603256
 
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $run = "{0}-{1}" -f $VmName, (Get-Date -Format 'yyyyMMdd-HHmmss')
@@ -271,7 +292,14 @@ try {
             @{ p = $CombinedExe; n = "combined-$VmName.exe" },
             @{ p = (Join-Path $PSScriptRoot 'interim-v120-phase1.ps1');  n = 'interim-v120-phase1.ps1' },
             @{ p = (Join-Path $PSScriptRoot 'interim-v120-runner.ps1');  n = 'interim-v120-runner.ps1' },
-            @{ p = (Join-Path $PSScriptRoot 'interim-v120-wslchan.ps1'); n = 'interim-v120-wslchan.ps1' }
+            @{ p = (Join-Path $PSScriptRoot 'interim-v120-wslchan.ps1'); n = 'interim-v120-wslchan.ps1' },
+            # The phase runner. Every phase dot-sources it, so a run that stages
+            # the phases without it dies at the first Record call. Staged here,
+            # beside the channel helper, for exactly that reason.
+            @{ p = (Join-Path $PSScriptRoot 'interim-v120-phaselib.ps1'); n = 'interim-v120-phaselib.ps1' },
+            # The harness self-test, so the four injected faults can be
+            # demonstrated ON THE BOX rather than only on the build machine.
+            @{ p = (Join-Path $PSScriptRoot 'harness-selftest.ps1'); n = 'harness-selftest.ps1' }
         )
         foreach ($f in $files) {
             if (-not (Test-Path $f.p)) { throw "Cannot stage '$($f.p)' -- not found." }
@@ -294,11 +322,14 @@ try {
         }
         $uExe = Sas "combined-$VmName.exe"; $uP1 = Sas 'interim-v120-phase1.ps1'
         $uRun = Sas 'interim-v120-runner.ps1'; $uCh = Sas 'interim-v120-wslchan.ps1'
+        $uLib = Sas 'interim-v120-phaselib.ps1'; $uSt = Sas 'harness-selftest.ps1'
         $stage = "`$ErrorActionPreference='Stop'; New-Item -ItemType Directory -Path C:\cfv\jobs -Force | Out-Null; New-Item -ItemType Directory -Path C:\cfv\wsl -Force | Out-Null; " +
                  "Invoke-WebRequest -Uri '$uExe' -OutFile C:\cfv\combined-setup.exe -UseBasicParsing; " +
                  "Invoke-WebRequest -Uri '$uP1' -OutFile C:\cfv\interim-v120-phase1.ps1 -UseBasicParsing; " +
                  "Invoke-WebRequest -Uri '$uRun' -OutFile C:\cfv\interim-v120-runner.ps1 -UseBasicParsing; " +
                  "Invoke-WebRequest -Uri '$uCh' -OutFile C:\cfv\interim-v120-wslchan.ps1 -UseBasicParsing; " +
+                 "Invoke-WebRequest -Uri '$uLib' -OutFile C:\cfv\interim-v120-phaselib.ps1 -UseBasicParsing; " +
+                 "Invoke-WebRequest -Uri '$uSt' -OutFile C:\cfv\harness-selftest.ps1 -UseBasicParsing; " +
                  "`$h=(Get-FileHash C:\cfv\combined-setup.exe -Algorithm SHA256).Hash.ToLower(); " +
                  "if (`$h -ne '$Sha256') { throw `"ARTIFACT HASH MISMATCH ON VM: `$h`" }; " +
                  "`"OK staged; artifact=`$h size=`$((Get-Item C:\cfv\combined-setup.exe).Length)`""
