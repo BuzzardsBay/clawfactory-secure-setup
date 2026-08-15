@@ -1,4 +1,4 @@
-# By-hand Studio checks, v1.3.1 (cfv-164)
+# By-hand Studio checks (Studio panel render verification)
 
 Required test 13. Six checks, all in ClawFactory Studio on the VM over RDP.
 
@@ -80,7 +80,7 @@ Leave the list **empty** when you are done, so the box is back in its shipped st
       false in the shipped product (there is no backend; it was retired) and it is what
       caused a working Studio to be declared broken twice. Its presence is a **FAIL**.
 - [ ] The page shows the running version as **1.3.0** (Studio's own version, which is
-      deliberately not the same as the ClawFactory installer's 1.3.1).
+      deliberately NOT the same as the ClawFactory installer's version, which is 1.3.2).
 - [ ] In the top bar, the version and the word **Templates** are visibly **separated**,
       not run together as `v1.3.0Templates`. Narrow the window if you want to check it
       holds at smaller widths.
