@@ -135,8 +135,15 @@ $CombinedExe = Join-Path $RepoRoot 'Output\ClawFactory-Secure-Setup.exe'
 # switch could not revoke them. 1.3.2 removes them from $baseHosts as well, and
 # resolves each toolchain host three times to cope with a rotating pool. Full
 # detail in the close-out, section 8.3.
-$Sha256      = 'ac0e6cf09675fae0c820fab06ab3d3938e88d9f0fdd690bd28ffcc32b34827a7'
-$ExpectBytes = 440603888
+# Repinned to 1.3.3. 1.3.2 could not install: removing the toolchain hosts from
+# $baseHosts left uid 1000 with no route to GitHub, npm or the skill hub between
+# Step-EgressFirewall and Step-InstallReadFetch, and step 8c runs as clawuser
+# inside that window. It spent 21 minutes timing out and failed the install with
+# "Failed to pre-configure gateway". 1.3.3 seeds @toolchain_ipv4 at firewall time,
+# which closes the window without making anything unrevocable, because the set is
+# still flushed and rebuilt from policy on every later run. See close-out 8.4.
+$Sha256      = '5bef35dc3a4a944583470bdb0afe893d413d96eafcdf1df0ba66311a417522ab'
+$ExpectBytes = 440606872
 
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $run = "{0}-{1}" -f $VmName, (Get-Date -Format 'yyyyMMdd-HHmmss')

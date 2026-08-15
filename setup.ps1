@@ -53,7 +53,7 @@ Set-StrictMode -Version 3.0
 # It sat at 1.0.34 from 2026-05 through v1.1.1, roughly fifteen releases, because
 # nothing referenced it and nothing compared it. It is still unreferenced today;
 # the assertion exists so that stops being possible rather than staying luck.
-$InstallerVersion      = '1.3.2'
+$InstallerVersion      = '1.3.3'
 # [R2] OpenClaw install.sh is BUNDLED into the installer (resources\openclaw-install.sh).
 # No network call to openclaw.ai/install.sh during install — that URL tracks "latest" and
 # changed twice in 24 hours on 2026-05-09/10. Hash is computed at install time and written
@@ -1458,6 +1458,33 @@ function Step-EgressFirewall {
     $hostList      = ($allHosts -join ' ')
     Write-Log INFO "Allowlist hosts: $hostList"
 
+    # v1 Guard 3, the toolchain access toggle. These are seeded into
+    # @toolchain_ipv4 HERE, at firewall time, and NOT into @allowed_ipv4.
+    #
+    # WHY THEY MUST BE SEEDED THIS EARLY, learned by execution on cfv-165. Taking
+    # them out of $baseHosts made the toggle able to revoke, which was the point,
+    # and it also left uid 1000 with NO route to GitHub, npm or the skill hub
+    # between this step and Step-InstallReadFetch, which is where the toolchain
+    # resolver first runs. Step 8c (`openclaw config set`) runs as CLAWUSER inside
+    # that window: it spent 21 minutes timing out and then failed the whole
+    # install with "Failed to pre-configure gateway". Seeding the set here closes
+    # that window while keeping every property the toggle depends on, because the
+    # set is still flushed and rebuilt from policy on every later run.
+    #
+    # THIS LIST IS DUPLICATED in clawfactory-toolchain.sh, which owns it for the
+    # five-hourly refresh. Duplication is only acceptable when something compares
+    # the copies, so install-read-fetch.sh asserts the two agree and FAILS THE
+    # INSTALL if they drift. Same discipline as the preflight-versus-[Files]
+    # bundle gate.
+    $toolchainHosts = @(
+        'clawhub.ai','api.clawhub.ai',
+        'api.github.com','github.com','raw.githubusercontent.com',
+        'objects.githubusercontent.com','codeload.github.com',
+        'registry.npmjs.org'
+    )
+    $toolchainList = (($toolchainHosts | Sort-Object -Unique) -join ' ')
+    Write-Log INFO "Toolchain hosts (user-switchable, seeded into toolchain_ipv4): $toolchainList"
+
     # Defect 1 (DNS exfiltration): the resolver-allowlist helper is shipped as a
     # base64 blob so its regex/awk survive the PowerShell->wsl->bash transport
     # without backtick-escaping. It prints the IPv4 resolver(s) clawuser may
@@ -1574,6 +1601,23 @@ for h in `$HOSTS; do
     done
 done
 
+# v1 Guard 3, the toolchain access toggle. Resolved into a SEPARATE variable so
+# these addresses land in @toolchain_ipv4 and never in @allowed_ipv4, which is
+# refreshed additively and from which nothing can be removed. Three passes,
+# matching clawfactory-toolchain.sh, because api.github.com answers with a
+# different address on roughly every other lookup and a set built from one lookup
+# leaves the host intermittently unreachable.
+TOOLCHAIN_HOSTS=`"$toolchainList`"
+TOOLCHAIN_IPS=`"`"
+for h in `$TOOLCHAIN_HOSTS; do
+    for pass in 1 2 3; do
+        for ip in `$(getent ahostsv4 `"`$h`" 2>/dev/null | awk '{print `$1}'); do
+            TOOLCHAIN_IPS=`"`$TOOLCHAIN_IPS `$ip`"
+        done
+    done
+done
+TOOLCHAIN_IPS=`"`$(printf '%s\n' `$TOOLCHAIN_IPS | sed '/^`$/d' | sort -u | tr '\n' ' ')`"
+
 # --- Try nftables first; fall back to iptables-legacy on Netlink failure ---
 # Default WSL2 kernels often ship without nf_tables loaded, in which case
 # nft -f exits non-zero with "Unable to initialize Netlink socket". We
@@ -1592,6 +1636,13 @@ if /usr/sbin/nft -f /etc/nftables.conf 2>`"`$NFT_ERR`"; then
     # Defect 1: populate the DNS resolver allowlist (port 53 -> WSL resolver only).
     for ip in `$CF_RESOLVERS; do
         /usr/sbin/nft add element inet clawfactory dns_resolvers `"{ `$ip }`" 2>/dev/null || true
+    done
+    # v1 Guard 3: seed the user-switchable toolchain set so the route exists from
+    # the moment the firewall does. Later runs of clawfactory-toolchain.sh flush
+    # and rebuild this from the root-owned policy, so seeding it here cannot make
+    # anything unrevocable.
+    for ip in `$TOOLCHAIN_IPS; do
+        /usr/sbin/nft add element inet clawfactory toolchain_ipv4 `"{ `$ip }`" 2>/dev/null || true
     done
 elif grep -qE 'Unable to initialize Netlink|netlink|nf_tables' `"`$NFT_ERR`"; then
     echo `"[clawfactory-fw] nftables not supported on this WSL kernel - falling back to iptables-legacy`"
@@ -1627,6 +1678,15 @@ echo `"[clawfactory-fw] active backend: `$FW_BACKEND`"
 mkdir -p /etc/clawfactory
 echo `"`$FW_BACKEND`" > /etc/clawfactory/fw-backend
 printf '%s\n' `$ALLOWED_IPS | sed '/^`$/d' > /etc/clawfactory/allowed-ips.txt
+# v1 Guard 3: persist the toolchain seed separately, so the boot path rebuilds it
+# into its own set. Kept out of allowed-ips.txt deliberately: anything in that
+# file is re-added to the unrevocable set on every boot.
+printf '%s\n' `$TOOLCHAIN_IPS | sed '/^`$/d' | sort -u > /etc/clawfactory/toolchain-ips.txt
+echo `"[clawfactory-fw] toolchain seed: `$(wc -l < /etc/clawfactory/toolchain-ips.txt | tr -d ' ') address(es) in toolchain_ipv4`"
+# Record the HOSTNAMES this step seeded, so install-read-fetch.sh can reconcile
+# them against the resolver's own copy and fail the install if the two drift.
+printf '%s\n' `"`$TOOLCHAIN_HOSTS`" > /etc/clawfactory/toolchain-hosts.seed
+chmod 644 /etc/clawfactory/toolchain-hosts.seed
 
 # --- Boot-time apply script: re-applies whichever backend is active --------
 cat > /usr/local/sbin/clawfactory-fw-apply.sh <<'APPLY'
@@ -1731,6 +1791,14 @@ systemctl enable clawfactory-fw.service 2>/dev/null || true
     # throughout - this assertion fails the install if a future edit
     # accidentally drops back to the bare 'nft' form or otherwise loses
     # the full-path token before transport to bash.
+    # The toolchain seed must actually be in the emitted script. Same shape as the
+    # /usr/sbin/nft guard below and for the same reason: this block is the one
+    # thing standing between a correct install and a 21-minute timeout at step 8c,
+    # and a future edit that drops it would fail far away from its cause.
+    if ($script -notmatch 'toolchain_ipv4') {
+        Write-Log ERROR 'Firewall script lost the toolchain_ipv4 seed - aborting. Without it clawuser has no route to GitHub, npm or the skill hub until Step-InstallReadFetch, and step 8c fails after a long timeout.'
+        throw 'ClawFactory: firewall script validation failed (toolchain seed missing)'
+    }
     if ($script -notmatch '/usr/sbin/nft') {
         Write-Log ERROR 'Firewall script missing /usr/sbin/nft full-path token - aborting to avoid silent firewall misconfiguration.'
         throw 'ClawFactory: firewall script validation failed'

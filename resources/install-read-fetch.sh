@@ -103,6 +103,28 @@ chmod 644 /etc/clawfactory/egress-policy.json
 
 # --- c. apply once, so the set is populated from the policy rather than left
 #        to the first timer tick ------------------------------------------
+# --- c0. the two copies of the toolchain host list must AGREE -----------------
+# setup.ps1 seeds @toolchain_ipv4 at firewall time from its own copy of this list,
+# because the route has to exist before step 8c runs as clawuser. This resolver
+# owns the list for every refresh afterwards. Two copies is a real risk: a host in
+# setup.ps1's copy but not this one would be seeded and then silently dropped at
+# the first refresh, and a host here but not there would be unreachable during the
+# install. Duplication is only acceptable when something compares the copies, so
+# this compares them and fails the install loudly on drift.
+SEEDED=/etc/clawfactory/toolchain-hosts.seed
+if [ -f "$SEEDED" ]; then
+    # Ask the resolver for its list rather than scraping its source. See the
+    # --list-hosts note in that file for what scraping cost.
+    MINE="$(/usr/local/sbin/clawfactory-toolchain.sh --list-hosts 2>/dev/null | tr ' ' '\n' | sed '/^$/d' | sort -u | tr '\n' ' ')"
+    THEIRS="$(tr ' ' '\n' < "$SEEDED" | sed '/^$/d' | sort -u | tr '\n' ' ')"
+    if [ "$MINE" != "$THEIRS" ]; then
+        fatal "toolchain host list DRIFT. setup.ps1 seeded [$THEIRS] but clawfactory-toolchain.sh owns [$MINE]. A host in one and not the other is either unreachable during install or silently dropped at the first refresh. Fix both and rebuild."
+    fi
+    note "toolchain host lists agree between setup.ps1 and the resolver ($(printf '%s' "$MINE" | wc -w | tr -d ' ') hosts)"
+else
+    note "WARNING: no toolchain host seed file to reconcile against; the two copies were NOT compared"
+fi
+
 /usr/local/sbin/clawfactory-read-fetch.sh || fatal "the read-fetch resolver failed on its first run"
 /usr/local/sbin/clawfactory-toolchain.sh || fatal "the toolchain resolver failed on its first run"
 

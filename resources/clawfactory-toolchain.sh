@@ -71,9 +71,7 @@ MAX_IPS=512
 # Measured on cfv-164: github.com, codeload.github.com and api.clawhub.ai were
 # missing here while still present in $baseHosts, so the switch could not close
 # them and the validation caught it.
-TOOLCHAIN_HOSTS="clawhub.ai api.clawhub.ai \
-api.github.com github.com raw.githubusercontent.com objects.githubusercontent.com codeload.github.com \
-registry.npmjs.org"
+TOOLCHAIN_HOSTS="clawhub.ai api.clawhub.ai api.github.com github.com raw.githubusercontent.com objects.githubusercontent.com codeload.github.com registry.npmjs.org"
 
 # How many times to resolve each host before building the set.
 #
@@ -98,6 +96,20 @@ RESOLVE_PASSES=3
 
 note() { echo "[toolchain] $*"; }
 loud() { echo "[toolchain] $*" >&2; }
+
+# --list-hosts prints the list and exits, so install-read-fetch.sh can reconcile
+# it against the copy setup.ps1 seeded WITHOUT scraping this file's source text.
+#
+# The first version of that reconciliation did scrape, with a sed that only
+# matched a single-line assignment, and this list was backslash-continued across
+# three lines. It parsed to EMPTY and would have failed the install claiming
+# total drift. Fail-closed, so not dangerous, but wrong about the reason, and a
+# check that reports the wrong reason sends the next person to the wrong place.
+# Having the program report its own value removes the parsing surface entirely.
+if [ "${1:-}" = "--list-hosts" ]; then
+    printf '%s\n' "$TOOLCHAIN_HOSTS"
+    exit 0
+fi
 
 if [ "$(id -u)" != "0" ]; then
     loud "must run as root"
