@@ -3,7 +3,7 @@
 Dispatch card #245. Track: v1 fast-security-harness.
 
 Input: Secure-Setup at `9b3bbee`, Studio at `34c9947`, artifact `6282a228...`.
-Output: Secure-Setup `TBD`, Studio `229ad26`, artifact `5bef35dc...` (v1.3.3).
+Output: Secure-Setup `b4ae78f`, Studio `229ad26`, artifact `5bef35dc...` (v1.3.3, NOT released).
 
 ---
 
