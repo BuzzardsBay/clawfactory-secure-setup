@@ -139,7 +139,12 @@ if (-not $done) { Say "Job '$JobName' did not complete within $TimeoutMinutes mi
 
 # ---- 5. retrieve both channels + gate ---------------------------------------
 $outFile   = Retrieve-VmFile "C:\cfv\jobs\$JobName.out" "$JobName-out-$VmName.txt"        (Join-Path $dir "$JobName.out.txt")
-$probeName = ($leaf -replace '\.ps1$', '') -replace '^interim-v120-', ''
+# Strip ANY interim-vNNN- prefix, not just v120. The v130 phases write their
+# transcripts under the short name (toolchain-out-probe.txt), and a prefix rule
+# that only knew about v120 would have looked for a file that does not exist and
+# quietly fallen back to a single evidence channel. cfv-149 lost an entire run to
+# having one channel; the second one is not decoration.
+$probeName = ($leaf -replace '\.ps1$', '') -replace '^interim-v\d+-', ''
 $transcript = Retrieve-VmFile "C:\cfv\$probeName-out-probe.txt" "$JobName-probe-$VmName.txt" (Join-Path $dir "$JobName-probe.txt")
 $resJson    = Retrieve-VmFile "C:\cfv\$probeName-results.json"  "$JobName-results-$VmName.json" (Join-Path $dir "$JobName-results.json")
 

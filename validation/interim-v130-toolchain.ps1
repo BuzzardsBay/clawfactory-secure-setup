@@ -355,10 +355,32 @@ $trip = Invoke-WslFile -Tag "tc-trip-$tag" -User 'root' -Body @'
 echo "=== baseline: the tripwire passes on an intact chain ==="
 /usr/local/sbin/clawfactory-fw-assert.sh >/dev/null 2>&1; echo "baseline_rc=$?"
 
-echo "=== fault A: delete the toolchain SET (the accept goes with it) ==="
-nft delete set inet clawfactory toolchain_ipv4 2>&1 | head -2
+# FAULT A: remove the ACCEPT RULE, by handle.
+#
+# NOT by deleting the set. nft refuses to delete a set that a rule still
+# references ("Device or resource busy"), so a delete-the-set fault would fail to
+# inject and the tripwire would then "pass" for the wrong reason -- a fault
+# injection that does not inject is exactly the absent-subject problem this
+# harness exists to catch. The attempt is still made below and its refusal
+# recorded, because "the set cannot be removed while the accept references it"
+# is itself a useful property.
+echo "=== fault A: delete the toolchain ACCEPT RULE by handle ==="
+H=$(nft -a list chain inet clawfactory output 2>/dev/null | grep '@toolchain_ipv4' | grep -oE 'handle [0-9]+' | awk '{print $2}' | head -1)
+echo "accept_rule_handle=$H"
+if [ -n "$H" ]; then
+  nft delete rule inet clawfactory output handle "$H" 2>&1 | head -2
+  echo "ACCEPT_GONE=$(nft list chain inet clawfactory output 2>/dev/null | grep -qE '@toolchain_ipv4 tcp dport 443 accept' && echo no || echo yes)"
+else
+  echo "ACCEPT_GONE=no (could not read a handle; the fault was NOT injected)"
+fi
 /usr/local/sbin/clawfactory-fw-assert.sh 2>&1 | grep -i 'toolchain' | head -3
 /usr/local/sbin/clawfactory-fw-assert.sh >/dev/null 2>&1; echo "faultA_rc=$?"
+
+echo "=== fault B (recorded, expected to be REFUSED): delete the set while the accept exists ==="
+/usr/local/sbin/clawfactory-fw-apply.sh >/dev/null 2>&1
+/usr/local/sbin/clawfactory-toolchain.sh >/dev/null 2>&1
+nft delete set inet clawfactory toolchain_ipv4 2>&1 | head -2
+echo "SET_STILL_THERE_AFTER_DELETE_ATTEMPT=$(nft list set inet clawfactory toolchain_ipv4 >/dev/null 2>&1 && echo yes || echo no)"
 
 echo "=== restore, and prove the restore worked ==="
 /usr/local/sbin/clawfactory-fw-apply.sh >/dev/null 2>&1
@@ -372,12 +394,20 @@ W $trip.Out
 $baseRc  = if ($trip.Out -match 'baseline_rc=(\d+)') { [int]$Matches[1] } else { -1 }
 $faultRc = if ($trip.Out -match 'faultA_rc=(\d+)') { [int]$Matches[1] } else { -1 }
 $restRc  = if ($trip.Out -match 'restored_rc=(\d+)') { [int]$Matches[1] } else { -1 }
-Register-Control -Id "TC.8.CTL.$tag" -Name 'the tripwire PASSES on an intact chain and the fault was really undone' `
-    -Fired (($baseRc -eq 0) -and ($restRc -eq 0)) `
-    -Evidence "baseline_rc=$baseRc restored_rc=$restRc; a tripwire that always fails would score a false pass below" | Out-Null
-Record "TC.8.$tag" 'The tripwire FAILS the unit when the toolchain set and its accept are removed' `
+$faultInjected = $trip.Out -match 'ACCEPT_GONE=yes'
+# TWO controls, because this test has two ways to score a false pass. A tripwire
+# that ALWAYS fails would "detect" the fault without detecting anything, and a
+# fault that never got injected would leave the tripwire correctly passing while
+# this test read it as a miss.
+Register-Control -Id "TC.8.CTL.$tag" -Name 'the tripwire passes on an intact chain, and the fault was genuinely injected and then undone' `
+    -Fired (($baseRc -eq 0) -and ($restRc -eq 0) -and $faultInjected) `
+    -Evidence "baseline_rc=$baseRc restored_rc=$restRc accept-actually-removed=$faultInjected" | Out-Null
+Record "TC.8.$tag" 'The tripwire FAILS the unit when the toolchain accept rule is removed' `
     $(if ($faultRc -ne 0) { 'PASS' } else { 'FAIL' }) `
-    "fw-assert returned $faultRc with the set deleted (must be non-zero); it returned $baseRc intact and $restRc after restore"
+    "fw-assert returned $faultRc with the accept deleted (must be non-zero); $baseRc intact and $restRc after restore"
+Record "TC.8c.$tag" 'The toolchain set cannot be deleted while its accept rule references it' `
+    $(if ($trip.Out -match 'SET_STILL_THERE_AFTER_DELETE_ATTEMPT=yes') { 'PASS' } else { 'INFO' }) `
+    'nft refuses a set delete while a rule references it, so removing this control takes two deliberate steps rather than one'
 Record "TC.8b.$tag" 'The firewall was left intact by this test' `
     $(if (($trip.Out -match 'SET_BACK=yes') -and ($trip.Out -match 'ACCEPT_BACK=yes')) { 'PASS' } else { 'FAIL' }) `
     'a test that leaves the firewall broken has manufactured the defect it was checking for'
