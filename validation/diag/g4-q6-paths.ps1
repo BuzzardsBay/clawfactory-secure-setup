@@ -91,7 +91,20 @@ echo '--- second path A: /mnt/c, which automount=false should have removed ---'
 # the two apart. What matters is whether anything is MOUNTED there and whether
 # the Windows filesystem is actually reachable through it.
 echo "MNT_C_DIR_EXISTS=`$([ -d /mnt/c ] && echo yes || echo no)"
-echo "MNT_C_IS_A_MOUNT=`$(awk '\$2 == "/mnt/c" {print "yes"}' /proc/mounts | head -1 || true)"
+# BACKTICK, NOT BACKSLASH, and this single character cost question 6.
+#
+# `\$2` in a double-quoted PowerShell here-string is a backslash followed by the
+# variable $2. On the VM an undefined variable reference is a TERMINATING error,
+# so the here-string never evaluated, $u was never assigned, and every statement
+# that touched it failed in cascade: no probe output, no positive control
+# registered, and the verdict subexpressions produced NOTHING, which left five
+# Record calls with an EMPTY verdict. An empty verdict is neither PASS nor FAIL
+# nor VOID, so the runner counted them as nothing and reported the phase PASS.
+#
+# It survived an audit that grepped for `\$` followed by a letter or an open
+# paren. awk field variables are DIGITS. The pattern used to prove the file
+# clean could not match the defect being introduced in the same edit.
+echo "MNT_C_IS_A_MOUNT=`$(awk '`$2 == "/mnt/c" {print "yes"}' /proc/mounts | head -1 || true)"
 echo "MNT_C_ENTRIES=`$(ls -A /mnt/c 2>/dev/null | wc -l | tr -d ' ')"
 if ls /mnt/c/Windows >/dev/null 2>&1; then echo "MNT_C_REACHES_WINDOWS=yes"; else echo "MNT_C_REACHES_WINDOWS=no"; fi
 echo

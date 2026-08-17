@@ -254,12 +254,59 @@ C:/cfv/g4-paths /workspaces/g4-paths-423de072 9p rw,relatime,
   aname=drvfs;path=C:/cfv/g4-paths;metadata;uid=1000;gid=1000;...
 ```
 
-**Not measured:** every check that ran as uid 1000. The probe body returned no
-output at all, twice, in about one second, and even its own positive control
-(`Q6.2.CTL`) never registered. The cause was not isolated and the session was
-stopped rather than spend more on it. So bind-mount refusal, unprivileged user
-namespaces, the private-bind-inside-a-namespace test, symlink enumeration and
-the Docker check are all **unmeasured**.
+**Not measured:** every check that ran as uid 1000. So bind-mount refusal,
+unprivileged user namespaces, the private-bind-inside-a-namespace test, symlink
+enumeration and the Docker check are all **unmeasured**.
+
+**ROOT CAUSE, found after the run from the job's captured stderr.** One
+character, and the failure it caused is the most instructive single event of the
+session.
+
+```
+The variable '$2' cannot be retrieved because it has not been set.
+At C:\cfv\g4-q6-paths.ps1:94 char:33
++ echo "MNT_C_IS_A_MOUNT=`$(awk '\$2 == "/mnt/c" {print "yes"}' /proc/m ...
+
+The variable '$u' cannot be retrieved because it has not been set.
+At C:\cfv\g4-q6-paths.ps1:134 char:3   +  W $u.Out
+
+The variable '$shadowDenied' cannot be retrieved because it has not been set.
+At C:\cfv\g4-q6-paths.ps1:138 char:12  +  -Fired $shadowDenied ...
+```
+
+Line 94 was written `awk '\$2 == ...'`. In a double-quoted PowerShell
+here-string that is a backslash followed by the variable `$2`. On the VM an
+undefined variable reference is a **terminating** error, so:
+
+1. the here-string never evaluated, and `$u` was never assigned
+2. `W $u.Out` threw, which is why no probe output appears
+3. `$shadowDenied` was never set, so `Register-Control` threw and **the positive
+   control never registered at all**
+4. `$mntC` was never set, so the `$(if ($mntC) { 'PASS' } else { 'FAIL' })`
+   verdict subexpression threw and produced **nothing**, leaving five `Record`
+   calls with an **empty verdict argument**
+5. an empty verdict is neither PASS nor FAIL nor VOID, so the runner counted
+   them as nothing and reported the phase **PASS**
+
+**And it survived the audit that was supposed to catch exactly this class.**
+After the first round of `\$` defects, the files were grepped with
+`\\\$[A-Za-z(]`, letters and an open paren. `awk` field variables are **digits**.
+The pattern used to certify the file clean was structurally incapable of
+matching the defect being introduced in the same edit. Locally it is harmless,
+because without strict-mode semantics an undefined variable is silently `$null`,
+which is why executing the identical bytes on the build machine reproduced pass
+1's correct behaviour and not the fault.
+
+**Three lessons, all carried into 9.4:**
+
+- an audit regex is itself a probe and needs a negative control, or it certifies
+  what it cannot see (instruction I)
+- the runner must treat an empty verdict as VOID (instruction F), which alone
+  would have turned this silent PASS into a loud VOID
+- probe stderr is a first-class evidence channel. This root cause was sitting in
+  the job `.out` the whole time and was found only after the VM was destroyed,
+  because the analysis kept reading the phase transcript, which by construction
+  contains only what the probe successfully printed (instruction J)
 
 **A harness defect this exposes, and it is the most important thing in this
 section.** Those five rows recorded an **empty verdict**, which is neither PASS
@@ -463,8 +510,11 @@ assumed coverage.
 8. **Studio, the installer, or any shipped resource.** Untouched, by scope.
 9. **Every uid 1000 reachability check in question 6**, per 3.6: bind-mount
    refusal, unprivileged user namespaces, the private-bind-inside-a-namespace
-   test, symlink enumeration, and the Docker check. The probe returned no output
-   and the cause was not isolated.
+   test, symlink enumeration, and the Docker check. **The root cause is now
+   known and fixed** (a `\$2` in a here-string, full analysis in 3.6), so this
+   is a cheap re-run rather than an open investigation. The `\$2` is corrected
+   in the same commit as this document, but the corrected probe has NOT been
+   executed, so these checks remain unmeasured until it is.
 10. **The reboot pass for questions 2 and 4.** Deliberately not run, and the
     reasoning is recorded rather than the step quietly dropped: FUSE had already
     failed the **lighter** trigger, the WSL restart cycle, which is more frequent
@@ -560,6 +610,7 @@ the plumbing carrying them was wrong.
 | a **user** systemd unit restarted against the **system** manager | environment |
 | permissions set on ext4 but not on the drvfs arm of the same test | symmetry |
 | a fixed 12-second sleep read back as `activating` and scored as failure | timing |
+| `\$2` in a here-string, missed by an audit regex that only matched letters | seam, and the audit |
 | **snapshot copy re-entering its own permission mark and deadlocking the box** | re-entrancy |
 
 The last one is the expensive one. It wedged every open on the granted
@@ -644,6 +695,24 @@ Copy these into the next prompt.
 
 > A `Record` call that produces no verdict currently counts as nothing and lets
 > a phase report PASS while several of its checks said nothing at all.
+
+**I. An audit regex needs a negative control, like any other probe.**
+
+> After fixing a class of defect, the grep used to prove the files clean is
+> itself a measurement and can be wrong in the same way the code was. Before
+> trusting it, deliberately introduce one instance of the defect and confirm the
+> pattern finds it. A pattern of `\$` followed by a letter certified a file that
+> contained `\$2`, and that single character voided a whole question while the
+> phase reported PASS.
+
+**J. Read probe stderr, not just the probe transcript.**
+
+> The phase transcript contains only what the probe successfully printed, so a
+> probe that dies early is invisible in it by construction. The job `.out` file
+> captures stdout and stderr together and is where the actual exception lives.
+> Read it whenever a phase produces less output than expected, BEFORE tearing
+> the VM down. In this session the root cause of question 6 sat in that file for
+> hours while the analysis re-read the transcript that could not contain it.
 
 **G. Wait on state, never on a sleep.**
 
