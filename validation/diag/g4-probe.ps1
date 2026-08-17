@@ -134,6 +134,26 @@ function Invoke-Rc {
     } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue }
 }
 
+function Get-StorageKey {
+    <#
+      The ARM control plane has timed out five times in this session. Invoke-Rc
+      retries, but the storage key read is a DIFFERENT az call and was not
+      covered, so a collection that had nothing to do with run-command died on
+      the same transient. Anything that talks to management.azure.com needs the
+      same treatment; this is the second such call and it is now the last one.
+    #>
+    foreach ($i in 1..3) {
+        $prevEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $k = az storage account keys list -g $ResourceGroup -n $StorageAcct --query "[0].value" -o tsv 2>&1
+        } finally { $ErrorActionPreference = $prevEap }
+        if ($LASTEXITCODE -eq 0 -and $k) { return ("$k").Trim() }
+        if ($i -lt 3) { Say "  storage key read failed (attempt $i of 3), retrying in 20s" DarkYellow; Start-Sleep -Seconds 20 }
+    }
+    throw "could not read a storage key for $StorageAcct after 3 attempts."
+}
+
 function Get-VmIp {
     $ip = az vm list-ip-addresses -g $ResourceGroup -n $VmName `
             --query "[0].virtualMachine.network.publicIpAddresses[0].ipAddress" -o tsv
@@ -265,7 +285,7 @@ switch ($Step) {
         Say "Artifact and probe scripts are already on the VM at the pinned digest; skipping the upload." Green
     } else {
     Say "Staging artifact, runner, channel, phase runner and probe phases..."
-    $key = az storage account keys list -g $ResourceGroup -n $StorageAcct --query "[0].value" -o tsv
+    $key = Get-StorageKey
     if ($LASTEXITCODE -ne 0 -or -not $key) { throw "could not read a storage key for $StorageAcct." }
     $exp = (Get-Date).ToUniversalTime().AddHours(6).ToString('yyyy-MM-ddTHH:mmZ')
     az storage container create --account-name $StorageAcct --account-key $key --name $Container --output none 2>$null
@@ -413,7 +433,7 @@ if(-not [G4W.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
     # re-running 'stage' would either skip everything (its digest check is
     # satisfied) or waste the upload. A probe fix needs neither.
     Say "Re-staging the probe scripts only..."
-    $key = az storage account keys list -g $ResourceGroup -n $StorageAcct --query "[0].value" -o tsv
+    $key = Get-StorageKey
     if ($LASTEXITCODE -ne 0 -or -not $key) { throw "could not read a storage key for $StorageAcct." }
     $exp = (Get-Date).ToUniversalTime().AddHours(4).ToString('yyyy-MM-ddTHH:mmZ')
     $dl = ''
@@ -488,8 +508,8 @@ if(-not [G4W.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
         @{ n = '03-q6'; f = 'g4-q6-paths.ps1';    a = ''; label = 'Q6 second paths to the workspace' },
         @{ n = '04-q4'; f = 'g4-q4-fuse.ps1';     a = ''; label = 'Q4 FUSE passthrough' },
         @{ n = '05-q3'; f = 'g4-q3-volume.ps1';   a = ''; label = 'Q3 write volume and exclusion placement' },
-        @{ n = '06-q5'; f = 'g4-q5-cost.ps1';     a = ''; label = 'Q5 cost of enforcement and copying' },
-        @{ n = '07-q7'; f = 'g4-q7-baseurl.ps1';  a = ''; label = 'Q7 card #197 model.baseUrl' },
+        @{ n = '06-q5'; f = 'g4-q5-cost.ps1';     a = ''; label = 'Q5 cost of enforcement and copying'; mins = 75 },
+        @{ n = '07-q7'; f = 'g4-q7-baseurl.ps1';  a = ''; label = 'Q7 card #197 model.baseUrl'; mins = 45 },
         @{ n = '08-q2'; f = 'g4-q2-scope.ps1';    a = ''; label = 'Q2 mark scope and restart survival (pre-reboot)' }
     )
     if ($Only) {
@@ -522,8 +542,14 @@ if(-not [G4W.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
         # Re-running this step is safe. The runner skips any job that already has
         # a .done beside it, so a phase completed before a driver crash is not
         # re-executed, and its result is picked up on the next poll.
+        # Per-phase budget. A single 40 minute figure was wrong for Q5, which
+        # repeats a warmed agent turn plus a dependency install three times and
+        # legitimately needs longer. When it overran, the driver moved on and
+        # started the next phase against a box the previous one still held, which
+        # turned one slow phase into two lost ones.
+        $budget = if ($ph.mins) { [int]$ph.mins } else { 40 }
         $done = $false
-        foreach ($i in 1..40) {
+        foreach ($i in 1..$budget) {
             Start-Sleep -Seconds 60
             $p = Invoke-Rc "if (Test-Path C:\cfv\jobs\$($ph.n).done) { 'DONE=' + (Get-Content C:\cfv\jobs\$($ph.n).done -Raw) } else { 'PENDING' }" 'poll'
             if ($p -match 'DONE=') { $done = $true; Say "  $($ph.n) finished: $p" Green; break }
@@ -606,7 +632,7 @@ if(-not [G4W.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
     # worse than one that fails, because a truncated transcript reads as a
     # complete one and nobody checks a byte count they were not warned about.
     Say "Collecting every result file and transcript through blob storage..."
-    $key = az storage account keys list -g $ResourceGroup -n $StorageAcct --query "[0].value" -o tsv
+    $key = Get-StorageKey
     if ($LASTEXITCODE -ne 0 -or -not $key) { throw "could not read a storage key for $StorageAcct." }
     $exp = (Get-Date).ToUniversalTime().AddHours(4).ToString('yyyy-MM-ddTHH:mmZ')
     az storage container create --account-name $StorageAcct --account-key $key --name $Container --output none 2>$null
@@ -648,15 +674,15 @@ if(-not [G4W.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
     Say "Tearing down $VmName..."
     az vm delete -g $ResourceGroup -n $VmName --yes --output none
     if ($LASTEXITCODE -ne 0) { throw "az vm delete exited $LASTEXITCODE." }
-    foreach ($r in @("$VmName-osdisk", "$VmName-pip", "$VmName-nsg")) {
-        az resource delete -g $ResourceGroup -n $r --resource-type $(
-            switch -Wildcard ($r) {
-                '*-osdisk' { 'Microsoft.Compute/disks' }
-                '*-pip'    { 'Microsoft.Network/publicIPAddresses' }
-                '*-nsg'    { 'Microsoft.Network/networkSecurityGroups' }
-            }) --output none 2>$null
-    }
+    # DEPENDENCY ORDER, and the previous order was wrong. The NIC references both
+    # the public IP and the NSG, so deleting those first fails and leaves all
+    # three behind. It failed loudly rather than silently, which is the only
+    # reason nothing was orphaned, but a teardown that needs a human to finish it
+    # is not a teardown.
+    az disk delete -g $ResourceGroup -n "$VmName-osdisk" --yes --output none 2>$null
     az network nic delete -g $ResourceGroup -n "$($VmName)VMNic" --output none 2>$null
+    az network nsg delete -g $ResourceGroup -n "$VmName-nsg" --output none 2>$null
+    az network public-ip delete -g $ResourceGroup -n "$VmName-pip" --output none 2>$null
     Start-Sleep -Seconds 10
     # UNFILTERED. A teardown proof that greps for the VM name cannot show a
     # resource that was left behind under a different name.

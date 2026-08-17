@@ -217,7 +217,14 @@ echo '--- restarting the gateway so the edit is actually loaded ---'
 # confidently, which is the specific outcome this phase exists to avoid.
 XDG=/run/user/1000
 su -s /bin/bash -c "XDG_RUNTIME_DIR=`$XDG systemctl --user restart openclaw-gateway.service" clawuser 2>&1
-sleep 12
+# POLL UNTIL ACTIVE, do not sleep a guess. The first attempt slept 12 seconds and
+# read back "activating", which is neither up nor failed, and the phase then
+# treated a still-starting gateway as one that never came back.
+for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  ST=`$(su -s /bin/bash -c "XDG_RUNTIME_DIR=`$XDG systemctl --user is-active openclaw-gateway.service" clawuser 2>&1)
+  [ "`$ST" = "active" ] && break
+  sleep 10
+done
 echo "GATEWAY_STATE=`$(su -s /bin/bash -c "XDG_RUNTIME_DIR=`$XDG systemctl --user is-active openclaw-gateway.service" clawuser 2>&1)"
 echo "GATEWAY_LISTENING=`$(ss -ltnp 2>/dev/null | grep -c ':8788' || echo 0)"
 echo '--- L17: warm, then the load-bearing turn ---'
@@ -274,7 +281,14 @@ echo "PRISTINE_SHA=`$(sha256sum /var/tmp/g4/openclaw.json.pristine | cut -d' ' -
 # confidently, which is the specific outcome this phase exists to avoid.
 XDG=/run/user/1000
 su -s /bin/bash -c "XDG_RUNTIME_DIR=`$XDG systemctl --user restart openclaw-gateway.service" clawuser 2>&1
-sleep 12
+# POLL UNTIL ACTIVE, do not sleep a guess. The first attempt slept 12 seconds and
+# read back "activating", which is neither up nor failed, and the phase then
+# treated a still-starting gateway as one that never came back.
+for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  ST=`$(su -s /bin/bash -c "XDG_RUNTIME_DIR=`$XDG systemctl --user is-active openclaw-gateway.service" clawuser 2>&1)
+  [ "`$ST" = "active" ] && break
+  sleep 10
+done
 echo "GATEWAY_STATE=`$(su -s /bin/bash -c "XDG_RUNTIME_DIR=`$XDG systemctl --user is-active openclaw-gateway.service" clawuser 2>&1)"
 echo "GATEWAY_LISTENING=`$(ss -ltnp 2>/dev/null | grep -c ':8788' || echo 0)"
 echo '--- CONTROL 2: a real turn, end to end, against the real provider ---'

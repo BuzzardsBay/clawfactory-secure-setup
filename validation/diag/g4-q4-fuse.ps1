@@ -93,6 +93,15 @@ dpkg -l bindfs 2>/dev/null | tail -1
 # ============================================================================
 Section '3. Can root mount a FUSE passthrough, and does it pass through'
 $mnt = Invoke-WslFile -Tag 'g4-q4-mount' -User 'root' -Body @'
+# UNMOUNT ANY PREVIOUS VIEW FIRST. rm -rf cannot remove a live mountpoint, so a
+# re-run silently kept the earlier mount and measured it instead of the new one.
+# That is what happened here: the previous mount carried default_permissions,
+# which correctly enforced the backing mode 0700 through the view and locked the
+# agent out, and the phase then voided on a control about a mount it had not
+# made. A stale mount is a stale instrument.
+fusermount3 -u /var/tmp/g4-fuse/view 2>/dev/null || fusermount -u /var/tmp/g4-fuse/view 2>/dev/null || umount -l /var/tmp/g4-fuse/view 2>/dev/null
+sleep 1
+echo "PRE_EXISTING_MOUNT=$(grep -c 'g4-fuse/view' /proc/mounts 2>/dev/null | tr -d ' ')"
 rm -rf /var/tmp/g4-fuse
 mkdir -p /var/tmp/g4-fuse/backing /var/tmp/g4-fuse/view
 echo "BACKING-CANARY-Q4" > /var/tmp/g4-fuse/backing/canary.txt
@@ -164,7 +173,13 @@ echo
 echo "--- THE BYPASS TEST: the backing directory, by its own path ---"
 if cat /var/tmp/g4-fuse/backing/canary.txt >/dev/null 2>&1; then echo "BACKING_READ=SUCCEEDED"; else echo "BACKING_READ=refused"; fi
 if ls /var/tmp/g4-fuse/backing >/dev/null 2>&1; then echo "BACKING_LIST=SUCCEEDED"; else echo "BACKING_LIST=refused"; fi
-echo "BYPASS_WRITE=$(echo bypass > /var/tmp/g4-fuse/backing/bypass.txt 2>/dev/null && echo SUCCEEDED || echo refused)"
+# The redirection failure is reported by the SHELL, not by echo, so `echo ... 2>/dev/null`
+# does not suppress it. It landed on stderr, interleaved into the middle of the
+# VIEW_READ line in the captured output, and turned VIEW_READ=SUCCEEDED into
+# "EDED". The matcher then missed it and the phase voided on a control that had
+# actually succeeded. Wrapping in a subshell puts the redirect inside the scope
+# that 2>/dev/null covers.
+echo "BYPASS_WRITE=$( (echo bypass > /var/tmp/g4-fuse/backing/bypass.txt) 2>/dev/null && echo SUCCEEDED || echo refused)"
 echo
 echo "--- every other route to the same inode ---"
 echo "HARDLINK=$(ln /var/tmp/g4-fuse/backing/canary.txt /var/tmp/g4-hardlink 2>/dev/null && echo SUCCEEDED || echo refused)"

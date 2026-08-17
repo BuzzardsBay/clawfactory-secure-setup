@@ -395,9 +395,22 @@ def cmd_daemon(path, seconds, snapdir=None):
     everything. With snapdir set, the file is copied before the allow, which is
     the snapshot cost.
 
+    THE RE-ENTRANCY HAZARD, AND WHY THE OBVIOUS COPY IS FATAL.
+
     The daemon never writes inside `path`: the snapshot lands on ext4 under
-    /var/tmp. A daemon that wrote into the tree it holds a permission mark on
-    would deadlock against itself.
+    /var/tmp. That is necessary and it is NOT sufficient, which cost a run.
+
+    The first version copied with open("/proc/self/fd/%d" % evfd). That is a
+    fresh open() ON THE MARKED MOUNT, so it generates another FAN_OPEN_PERM
+    event, and the daemon is already inside the copy and single threaded, so it
+    can never answer it. The daemon deadlocks against itself, and because the
+    mark is mount-scoped, EVERY open on the granted workspace blocks behind it.
+    On the box that wedged the on-VM job runner and silently killed the rest of
+    the run: the driver polled a dead runner for 27 minutes.
+
+    os.dup() duplicates the descriptor the kernel already handed us. It is not an
+    open, it generates no event, and it cannot re-enter. Any future work here
+    must preserve that property: inside the event loop, never open a path.
     """
     out = {"cmd": "daemon", "path": path, "seconds": seconds, "snapdir": snapdir}
     fd, e, ename = fan_init(FAN_CLOEXEC | FAN_CLASS_CONTENT)
@@ -426,13 +439,31 @@ def cmd_daemon(path, seconds, snapdir=None):
         if ev is None:
             continue
         mask, evfd, epid, vers = ev
+        # Never adjudicate our own opens. Belt and braces beside the dup below:
+        # if anything in this loop ever does open a path, this stops it wedging
+        # the whole mount rather than merely being slow.
+        if epid == os.getpid():
+            respond(fd, evfd, FAN_ALLOW)
+            os.close(evfd)
+            continue
         if snapdir:
             t0 = time.time()
             try:
-                p = fd_path(evfd)
                 dest = os.path.join(snapdir, "snap-%d" % handled)
-                with open("/proc/self/fd/%d" % evfd, "rb") as src, open(dest, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
+                # os.dup, NOT open("/proc/self/fd/N"). See the docstring: the
+                # latter is an open on the marked mount and deadlocks the daemon
+                # against itself.
+                dup = os.dup(evfd)
+                try:
+                    os.lseek(dup, 0, os.SEEK_SET)
+                    with open(dest, "wb") as dst:
+                        while True:
+                            chunk = os.read(dup, 65536)
+                            if not chunk:
+                                break
+                            dst.write(chunk)
+                finally:
+                    os.close(dup)
                 copied += 1
             except (OSError, IOError):
                 pass
