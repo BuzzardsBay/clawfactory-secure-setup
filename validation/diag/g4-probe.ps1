@@ -89,15 +89,29 @@ function Card($title, [string[]]$lines) {
 # az on Windows is az.cmd and cmd.exe re-parses every argument, so the script
 # goes in via @file and the query carries no parentheses. Both streams are read.
 function Invoke-Rc {
-    param([string]$Script, [string]$Label = 'run-command')
+    param([string]$Script, [string]$Label = 'run-command', [int]$Attempts = 3)
     $f = Join-Path ([IO.Path]::GetTempPath()) ("g4-rc-{0}.ps1" -f [Guid]::NewGuid())
     try {
         [IO.File]::WriteAllText($f, $Script, (New-Object Text.UTF8Encoding($false)))
-        $out = az vm run-command invoke -g $ResourceGroup -n $VmName `
-                 --command-id RunPowerShellScript --scripts "@$f" `
-                 --query "value[].message" -o tsv
-        if ($LASTEXITCODE -ne 0) { throw "$Label : az run-command exited $LASTEXITCODE" }
-        return ($out -join "`n")
+        # RETRIED, because the ARM control plane times out transiently and it did
+        # so twice in this run: once reading a storage key, once seeding a
+        # credential, both with 'Connection to management.azure.com timed out'.
+        # That is not a product fault and it must not be able to end a run that
+        # has a live VM billing behind it. A genuine failure fails the same way
+        # every attempt and is still reported, with the last error preserved.
+        $lastErr = ''
+        foreach ($i in 1..$Attempts) {
+            $out = az vm run-command invoke -g $ResourceGroup -n $VmName `
+                     --command-id RunPowerShellScript --scripts "@$f" `
+                     --query "value[].message" -o tsv 2>&1
+            if ($LASTEXITCODE -eq 0) { return (($out | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] }) -join "`n") }
+            $lastErr = ($out | Out-String).Trim()
+            if ($i -lt $Attempts) {
+                Write-Host "  [$Label] az exited $LASTEXITCODE on attempt $i of $Attempts, retrying in 20s" -ForegroundColor DarkYellow
+                Start-Sleep -Seconds 20
+            }
+        }
+        throw "$Label : az run-command failed $Attempts times. Last error: $lastErr"
     } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue }
 }
 
@@ -216,6 +230,21 @@ switch ($Step) {
     Say "  RDP allowed from $ruleSrc only" Green
 
     # --- stage ---------------------------------------------------------------
+    # IDEMPOTENT BY DIGEST. A transient ARM timeout AFTER a successful upload
+    # must not cost another 440 MB, and it did exactly that once in this run. So
+    # re-running this step skips straight to whatever did not finish.
+    #
+    # The check is the ARTIFACT DIGEST ON THE VM rather than a local flag,
+    # because a local flag is a claim about a box that may have been rebuilt
+    # underneath it, and the last probe script is checked alongside it so a
+    # half-finished upload cannot read as a complete one.
+    $dl = ''
+    $alreadyStaged = (Invoke-Rc ("if ((Test-Path C:\cfv\combined-setup.exe) -and " +
+        "((Get-FileHash C:\cfv\combined-setup.exe -Algorithm SHA256).Hash.ToLower() -eq '$Sha256') -and " +
+        "(Test-Path C:\cfv\g4-q7-baseurl.ps1)) { 'ALREADY_STAGED' } else { 'NOT_STAGED' }") 'stage-check') -match 'ALREADY_STAGED'
+    if ($alreadyStaged) {
+        Say "Artifact and probe scripts are already on the VM at the pinned digest; skipping the upload." Green
+    } else {
     Say "Staging artifact, runner, channel, phase runner and probe phases..."
     $key = az storage account keys list -g $ResourceGroup -n $StorageAcct --query "[0].value" -o tsv
     if ($LASTEXITCODE -ne 0 -or -not $key) { throw "could not read a storage key for $StorageAcct." }
@@ -256,8 +285,11 @@ switch ($Step) {
         $dl += "Invoke-WebRequest -Uri '$url' -OutFile $dest -UseBasicParsing; "
         Say "  uploaded $($f.n) ($localLen bytes, size confirmed at the service)" DarkGray
     }
+    }
 
     # Seed the provider key. Read from Credential Manager, never printed.
+    # Runs on every pass, including a resumed one: it is cheap, and the seed is
+    # the step that failed the first time round.
     Add-Type -Namespace G4R -Name Cred -MemberDefinition @'
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet=System.Runtime.InteropServices.CharSet.Unicode)]
 public struct CREDENTIAL { public uint Flags; public uint Type; public string TargetName; public string Comment; public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten; public uint CredentialBlobSize; public System.IntPtr CredentialBlob; public uint Persist; public uint AttributeCount; public System.IntPtr Attributes; public string TargetAlias; public string UserName; }
@@ -313,7 +345,12 @@ if(-not [G4W.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
     Say "Staged, digest re-verified on the VM. $r" Green
 
     $rs = Invoke-Rc $seedPs 'seed-key'
-    if (Invoke-Rc "Test-Path C:\cfv\seed-ok.txt" 'seed-check' -notmatch 'True') { throw "the provider key did not land on the VM." }
+    # PARENTHESISED, and the reason is worth a line. Without them PowerShell
+    # binds -notmatch as a PARAMETER of Invoke-Rc rather than applying it as an
+    # operator, so the check cannot report what it claims to check. It failed
+    # closed here, which is the only reason it was noticed at all.
+    $seedCheck = Invoke-Rc "Test-Path C:\cfv\seed-ok.txt" 'seed-check'
+    if ($seedCheck -notmatch 'True') { throw "the provider key did not land on the VM. seed-check returned: '$seedCheck'" }
     Say "  provider key seeded on the VM" Green
 
     $ip = Get-VmIp
