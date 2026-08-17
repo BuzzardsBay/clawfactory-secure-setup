@@ -743,7 +743,223 @@ Copy these into the next prompt.
 
 ---
 
-## 10. Task accounting
+## 10. Judgement calls, and the case for each
+
+Written because the operator asked for the reasoning to be defensible to the
+planning session rather than taken on trust. Each entry states the decision, the
+case for it, and the case against. Where the decision was wrong, it says so.
+
+### 10.1 The provisioning protocol: no auto-logon, one extra human login
+
+**Decision.** The operator created the VM themselves with a password this
+session never held, and logged in over RDP for the install boot as well as after
+the restart.
+
+**Reasoning.** The work package forbade generating, printing or requesting a
+password, and forbade `az vm user update` after provisioning. Those constraints
+together make Winlogon auto-logon impossible, because arming it requires writing
+the account password into `DefaultPassword` and the driver does not have it.
+Rather than work around the constraint, the driver dropped auto-logon entirely
+and said so on every card, so nobody would wait for a session that was never
+armed.
+
+**Cost.** One extra login. **Benefit.** The password existed in exactly one
+place, the operator's own record, and the VMAccess hang risk that cost an hour
+on cfv-162 was taken at `az vm create` time rather than between reboots.
+
+**Against.** It makes the run less autonomous. That is the correct trade when the
+alternative is a credential in a session transcript.
+
+### 10.2 Adding a drvfs arm to question 1, which the package did not ask for
+
+**Decision.** Question 1 was measured on drvfs as well as on the specified
+`/var/tmp`.
+
+**Reasoning.** Guard 4 protects granted workspaces, and granted workspaces are
+drvfs mounts of Windows folders. An ext4-only measurement answers a question
+nobody asked.
+
+**This is the single decision the whole deliverable rests on.** The ext4 answer
+was YES and the drvfs answer was NO. Executed exactly as written, this job would
+have returned a confident YES and Guard 4 would have been built on a mechanism
+that enforces nothing where it matters.
+
+**Against.** It expanded scope without asking. Given the result, that is not a
+close call, but the general form of it is: the package should have named the
+filesystem, and instruction H exists so the next one does.
+
+### 10.3 Proceeding after the 1.3.3 install failed
+
+**Decision.** The probes were run on a box whose installer reported failure, with
+the caveat recorded in the run directory and carried into this document.
+
+**Reasoning.** The failure was in Guard 3, a network control, at
+`Step-InstallReadFetch`. Questions 1, 2, 4 and 6 are kernel and filesystem
+questions depending on the distro, `clawuser`, systemd and the grants script, all
+installed well before the failure. Stopping would have delivered nothing;
+re-installing over a half install would have traded a precise caveat for a
+muddier one.
+
+**Against, and it is real.** Question 7 turned out to need a working gateway,
+which this box never had, so card 197 was unanswerable and roughly 40 minutes
+went into discovering that. A stricter reading would have stopped at the install
+failure and cost the whole session. **The decision was right for questions 1 to
+6 and wrong for question 7**, and the honest summary is that the cost fell
+exactly where the install failure was relevant and nowhere else.
+
+### 10.4 Not diagnosing the install race further
+
+**Decision.** The install failure was traced to a one second race from
+timestamps on the box, and then left alone. `setup.ps1` was never opened.
+
+**Reasoning.** The package put the toolchain blocker in another session and said
+to report rather than follow. Enough diagnosis was done to decide whether this
+session could proceed, which is a different question from fixing it.
+
+### 10.5 Running all seven probes before calibrating any of them
+
+**Decision, and it was the wrong one.** All seven ran against the real subject on
+the first attempt.
+
+**Consequence.** Seven problems surfaced at once instead of one. Two false
+findings reached the operator and had to be withdrawn. Roughly half the session
+went into rework.
+
+**No defence is offered.** The correct approach was a calibration pass against
+known answers, which is instruction A and is the first thing the next package
+should require. A `harness-selftest.ps1` already exists for the phase runner
+because this lesson was learned one level up; the equivalent for the probes was
+not built.
+
+### 10.6 Reporting question 3 and question 6 findings before they were solid
+
+**Decision, and it was wrong.** Both were reported to the operator as findings,
+described as consequential, and later withdrawn when the probes turned out to be
+measuring something other than their labels claimed.
+
+**Why it happened.** The phase runner returned confident FAILs, and a FAIL from a
+runner that voids unproven instruments reads as trustworthy. It is not: the
+runner certifies that an instrument RAN, never that it measured the right thing.
+
+**What should have happened.** Any FAIL whose consequence is architectural should
+have its raw evidence read before it is described as a finding. That takes one
+minute and would have caught both.
+
+### 10.7 Continuing rather than restarting after the defect run
+
+**Decision.** After the defects were understood, the run continued with fixed
+probes rather than being abandoned for a clean session.
+
+**Reasoning, and it was marginal cost against marginal value rather than sunk
+cost.** The rig worked: VM, install, file channel, runner, evidence collection.
+The probes were fixed and committed. A fresh session would have run the same
+code against the same kernel and derived the same answers, at the price of
+rebuilding the rig and two more human logins. The only thing restarting bought
+was a clean install, which is irrelevant to kernel and filesystem questions.
+
+**Against.** A higher defect rate makes further re-runs riskier, and two of them
+did surface new problems. Mitigated by writing no new probe logic, only fixing
+what existed.
+
+### 10.8 Skipping the reboot pass
+
+**Decision.** Not run. Recorded in 7.10 with its reasoning rather than dropped.
+
+**Reasoning.** FUSE had already failed the **lighter** trigger, the WSL restart
+cycle, which is more frequent than a reboot and strictly less destructive.
+Fanotify's survival is moot because it is ruled out for granted workspaces. The
+pass would have re-measured a known answer at the cost of a human login.
+
+**Against.** Obvious answers are occasionally wrong, and this was the operator's
+call to overrule. It was offered as a recommendation with that stated.
+
+### 10.9 Dropping question 5 after it deadlocked the box
+
+**Decision.** Not re-run after the deadlock.
+
+**Reasoning.** Question 5 is the only question whose answer cannot change the go
+or no-go: it prices a mechanism after viability is established. At the moment it
+ran, no candidate had survived, so its own precondition was correctly unmet.
+
+### 10.10 Leaving the VM running rather than deallocating at handoffs
+
+**Decision.** Not deallocated during the run, against the standing rule.
+
+**Reasoning.** The rule exists for machines parked on a human step. This one was
+continuously computing. Deallocating between phases would have destroyed the
+in-flight work and the distro state that questions 2 and 4 depend on.
+
+**Cost.** About five and a half hours of `D2s_v4`, a few cents. It was torn down
+as soon as the work stopped needing it.
+
+### 10.11 Rebuilding the evidence channel mid-run
+
+**Decision.** Collection was rewritten from `run-command` to blob storage with
+byte-count verification, mid-session.
+
+**Reasoning.** Five transcripts came back at exactly 4097 characters. An evidence
+channel that silently keeps the tail is worse than one that fails, because a
+truncated transcript reads as a complete one and the verdict lines happened to
+survive. Every collected file is now byte-count verified against the VM.
+
+### 10.12 Chasing the question 6 root cause after teardown
+
+**Decision.** Investigated after the VM was destroyed, on the operator's request.
+
+**Reasoning and outcome.** It was worth it. The cause was a single `\$2` in a
+here-string, and the general lesson is larger than the bug: **the audit regex
+used to certify the files clean could not match the defect being introduced in
+the same edit**, and the actual exception had been sitting in the job's stderr
+capture the whole time while the analysis re-read a transcript that by
+construction could not contain it. Both became instructions I and J.
+
+---
+
+## 11. Chronology
+
+Compressed, so the shape of the session is visible without reading the whole
+document.
+
+| Time | Event |
+| --- | --- |
+| start | Repo clean at `3759a54`, artifact digest and signature verified, resource group verified empty, dispatch card 254 opened |
+| build | Harness written: driver plus seven phases on the existing phase runner. Five `\$` seam defects found and fixed before anything ran. Python payload rendered and byte-checked. Committed `0d72b40` |
+| provision | Card 1 issued. Operator created `cfv-165` with their own password. RDP scoped to a single `/32` |
+| stage | Two ARM timeouts. Driver given retries and digest-based idempotency so a timeout after a 440 MB upload does not discard it. Committed `9bf77ee` |
+| install | **1.3.3 install FAILED** at Guard 3's read-fetch step. Traced to a one second race from on-box timestamps. Decision taken to proceed with the caveat recorded |
+| probes, pass 1 | All seven ran. Three voided correctly. Two returned confident FAILs that were probe defects. Transcripts found truncated at 4097 bytes |
+| rework | Five probes corrected, evidence collection rebuilt on blob storage with byte verification. Committed `1ffaffc` |
+| probes, pass 2 | Q1, Q3, Q4, Q6 completed. **Q5 deadlocked the box**: the snapshot copy re-entered its own permission mark, wedging every open on the granted workspace and killing the on-VM runner |
+| recovery | Operator ran `wsl --shutdown` and restarted the runner. Deadlock fixed with `os.dup` |
+| probes, pass 3 | Q4 and Q7 re-run. Q4 voided on a control corrupted by interleaved stderr; Q7 voided because the gateway never binds its port |
+| final | Q4 fixed and re-run: **PASS, 5 of 5 controls**. Q7 confirmed unanswerable on this box |
+| teardown | VM deleted. Teardown ordering defect found and fixed. Resource group verified back to its exact starting state by unfiltered listing |
+| after | Question 6 root cause found in the job's stderr capture: a single `\$2`. Fixed, not re-executed. Committed `42a252d` |
+
+---
+
+## 12. What the next session should do first
+
+In order, and the first item is the one that decides Guard 4.
+
+1. **Mount a FUSE passthrough over a real drvfs granted workspace** and repeat
+   questions 4 and 2 there. This is the only thing standing between the current
+   answer and a build decision. If it holds, section 6 is the build list. If it
+   does not, Guard 4 has no viable mechanism on this platform, which is a
+   strategic answer worth having early.
+2. **Re-run question 6.** The `\$2` is fixed; the uid 1000 checks are a cheap
+   re-run rather than an open investigation.
+3. **Card 197 needs a box where the gateway actually serves**, so it is blocked
+   behind the 1.3.3 install defect and belongs with the Guard 3 rework rather
+   than with Guard 4.
+4. **Adopt instructions A through J** from section 9.4 in the work package
+   itself, not as guidance to the executing session.
+5. **Do not re-litigate question 1.** fanotify permission mode on drvfs is
+   settled, measured, with all controls fired.
+
+---
+
+## 13. Task accounting
 
 | Asked for | State |
 | --- | --- |
