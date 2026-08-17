@@ -41,8 +41,14 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('plan', 'stage', 'install', 'probes', 'reboot', 'postreboot', 'collect', 'teardown', 'status')]
+    [ValidateSet('plan', 'stage', 'restage', 'install', 'probes', 'reboot', 'postreboot', 'collect', 'teardown', 'status')]
     [string]$Step = 'plan',
+    # Comma-separated phase ids to run, e.g. "02-q1,05-q3". Empty means all.
+    [string]$Only = '',
+    # Clear the .done barrier for the selected phases so they actually re-run.
+    # Without this the on-VM runner skips anything already completed, which is
+    # the right default after a driver crash and the wrong one after a probe fix.
+    [switch]$Rerun,
     [string]$VmName        = 'cfv-165',
     [string]$ResourceGroup = 'clawfactory-validation',
     [string]$Image         = 'clawfactory-win11-baseline-v2',
@@ -101,9 +107,22 @@ function Invoke-Rc {
         # every attempt and is still reported, with the last error preserved.
         $lastErr = ''
         foreach ($i in 1..$Attempts) {
-            $out = az vm run-command invoke -g $ResourceGroup -n $VmName `
-                     --command-id RunPowerShellScript --scripts "@$f" `
-                     --query "value[].message" -o tsv 2>&1
+            # EAP IS DROPPED TO Continue AROUND THE az CALL, and this is the whole
+            # reason the retry above exists at all.
+            #
+            # az writes progress and errors to stderr. Redirecting a NATIVE
+            # command's stderr with 2>&1 wraps each line in an ErrorRecord, and
+            # under $ErrorActionPreference = 'Stop' that ErrorRecord TERMINATES.
+            # So the first timeout threw straight past this loop: the retry was
+            # present, correct, and unreachable. Four ARM timeouts in one session
+            # and the one that killed a run was the harness, not the network.
+            $prevEap = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                $out = az vm run-command invoke -g $ResourceGroup -n $VmName `
+                         --command-id RunPowerShellScript --scripts "@$f" `
+                         --query "value[].message" -o tsv 2>&1
+            } finally { $ErrorActionPreference = $prevEap }
             if ($LASTEXITCODE -eq 0) { return (($out | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] }) -join "`n") }
             $lastErr = ($out | Out-String).Trim()
             if ($i -lt $Attempts) {
@@ -389,6 +408,42 @@ if(-not [G4W.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
     )
 }
 
+'restage' {
+    # Re-upload ONLY the probe scripts. The artifact is 440 MB and unchanged, so
+    # re-running 'stage' would either skip everything (its digest check is
+    # satisfied) or waste the upload. A probe fix needs neither.
+    Say "Re-staging the probe scripts only..."
+    $key = az storage account keys list -g $ResourceGroup -n $StorageAcct --query "[0].value" -o tsv
+    if ($LASTEXITCODE -ne 0 -or -not $key) { throw "could not read a storage key for $StorageAcct." }
+    $exp = (Get-Date).ToUniversalTime().AddHours(4).ToString('yyyy-MM-ddTHH:mmZ')
+    $dl = ''
+    foreach ($f in @(Get-ChildItem (Join-Path $DiagDir 'g4-*.ps1') | Where-Object { $_.Name -ne 'g4-probe.ps1' })) {
+        az storage blob upload --account-name $StorageAcct --account-key $key --container-name $Container `
+            --name $f.Name --file $f.FullName --overwrite --output none
+        if ($LASTEXITCODE -ne 0) { throw "upload of $($f.Name) failed (az exit $LASTEXITCODE)." }
+        $remote = az storage blob show --account-name $StorageAcct --account-key $key --container-name $Container `
+                    --name $f.Name --query "properties.contentLength" -o tsv
+        if ("$remote" -ne "$($f.Length)") { throw "upload of $($f.Name) landed $remote bytes, expected $($f.Length)." }
+        $sas = az storage blob generate-sas --account-name $StorageAcct --account-key $key `
+                 --container-name $Container --name $f.Name --permissions r --expiry $exp -o tsv
+        $dl += "Invoke-WebRequest -Uri 'https://$StorageAcct.blob.core.windows.net/$Container/$($f.Name)`?$sas' -OutFile C:\cfv\$($f.Name) -UseBasicParsing; "
+        Say "  uploaded $($f.Name) ($($f.Length) bytes, size confirmed at the service)" DarkGray
+    }
+    # Byte counts are re-verified ON THE VM, because "the download ran" and "the
+    # file on the box is the file I just fixed" are different claims and only the
+    # second one matters.
+    $verify = "`$ErrorActionPreference='Stop'; $dl " +
+              "(Get-ChildItem C:\cfv\g4-*.ps1 | ForEach-Object { `"`$(`$_.Name)=`$(`$_.Length)`" }) -join ' '"
+    $r = Invoke-Rc $verify 'restage'
+    Say "on-VM sizes: $r" Cyan
+    foreach ($f in @(Get-ChildItem (Join-Path $DiagDir 'g4-*.ps1') | Where-Object { $_.Name -ne 'g4-probe.ps1' })) {
+        if ($r -notmatch [regex]::Escape("$($f.Name)=$($f.Length)")) {
+            throw "$($f.Name) on the VM does not match the local size $($f.Length). Refusing to re-run probes against a stale script."
+        }
+    }
+    Say "All probe scripts on the VM match the local byte counts." Green
+}
+
 'install' {
     Say "Checking the runner heartbeat before queueing anything..."
     $hb = Invoke-Rc "if (Test-Path C:\cfv\jobs\_runner.heartbeat) { 'HB=' + (Get-Content C:\cfv\jobs\_runner.heartbeat -Raw) } else { 'HB=NONE' }" 'heartbeat'
@@ -437,17 +492,42 @@ if(-not [G4W.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
         @{ n = '07-q7'; f = 'g4-q7-baseurl.ps1';  a = ''; label = 'Q7 card #197 model.baseUrl' },
         @{ n = '08-q2'; f = 'g4-q2-scope.ps1';    a = ''; label = 'Q2 mark scope and restart survival (pre-reboot)' }
     )
+    if ($Only) {
+        $want = @($Only -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        $phases = @($phases | Where-Object { $want -contains $_.n })
+        Say "Running only: $($phases.n -join ', ')" Yellow
+        if (-not $phases.Count) { throw "-Only '$Only' matched no phase. Valid ids: 02-q1 03-q6 04-q4 05-q3 06-q5 07-q7 08-q2" }
+    }
     foreach ($ph in $phases) {
         Say "=== $($ph.label) ===" Cyan
-        $job = "& powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\cfv\$($ph.f) $($ph.a)"
+        if ($Rerun) {
+            Invoke-Rc "Remove-Item 'C:\cfv\jobs\$($ph.n).done','C:\cfv\jobs\$($ph.n).out' -Force -ErrorAction SilentlyContinue; 'cleared'" "clear $($ph.n)" | Out-Null
+            Say "  cleared the previous .done barrier so this phase actually re-runs" DarkGray
+        }
+        # `exit $LASTEXITCODE` IS LOAD-BEARING. Without it the job script runs a
+        # nested powershell and then exits 0 on its own account, so the runner
+        # records rc=0 for a phase that exited 4 (VOID) or 1 (FAIL). Every one of
+        # the first seven phases reported "DONE=rc=0" while three had FAILED and
+        # two had VOIDED. The transcripts were right and the driver's summary was
+        # a fiction, which is the exact failure mode the phase runner exists to
+        # prevent, reappearing one layer up where the runner cannot see it.
+        $job = "& powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\cfv\$($ph.f) $($ph.a)`r`nexit `$LASTEXITCODE"
         $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($job))
         Invoke-Rc "[IO.File]::WriteAllBytes('C:\cfv\jobs\$($ph.n).job.ps1', [Convert]::FromBase64String('$b64')); 'queued'" "queue $($ph.n)" | Out-Null
+        # 60s, not 30s. Every poll is an ARM round trip and the control plane has
+        # timed out four times in this session, each costing a 300s connect
+        # timeout. Halving the poll rate halves the exposure and costs nothing:
+        # these phases run in minutes, not seconds.
+        #
+        # Re-running this step is safe. The runner skips any job that already has
+        # a .done beside it, so a phase completed before a driver crash is not
+        # re-executed, and its result is picked up on the next poll.
         $done = $false
-        foreach ($i in 1..80) {
-            Start-Sleep -Seconds 30
+        foreach ($i in 1..40) {
+            Start-Sleep -Seconds 60
             $p = Invoke-Rc "if (Test-Path C:\cfv\jobs\$($ph.n).done) { 'DONE=' + (Get-Content C:\cfv\jobs\$($ph.n).done -Raw) } else { 'PENDING' }" 'poll'
             if ($p -match 'DONE=') { $done = $true; Say "  $($ph.n) finished: $p" Green; break }
-            if ($i % 6 -eq 0) { Say "  ...$($ph.n) running ($([int]($i*0.5))min)" DarkGray }
+            if ($i % 3 -eq 0) { Say "  ...$($ph.n) running ($i min)" DarkGray }
         }
         if (-not $done) { Say "  $($ph.n) did not finish in 40 min; continuing and recording the gap." Yellow }
         $out = Invoke-Rc "if (Test-Path C:\cfv\jobs\$($ph.n).out) { Get-Content C:\cfv\jobs\$($ph.n).out -Raw } else { 'NO OUTPUT FILE' }" "out $($ph.n)"
@@ -517,18 +597,49 @@ if(-not [G4W.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
 }
 
 'collect' {
-    Say "Collecting every result file and transcript..."
+    # RETRIEVAL GOES THROUGH BLOB STORAGE, NOT run-command.
+    #
+    # The first collection read files with Get-Content -Raw over run-command and
+    # every transcript came back exactly 4097 characters, because az truncates
+    # the message payload. Five files, identical size, and the verdict lines
+    # happened to survive: an evidence channel that silently keeps the tail is
+    # worse than one that fails, because a truncated transcript reads as a
+    # complete one and nobody checks a byte count they were not warned about.
+    Say "Collecting every result file and transcript through blob storage..."
+    $key = az storage account keys list -g $ResourceGroup -n $StorageAcct --query "[0].value" -o tsv
+    if ($LASTEXITCODE -ne 0 -or -not $key) { throw "could not read a storage key for $StorageAcct." }
+    $exp = (Get-Date).ToUniversalTime().AddHours(4).ToString('yyyy-MM-ddTHH:mmZ')
+    az storage container create --account-name $StorageAcct --account-key $key --name $Container --output none 2>$null
+
     $names = @('g4-q1-results.json', 'g4-q2-results-PRE.json', 'g4-q2-results-POSTREBOOT.json',
                'g4-q3-results.json', 'g4-q4-results.json', 'g4-q5-results.json',
                'g4-q6-results.json', 'g4-q7-results.json',
                'g4-q1-out-probe.txt', 'g4-q2-out-probe.txt', 'g4-q3-out-probe.txt',
                'g4-q4-out-probe.txt', 'g4-q5-out-probe.txt', 'g4-q6-out-probe.txt',
-               'g4-q7-out-probe.txt')
+               'g4-q7-out-probe.txt',
+               'jobs\02-q1.out', 'jobs\03-q6.out', 'jobs\04-q4.out', 'jobs\05-q3.out',
+               'jobs\06-q5.out', 'jobs\07-q7.out', 'jobs\08-q2.out', 'jobs\09-q2post.out')
     foreach ($n in $names) {
-        $c = Invoke-Rc "if (Test-Path 'C:\cfv\$n') { Get-Content 'C:\cfv\$n' -Raw } else { 'ABSENT_ON_VM' }" "get $n"
-        $c | Out-File (Join-Path $dir $n) -Encoding utf8
-        $state = if ($c -match 'ABSENT_ON_VM') { 'ABSENT' } else { "$($c.Length) chars" }
-        Say "  $n : $state" $(if ($c -match 'ABSENT_ON_VM') { 'Yellow' } else { 'DarkGray' })
+        $blob  = "cfv165-" + ($n -replace '\\', '-')
+        $local = Join-Path $dir ($n -replace '\\', '-')
+        $sas = az storage blob generate-sas --account-name $StorageAcct --account-key $key `
+                 --container-name $Container --name $blob --permissions cw --expiry $exp -o tsv
+        $url = "https://$StorageAcct.blob.core.windows.net/$Container/$blob`?$sas"
+        $put = Invoke-Rc ("if (-not (Test-Path 'C:\cfv\$n')) { 'MISSING_ON_VM' } else { " +
+                          "Invoke-WebRequest -Uri '$url' -Method Put -Headers @{'x-ms-blob-type'='BlockBlob'} " +
+                          "-InFile 'C:\cfv\$n' -UseBasicParsing | Out-Null; " +
+                          "`"UPLOADED=`$((Get-Item 'C:\cfv\$n').Length)`" }") "put $n"
+        if ($put -match 'MISSING_ON_VM') { Say "  $n : ABSENT on VM" Yellow; continue }
+        if ($put -notmatch 'UPLOADED=(\d+)') { Say "  $n : upload did not confirm" Yellow; continue }
+        $srcLen = [int]$Matches[1]
+        az storage blob download --account-name $StorageAcct --account-key $key `
+            --container-name $Container --name $blob --file $local --overwrite --output none
+        if ($LASTEXITCODE -ne 0) { Say "  $n : download failed" Yellow; continue }
+        # Byte-for-byte, because a silently truncated transcript is what this
+        # whole rewrite exists to stop happening again.
+        $gotLen = (Get-Item $local).Length
+        if ($gotLen -ne $srcLen) { Say "  $n : TRUNCATED, $gotLen of $srcLen bytes" Red }
+        else { Say "  $n : $gotLen bytes, byte count matches the VM" DarkGray }
     }
     Say "Collected into $dir" Green
 }

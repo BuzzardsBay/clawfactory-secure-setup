@@ -87,8 +87,13 @@ echo '--- SUBJECT: the granted path itself, which is SUPPOSED to be reachable --
 ls '$gp' 2>&1 | head -5
 echo
 echo '--- second path A: /mnt/c, which automount=false should have removed ---'
-ls /mnt/c 2>&1 | head -2
-echo "MNT_C_EXISTS=`$([ -d /mnt/c ] && echo yes || echo no)"
+# An EMPTY DIRECTORY at /mnt/c is not a second path, and `[ -d ]` cannot tell
+# the two apart. What matters is whether anything is MOUNTED there and whether
+# the Windows filesystem is actually reachable through it.
+echo "MNT_C_DIR_EXISTS=`$([ -d /mnt/c ] && echo yes || echo no)"
+echo "MNT_C_IS_A_MOUNT=`$(awk '\$2 == "/mnt/c" {print "yes"}' /proc/mounts | head -1 || true)"
+echo "MNT_C_ENTRIES=`$(ls -A /mnt/c 2>/dev/null | wc -l | tr -d ' ')"
+if ls /mnt/c/Windows >/dev/null 2>&1; then echo "MNT_C_REACHES_WINDOWS=yes"; else echo "MNT_C_REACHES_WINDOWS=no"; fi
 echo
 echo '--- second path B: anything else under /mnt ---'
 ls -la /mnt 2>&1 | head -10
@@ -101,15 +106,22 @@ find '$gp' -type l 2>/dev/null | head -10
 echo "SYMLINKS_IN_GRANT=`$(find '$gp' -type l 2>/dev/null | wc -l | tr -d ' ')"
 echo
 echo '--- second path E: can uid 1000 mount anything at all ---'
+# NOT `cmd | head` followed by `echo $?`. In a pipeline $? is the LAST command's
+# status, so that reports head's exit code, which is 0 whatever mount did. The
+# first run of this probe did exactly that and produced a confident, entirely
+# invented finding that uid 1000 could bind-mount a granted workspace.
 mkdir -p /var/tmp/g4-q6-mnt 2>/dev/null
-mount --bind '$gp' /var/tmp/g4-q6-mnt 2>&1 | head -2
-echo "BIND_AS_UID1000_RC=`$?"
+if mount --bind '$gp' /var/tmp/g4-q6-mnt 2>/tmp/g4-bind.err; then echo "BIND_AS_UID1000=SUCCEEDED"; else echo "BIND_AS_UID1000=refused"; fi
+echo "BIND_ERR=`$(head -1 /tmp/g4-bind.err 2>/dev/null)"
 echo
 echo '--- second path F: unprivileged user namespaces (would allow a private bind) ---'
 echo "USERNS_CLONE=`$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || echo '(sysctl absent)')"
 echo "USERNS_MAX=`$(cat /proc/sys/user/max_user_namespaces 2>/dev/null || echo '(sysctl absent)')"
-unshare -U -r -m true 2>&1 | head -2
-echo "UNSHARE_RC=`$?"
+if unshare -U -r -m true 2>/tmp/g4-uns.err; then echo "UNSHARE_USERNS=SUCCEEDED"; else echo "UNSHARE_USERNS=refused"; fi
+echo "UNSHARE_ERR=`$(head -1 /tmp/g4-uns.err 2>/dev/null)"
+echo '--- and the one that actually matters: a private bind INSIDE a new namespace ---'
+if unshare -U -r -m --propagation private /bin/bash -c "mount --bind '$gp' /var/tmp/g4-q6-mnt && ls /var/tmp/g4-q6-mnt" 2>/tmp/g4-uns2.err; then echo "PRIVATE_BIND=SUCCEEDED"; else echo "PRIVATE_BIND=refused"; fi
+echo "PRIVATE_BIND_ERR=`$(head -1 /tmp/g4-uns2.err 2>/dev/null)"
 echo
 echo '--- second path G: Docker, which SECFIX_CLOSE_DOORS decision A removed ---'
 echo "DOCKER_BIN=`$(command -v docker || echo ABSENT)"
@@ -117,12 +129,11 @@ echo "DOCKER_SOCK=`$([ -S /var/run/docker.sock ] && echo present || echo absent)
 ls /var/lib/docker 2>&1 | head -2
 echo
 echo '--- CONTROL: a path that must be refused, so this probe is not simply saying yes ---'
-cat /etc/shadow 2>&1 | head -1
-echo "SHADOW_RC=`$?"
+if cat /etc/shadow >/dev/null 2>&1; then echo "SHADOW_READ=SUCCEEDED"; else echo "SHADOW_READ=refused"; fi
 "@
 W $u.Out
 
-$shadowDenied = ($u.Out -match 'Permission denied') -or ($u.Out -match 'SHADOW_RC=[1-9]')
+$shadowDenied = $u.Out -match 'SHADOW_READ=refused'
 Register-Control -Id 'Q6.2.CTL' -Name 'the uid 1000 probe can be refused, so a success is a real success' `
     -Fired $shadowDenied -Evidence '/etc/shadow was denied to uid 1000 in the same run' | Out-Null
 

@@ -96,7 +96,17 @@ $mnt = Invoke-WslFile -Tag 'g4-q4-mount' -User 'root' -Body @'
 rm -rf /var/tmp/g4-fuse
 mkdir -p /var/tmp/g4-fuse/backing /var/tmp/g4-fuse/view
 echo "BACKING-CANARY-Q4" > /var/tmp/g4-fuse/backing/canary.txt
-chmod 0755 /var/tmp/g4-fuse /var/tmp/g4-fuse/backing /var/tmp/g4-fuse/view
+# 0700 ON THE BACKING DIRECTORY, and this is a design decision being tested
+# rather than tidiness. The first run made it 0755, uid 1000 could read the
+# backing tree by its own path, and that was reported as "the passthrough is not
+# a control". That conclusion was about the MODE THE PROBE CHOSE, not about
+# FUSE. The real question is whether a passthrough plus a locked backing
+# directory denies the second path, so the backing directory is locked and the
+# same bypass test is run against it.
+chmod 0755 /var/tmp/g4-fuse /var/tmp/g4-fuse/view
+chmod 0700 /var/tmp/g4-fuse/backing
+chmod 0600 /var/tmp/g4-fuse/backing/canary.txt
+stat -c 'BACKING_MODE=%a %U:%G %n' /var/tmp/g4-fuse/backing
 
 # allow_other is what makes the view usable by the agent. It needs
 # user_allow_other in /etc/fuse.conf, which is a shipped-config dependency and
@@ -104,10 +114,16 @@ chmod 0755 /var/tmp/g4-fuse /var/tmp/g4-fuse/backing /var/tmp/g4-fuse/view
 grep -q '^user_allow_other' /etc/fuse.conf 2>/dev/null || echo 'user_allow_other' >> /etc/fuse.conf
 echo "FUSE_CONF_NOW=$(grep -c user_allow_other /etc/fuse.conf 2>/dev/null | tr -d ' ')"
 
-if bindfs -o allow_other,default_permissions /var/tmp/g4-fuse/backing /var/tmp/g4-fuse/view 2>&1; then
+# The view REMAPS ownership, the backing stays locked to root. That pairing is
+# the whole shape of a FUSE-based Guard 4: the agent works in the view, and the
+# path underneath it is not a route because it is not readable. default_permissions
+# is dropped deliberately, since it would enforce the backing mode 0700 through
+# the view and lock the agent out of the thing it is meant to use.
+if bindfs --force-user=clawuser --force-group=clawuser --perms=a+rwD -o allow_other /var/tmp/g4-fuse/backing /var/tmp/g4-fuse/view 2>/tmp/g4-bindfs.err; then
   echo "MOUNT_RC=0"
 else
-  echo "MOUNT_RC=$?"
+  echo "MOUNT_RC=nonzero"
+  head -2 /tmp/g4-bindfs.err
 fi
 sleep 1
 echo "MOUNT_LINE=$(grep -F '/var/tmp/g4-fuse/view' /proc/mounts || echo NONE)"
@@ -138,33 +154,42 @@ Record 'Q4.7' 'allow_other had to be enabled in /etc/fuse.conf for the agent to 
 Section '4. THE ONE THAT DECIDES IT: can uid 1000 reach the BACKING directory'
 $b = Invoke-WslFile -Tag 'g4-q4-backing' -User 'clawuser' -Body @'
 echo "whoami=$(id -un) uid=$(id -u)"
+# NO `cmd | head` FOLLOWED BY $?. In a pipeline $? is head's status, which is 0
+# regardless of what cat did, so the first run reported BACKING_READ_RC=0 for a
+# read whose success was never actually established. Every check below is an if.
 echo "--- SUBJECT: the view, which the agent is meant to use ---"
-cat /var/tmp/g4-fuse/view/canary.txt 2>&1 | head -1
-echo "VIEW_READ_RC=$?"
+if cat /var/tmp/g4-fuse/view/canary.txt >/dev/null 2>&1; then echo "VIEW_READ=SUCCEEDED"; else echo "VIEW_READ=refused"; fi
+cat /var/tmp/g4-fuse/view/canary.txt 2>/dev/null | head -1
 echo
 echo "--- THE BYPASS TEST: the backing directory, by its own path ---"
-cat /var/tmp/g4-fuse/backing/canary.txt 2>&1 | head -1
-echo "BACKING_READ_RC=$?"
-echo "BYPASS_WRITE=$(echo bypass > /var/tmp/g4-fuse/backing/bypass.txt 2>&1 && echo SUCCEEDED || echo refused)"
+if cat /var/tmp/g4-fuse/backing/canary.txt >/dev/null 2>&1; then echo "BACKING_READ=SUCCEEDED"; else echo "BACKING_READ=refused"; fi
+if ls /var/tmp/g4-fuse/backing >/dev/null 2>&1; then echo "BACKING_LIST=SUCCEEDED"; else echo "BACKING_LIST=refused"; fi
+echo "BYPASS_WRITE=$(echo bypass > /var/tmp/g4-fuse/backing/bypass.txt 2>/dev/null && echo SUCCEEDED || echo refused)"
 echo
 echo "--- every other route to the same inode ---"
-echo "HARDLINK=$(ln /var/tmp/g4-fuse/backing/canary.txt /var/tmp/g4-hardlink 2>&1 && echo SUCCEEDED || echo refused)"
+echo "HARDLINK=$(ln /var/tmp/g4-fuse/backing/canary.txt /var/tmp/g4-hardlink 2>/dev/null && echo SUCCEEDED || echo refused)"
 echo "PROC_ROUTE=$(ls /proc/*/root/var/tmp/g4-fuse/backing 2>/dev/null | head -1 || echo none)"
 echo
 echo "--- CONTROL: a path uid 1000 must be refused ---"
-cat /etc/shadow 2>&1 | head -1
-echo "SHADOW_RC=$?"
+if cat /etc/shadow >/dev/null 2>&1; then echo "SHADOW_READ=SUCCEEDED"; else echo "SHADOW_READ=refused"; fi
 '@
 W $b.Out
-$shadowDenied = ($b.Out -match 'Permission denied') -or ($b.Out -match 'SHADOW_RC=[1-9]')
+$shadowDenied = $b.Out -match 'SHADOW_READ=refused'
 Register-Control -Id 'Q4.8.CTL' -Name 'the uid 1000 probe can be refused' `
     -Fired $shadowDenied -Evidence '/etc/shadow denied to uid 1000 in the same run' | Out-Null
 
-$backingReachable = $b.Out -match 'BACKING-CANARY-Q4'
-$bypassWrite = $b.Out -match 'BYPASS_WRITE=SUCCEEDED'
+$viewReadable     = $b.Out -match 'VIEW_READ=SUCCEEDED'
+$backingReachable = $b.Out -match 'BACKING_READ=SUCCEEDED'
+$bypassWrite      = $b.Out -match 'BYPASS_WRITE=SUCCEEDED'
+# The view must WORK, or a denied backing path proves nothing: a passthrough
+# that denies the agent everything is trivially secure and useless, and it would
+# score a PASS on the row below.
+Register-Control -Id 'Q4.8.CTL2' -Name 'the agent can actually use the view, so a denied backing path is a real result' `
+    -Fired $viewReadable `
+    -Evidence "uid 1000 read the canary through the view = $viewReadable. Without this, Q4.8 passes for a passthrough nobody can use." | Out-Null
 Record 'Q4.8' 'uid 1000 CANNOT reach the backing directory by its own path' `
     $(if (-not $backingReachable) { 'PASS' } else { 'FAIL' }) `
-    "backing content readable by uid 1000 = $backingReachable. A reachable backing path makes the passthrough a suggestion rather than a control."
+    "backing content readable by uid 1000 = $backingReachable, with the backing directory at 0700 root. The first run made it 0755 and reported the reachability as a property of FUSE; it was a property of the mode this probe chose."
 Record 'Q4.9' 'uid 1000 CANNOT write into the backing directory, bypassing the view' `
     $(if (-not $bypassWrite) { 'PASS' } else { 'FAIL' }) `
     "direct write to the backing path = $(if($bypassWrite){'SUCCEEDED, which is the bypass'}else{'refused'})"

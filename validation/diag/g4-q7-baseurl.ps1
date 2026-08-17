@@ -208,9 +208,18 @@ console.log("ANY_PREEXISTING="+written.some(w=>w.preexisting));
 chown clawuser:clawuser '$CONF'
 echo "CONFIG_CHANGED=`$(sha256sum '$CONF' | cut -d' ' -f1)"
 echo '--- restarting the gateway so the edit is actually loaded ---'
-systemctl restart openclaw-gateway.service 2>&1
+# THE GATEWAY IS A USER UNIT, NOT A SYSTEM UNIT. It lives at
+# /home/clawuser/.config/systemd/user/openclaw-gateway.service. Restarting it as
+# root against the SYSTEM manager, which is what the first run did, addresses a
+# unit that does not exist there: systemctl reports inactive, the gateway is
+# never actually restarted, and the resulting silence at the listener reads as
+# "the override was ignored". That is the wrong answer to card #197 arrived at
+# confidently, which is the specific outcome this phase exists to avoid.
+XDG=/run/user/1000
+su -s /bin/bash -c "XDG_RUNTIME_DIR=`$XDG systemctl --user restart openclaw-gateway.service" clawuser 2>&1
 sleep 12
-echo "GATEWAY_STATE=`$(systemctl is-active openclaw-gateway.service 2>&1)"
+echo "GATEWAY_STATE=`$(su -s /bin/bash -c "XDG_RUNTIME_DIR=`$XDG systemctl --user is-active openclaw-gateway.service" clawuser 2>&1)"
+echo "GATEWAY_LISTENING=`$(ss -ltnp 2>/dev/null | grep -c ':8788' || echo 0)"
 echo '--- L17: warm, then the load-bearing turn ---'
 su -s /bin/bash -c "timeout 120 openclaw agent --agent main --message 'Reply with the single word WARM.' 2>&1 | tail -2" clawuser 2>&1 | tail -2
 su -s /bin/bash -c "timeout 180 openclaw agent --agent main --message 'Reply with the single word OVERRIDE.' 2>&1 | tail -4" clawuser 2>&1 | tail -4
@@ -227,9 +236,15 @@ $anyPre = $apply.Out -match 'ANY_PREEXISTING=true'
 $hits = if ($apply.Out -match 'LISTENER_HITS_NONCONTROL=(\d+)') { [int]$Matches[1] } else { -1 }
 $gwUp = $apply.Out -match 'GATEWAY_STATE=active'
 
+# The question is whether the MODEL DEFINITION pre-existed, not whether baseUrl
+# did. baseUrl is the thing being added, so it is absent by definition on a
+# shipped box and testing for it would answer nothing. The definition is
+# pre-existing unless the probe fell through to its invented-model fallback,
+# which is the one case that would reproduce the first #197 answer's weakness.
+$inventedDefinition = $wroteWhere -match 'clawfactory-probe-model'
 Record 'Q7.2' 'The override was written to a model definition that ALREADY EXISTED in the shipped config' `
-    $(if ($anyPre) { 'PASS' } else { 'INFO' }) `
-    "locations written: $wroteWhere. A FALSE here means the config names its model as a string and this probe had to CREATE the definition, which is the same weakness that made the first #197 answer overconfident. The verdict below is reported at that strength."
+    $(if (-not $inventedDefinition) { 'PASS' } else { 'FAIL' }) `
+    "locations written: $wroteWhere (baseUrl itself pre-existing: $anyPre, which is expected to be false on a shipped box). A definition INVENTED by this probe would repeat the exact weakness that made the first #197 answer overconfident, so the verdict below is reported at whichever strength this row establishes."
 
 $null = Require-Precondition -Id 'Q7.PRE.GW' -Name 'the gateway came back up after the edit' `
     -Met $gwUp -Reason 'a gateway that did not restart cannot contact anything, and its silence would be misread as the override being ignored'
@@ -243,14 +258,29 @@ Section '4. Control 2: restore, and prove the box works without the override'
 $restore = Invoke-WslFile -Tag 'g4-q7-restore' -User 'root' -Body @"
 cp /var/tmp/g4/openclaw.json.pristine '$CONF'
 chown clawuser:clawuser '$CONF'
-echo "RESTORED_SHA=`$(sha256sum '$CONF' | cut -d' ' -f1)"
+# These labels deliberately do NOT contain the word the control turn asks the
+# agent to say. The first run checked for 'RESTORED' and the transcript already
+# contained 'RESTORED_SHA=', so control 2 fired on this probe's own echo. A
+# control that matches its own output cannot fail, which is the one property a
+# control must never have.
+echo "AFTER_SHA=`$(sha256sum '$CONF' | cut -d' ' -f1)"
 echo "PRISTINE_SHA=`$(sha256sum /var/tmp/g4/openclaw.json.pristine | cut -d' ' -f1)"
-systemctl restart openclaw-gateway.service 2>&1
+# THE GATEWAY IS A USER UNIT, NOT A SYSTEM UNIT. It lives at
+# /home/clawuser/.config/systemd/user/openclaw-gateway.service. Restarting it as
+# root against the SYSTEM manager, which is what the first run did, addresses a
+# unit that does not exist there: systemctl reports inactive, the gateway is
+# never actually restarted, and the resulting silence at the listener reads as
+# "the override was ignored". That is the wrong answer to card #197 arrived at
+# confidently, which is the specific outcome this phase exists to avoid.
+XDG=/run/user/1000
+su -s /bin/bash -c "XDG_RUNTIME_DIR=`$XDG systemctl --user restart openclaw-gateway.service" clawuser 2>&1
 sleep 12
-echo "GATEWAY_STATE=`$(systemctl is-active openclaw-gateway.service 2>&1)"
+echo "GATEWAY_STATE=`$(su -s /bin/bash -c "XDG_RUNTIME_DIR=`$XDG systemctl --user is-active openclaw-gateway.service" clawuser 2>&1)"
+echo "GATEWAY_LISTENING=`$(ss -ltnp 2>/dev/null | grep -c ':8788' || echo 0)"
 echo '--- CONTROL 2: a real turn, end to end, against the real provider ---'
 su -s /bin/bash -c "timeout 120 openclaw agent --agent main --message 'Reply with the single word WARM.' 2>&1 | tail -1" clawuser 2>&1 | tail -1
-su -s /bin/bash -c "timeout 180 openclaw agent --agent main --message 'Reply with exactly the word RESTORED and nothing else.' 2>&1 | tail -4" clawuser 2>&1 | tail -4
+echo '--- the agent reply begins after this line ---'
+su -s /bin/bash -c "timeout 180 openclaw agent --agent main --message 'Reply with exactly the token CFQ7LIVEOK and nothing else.' 2>&1 | tail -4" clawuser 2>&1 | tail -4
 sleep 2
 echo "LISTENER_HITS_AFTER_RESTORE=`$(grep -v 'probe-control' /var/tmp/g4/listener.log 2>/dev/null | grep -c . | tr -d ' ')"
 pkill -f g4-listener.py 2>/dev/null
@@ -259,11 +289,13 @@ echo "LISTENER_STOPPED=`$(pgrep -f g4-listener.py | head -1 || echo yes)"
 W $restore.Out
 
 $shaMatch = $false
-if (($restore.Out -match 'RESTORED_SHA=([0-9a-f]{64})')) {
+if (($restore.Out -match 'AFTER_SHA=([0-9a-f]{64})')) {
     $rs = $Matches[1]
     if ($restore.Out -match 'PRISTINE_SHA=([0-9a-f]{64})') { $shaMatch = ($rs -eq $Matches[1]) }
 }
-$turnOk = $restore.Out -match 'RESTORED'
+# CFQ7LIVEOK appears nowhere in this probe except as the token the agent is
+# asked to emit, so a match is the agent speaking and nothing else.
+$turnOk = $restore.Out -match 'CFQ7LIVEOK'
 Register-Control -Id 'Q7.4.CTL' -Name 'CONTROL 2: with the override removed, a real turn completes end to end' `
     -Fired $turnOk `
     -Evidence 'without this a negative above is ambiguous between "the override was ignored" and "this probe broke the gateway"' | Out-Null

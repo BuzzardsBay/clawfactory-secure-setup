@@ -184,6 +184,16 @@ mkdir -p '$gp/marked' '$gp/unmarked'
 : > '$gp/marked/allow.txt'
 : > '$gp/marked/deny.txt'
 : > '$gp/unmarked/free.txt'
+# THE STEP THIS ARM WAS MISSING. The ext4 arm chmods its subjects and this one
+# did not, and the drvfs mount carries `metadata`, so real Linux ownership is
+# stored rather than synthesised from the mount options. Files created by root
+# were therefore root:root 0644 and every open by uid 1000 failed EACCES before
+# it could generate an event. The control caught it and voided the phase, which
+# is correct, but the phase measured nothing.
+chown -R clawuser:clawuser '$gp/marked' '$gp/unmarked' 2>/dev/null
+chmod 0777 '$gp/marked' '$gp/unmarked'
+chmod 0666 '$gp/marked/allow.txt' '$gp/marked/deny.txt' '$gp/unmarked/free.txt'
+ls -l '$gp/marked' '$gp/unmarked'
 echo '--- CONTROL: clawuser can write here with no daemon running ---'
 su -s /bin/bash -c "if : > '$gp/marked/allow.txt'; then echo BASELINE_WRITE_OK; else echo BASELINE_WRITE_FAILED; fi" clawuser 2>&1
 "@
