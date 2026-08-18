@@ -17,10 +17,10 @@ agent can only reach network destinations that have been explicitly allowed.
 
 The firewall is nftables. It holds several named **address sets**:
 
-- `@allowed_ipv4` — the AI model provider (Anthropic). Must always work, or the
+- `@allowed_ipv4`: the AI model provider (Anthropic). Must always work, or the
   agent is bricked.
-- `@read_fetch_ipv4` — web pages the user has explicitly allowed. Empty by default.
-- `@toolchain_ipv4` — software sources (GitHub, npm). Governed by a user-facing
+- `@read_fetch_ipv4`: web pages the user has explicitly allowed. Empty by default.
+- `@toolchain_ipv4`: software sources (GitHub, npm). Governed by a user-facing
   on/off switch called the **toolchain toggle**.
 
 The chain ends in a terminal `drop`, so anything not in an allowed set is refused.
@@ -29,12 +29,12 @@ The chain ends in a terminal `drop`, so anything not in an allowed set is refuse
 
 Three terms used throughout:
 
-- **structural vs advisory** — a control the agent cannot influence, versus one it
+- **structural vs advisory**: a control the agent cannot influence, versus one it
   could. Marketing claims may only describe structural controls.
-- **control (in the testing sense)** — a check that must produce a *known* result
+- **control (in the testing sense)**: a check that must produce a *known* result
   in the same run, proving the instrument works. If a control fails, the
   measurement beside it means nothing.
-- **VOID** — a test verdict meaning "this was not measured", as distinct from
+- **VOID**: a test verdict meaning "this was not measured", as distinct from
   pass or fail.
 
 ---
@@ -71,7 +71,7 @@ firewall dropped for the agent's uid.
 | **SUBJECT** | **OFF**, 0 addresses loaded | **FAILED**, `{"error":{"message":"internal error","type":"api_error"}}` | 165s | 91 to `160.79.104.10` |
 | **SECOND**, gateway not restarted | OFF | **FAILED** | 162s | 84 to `160.79.104.10` |
 
-`160.79.104.10` resolves as **`api.anthropic.com`** — the AI model provider.
+`160.79.104.10` resolves as **`api.anthropic.com`**, the AI model provider.
 
 For contrast, the toolchain hosts resolve nowhere near it:
 `api.github.com` → `140.82.114.6`; `registry.npmjs.org` → `104.16.x.34`.
@@ -96,8 +96,7 @@ the gateway deliberately not restarted, failed the same way to the same address.
 ### 2.3 Why the control failing is the result, not a spoiled run
 
 The control turn (toggle ON) was supposed to succeed and thereby prove the
-subject's failure was caused by the toggle. It failed instead — **the same way,
-on the same address**.
+subject's failure was caused by the toggle. It failed instead, in **the same way and on the same address**.
 
 That does more than void the attribution. It inverts it: from "the toggle broke
 the turn" to "something else broke the turn and the toggle was never implicated".
@@ -116,7 +115,7 @@ Two candidates, neither tested:
 
 1. The refresh job resolved a *different* address than the one the gateway later
    dialled. Anthropic publishes several addresses, and an nftables address set
-   holds fixed addresses — it cannot follow a name that moves. This would make
+   holds fixed addresses, so it cannot follow a name that moves. This would make
    the failure **intermittent and environment-dependent**, which is the nasty
    case.
 2. The refresh silently failed to populate the set at all.
@@ -125,14 +124,14 @@ Both are answerable in one short VM run. Neither was run.
 
 **Severity:** this should be treated as a ship-blocker until explained. It is
 more serious than the toggle question it displaced. It is also **not known**
-whether it affects every install or was specific to that machine — that is
+whether it affects every install or was specific to that machine, and that is
 exactly what the untested candidates above decide.
 
 ---
 
 ## 3. What was completed and proven
 
-### 3.1 Task 0: verdict triage — DONE
+### 3.1 Task 0, the verdict triage: DONE
 
 53 distinct call sites carrying 61 out-of-vocabulary verdicts, all given real
 verdicts by reading what each check actually measured.
@@ -154,17 +153,17 @@ opposite verdicts.
 
 **Three sites turned out to be defects in the tests themselves:**
 
-- One test scored **PASS when the agent discovered the email command** — but the
+- One test scored **PASS when the agent discovered the email command**, but the
   product's own documentation says the agent is deliberately not told that
   command exists, and that non-discovery *is* the security property. The test was
   rewarding the outcome the product treats as notable. Polarity inverted.
 - One test counted the whole pending queue, so it could never distinguish "our
   request is stuck" from "something unrelated was queued".
 - One test searched a packed archive for the *absence* of something, with nothing
-  proving the archive was readable — so an unreadable archive would have scored
+  proving the archive was readable, so an unreadable archive would have scored
   as clean. A searchability control was added.
 
-### 3.2 Task 1: the chain-read defect — FIXED AND PROVEN
+### 3.2 Task 1, the chain-read defect: FIXED AND PROVEN
 
 **The measurement came first, and it contradicts the diagnosis that was handed
 over.** That diagnosis claimed that if these transient failures were real, the
@@ -184,7 +183,7 @@ So the read is reliable at rest and the "chronic intermittent failure" claim is
 not supported.
 
 **The fix:** one firewall read, retried on a bounded poll, from which every check
-is made — replacing four single-look checks including two separate reads twelve
+is made, replacing four single-look checks including two separate reads twelve
 lines apart for two rules that physically cannot differ. The failure message now
 names four things the old one named none of: whether the chain was *readable*
 (reported separately from whether the rule was *present*), the exact error text,
@@ -196,8 +195,8 @@ how many attempts over how long, and the full rule set text.
 | --- | --- |
 | Install completes clean | **PASS** |
 | Concurrent firewall load during the check | **PASS**, rc=0 in 1s under 40 full rule-set re-applies |
-| CONTROL: exceed the retry budget | **PASS** — correctly reports the rule *absent*, explicitly not a read failure |
-| CONTROL: make the read itself impossible | **PASS** — correctly reports a *read* failure with the real error text, and makes no claim about any rule |
+| CONTROL: exceed the retry budget | **PASS**, correctly reporting the rule *absent*, explicitly not a read failure |
+| CONTROL: make the read itself impossible | **PASS**, correctly reporting a *read* failure with the real error text, and makes no claim about any rule |
 
 Those last two are the whole point: the same code, given two different faults,
 now produces two different correct diagnoses. Before the change both produced one
@@ -207,7 +206,7 @@ message, and that message asserted the wrong one.
 
 **Before shipping:** the retry budgets were first written at 30 attempts each.
 The service they run under has a 90-second startup limit, so a genuinely broken
-machine would have spent 30+30+30 there and been killed by the timeout — turning
+machine would have spent 30+30+30 there and been killed by the timeout, turning
 a precise "this rule is missing, here is the error" into a useless "start
 operation timed out". Worse than the check it replaced. Bounded at 5 instead;
 worst case fell from 64s to 9s with no loss of detail. Nothing about this would
@@ -216,7 +215,7 @@ specification was wrong.
 
 **During testing:** one test surprised me by failing, and the specification was
 wrong again rather than the code. The tripwire refused to "ride out" a deleted
-firewall rule, failing in 1 second. That is *correct* — a deleted rule is exactly
+firewall rule, failing in 1 second. That is *correct*, because a deleted rule is exactly
 the tampering it exists to catch, and retrying would delay detection of real
 tampering. The principle is now written into the file so nobody "fixes" the
 apparent inconsistency later: **retry reads, never retry findings.** No behaviour
@@ -226,7 +225,7 @@ A related result worth keeping: 40 concurrent full rule-set re-applies produced
 **zero** false findings, because the firewall load is a single atomic
 transaction with no window where the rules are momentarily absent. So contention
 does not manufacture a missing rule, which leaves a failed *read* as the
-surviving explanation for the original install failure — precisely what the new
+surviving explanation for the original install failure, which is precisely what the new
 message can now distinguish and the old one could not.
 
 ---
