@@ -31,10 +31,63 @@
        reports is not independence, it is a second stale list, so the comparison
        is a first-class call rather than something a reader is left to spot.
     5. A search for absences must first prove its target is searchable at all.
+    6. A row whose verdict the runner cannot READ is recorded as VOID and named.
+       An empty, null or unrecognised verdict is a measurement that was not
+       taken, and it must never be counted as nothing.
 
   These are properties of the runner, not habits of the test author. That is the
   whole point: the previous session had the habits and still shipped four wrong
   results.
+
+  DISCIPLINE 6, ADDED 2026-08-17, AND THE RUN THAT FORCED IT
+  ---------------------------------------------------------
+  Card 254 question 6. A `$2` inside a double-quoted here-string was read by
+  PowerShell as a variable reference, which on the VM is a terminating error, so
+  the `$(if ($mntC) { 'PASS' } else { 'FAIL' })` verdict subexpression produced
+  NOTHING and five of that phase's ten Record calls arrived with an empty
+  verdict argument.
+
+  An empty string is not PASS, not FAIL and not VOID. The tally below counts the
+  four verdicts it knows by exact name, so those five rows were counted as
+  nothing at all, no branch of the precedence rule was reached, and the phase
+  printed
+
+      PHASE VERDICT: PASS
+
+  over a phase in which half the checks had said nothing. That is the exact
+  shape of the four defects this file was built to stop, arriving through the
+  one door left open: the tally trusted the verdict string.
+
+  So Record now READS the verdict rather than storing it. PASS, FAIL, VOID and
+  INFO are the entire vocabulary. Anything else -- empty, null, whitespace, or a
+  word the runner does not know -- becomes VOID, is named with its raw value,
+  and withholds the phase pass.
+
+  ROW-LEVEL OR INSTRUMENT-LEVEL, and the distinction is not cosmetic. A
+  malformed verdict on a row the runner can still ACCOUNT FOR is row-level: the
+  row voids, the rest of the phase stands. But when the runner cannot establish
+  how many rows were affected it goes instrument-level, because a runner that
+  cannot count what it lost cannot certify what survived. Two detectable cases:
+
+    * the row has no usable id, so the void cannot be attributed to a check and
+      two such rows are indistinguishable from one
+    * the call arrived SHORT, with no evidence argument bound, which means the
+      argument list shifted. The runner does not know which argument it is
+      holding, so it does not know what else in the phase was mis-bound
+
+  There is a third case it cannot detect at all, and it is worth stating rather
+  than pretending otherwise: a Record call that THREW never reaches this
+  function, so its row does not exist and nothing here can miss it. That is the
+  driver's job, via probe stderr, and it is why stderr is a first-class evidence
+  channel. See the close-out for 2026-08-17.
+
+  A NOTE ON VOCABULARY, because this fix has a blast radius. The phases in this
+  directory record REVIEW, UNTESTED, BLOCKED, MEASURED-BYPASS, MEASURED-HELD,
+  PARTIAL, NOTE, WARN and others. Every one of those was ALREADY counted as
+  nothing by the tally, and every one of them already produced the same silent
+  pass. They now void loudly instead. That is the fix working, not a regression,
+  but each of those call sites needs a real verdict chosen for it before the
+  next validation run.
 
   WHAT A "POSITIVE CONTROL" MEANS HERE
   ------------------------------------
@@ -68,6 +121,18 @@ $script:CF_PhaseName    = 'unnamed phase'
 $script:CF_Transcript   = 'C:\cfv\phase-out-probe.txt'
 $script:CF_Sentinel     = 'PHASE_PROBE_COMPLETE'
 
+# The ENTIRE verdict vocabulary. Complete-Phase tallies by exact match against
+# this list, so a verdict outside it is counted by no branch and silently
+# disappears. That is not a style rule, it is the card 254 defect: keep this list
+# and the tally in Complete-Phase reading from the same source, and never add a
+# verdict here without adding it to the tally.
+$script:CF_Verdicts     = @('PASS', 'FAIL', 'VOID', 'INFO')
+
+# Rows whose verdict the runner could not read. Each entry carries the raw value
+# and whether the damage was countable, because that decides row-level versus
+# instrument-level in Complete-Phase.
+$script:CF_Malformed    = New-Object System.Collections.ArrayList
+
 function Start-Phase {
     <# Called once, first, by every phase. #>
     param(
@@ -92,11 +157,70 @@ function Section($t) { W ''; W ("=" * 72); W $t; W ("=" * 72) }
 function Marker($n) { New-Item -ItemType File -Path "C:\cfv\$n.marker" -Force | Out-Null }
 
 function Record($id, $name, $verdict, $evidence) {
+    <# Records one measurement, and READS the verdict rather than storing it
+       unexamined. See discipline 6 in the header for the run that forced this.
+
+       The check is here rather than in Complete-Phase on purpose. Here the
+       runner still knows how the CALL was shaped -- whether an evidence
+       argument was bound at all -- and that is the only signal available for
+       telling a row-level void apart from an instrument-level one. By the time
+       Complete-Phase sees the row that information is gone. #>
+
+    # Bound BEFORE anything else touches $PSBoundParameters. A short call means
+    # the argument list shifted, and a shifted list means the runner does not
+    # know which argument it is holding.
+    $evidenceBound = $PSBoundParameters.ContainsKey('evidence')
+
+    $raw  = $verdict
+    $norm = if ($null -eq $raw) { '' } else { "$raw".Trim().ToUpperInvariant() }
+
+    if ($script:CF_Verdicts -contains $norm) {
+        $final           = $norm
+        $malformedReason = ''
+        $emitEvidence    = $evidence
+    } else {
+        # Name the raw value in a form that survives the transcript. An empty
+        # string and a null are different defects with different causes, and
+        # printing both as nothing is how this went unnoticed the first time.
+        $shown =
+            if ($null -eq $raw)                   { '<null>' }
+            elseif ("$raw" -eq '')                { '<empty string>' }
+            elseif ([string]::IsNullOrWhiteSpace("$raw")) { "<whitespace only, $(("$raw").Length) chars>" }
+            else                                  { "'$raw'" }
+
+        $idBlank    = [string]::IsNullOrWhiteSpace("$id")
+        $countable  = (-not $idBlank) -and $evidenceBound
+
+        $why = "recorded the verdict $shown, which is not one of $($script:CF_Verdicts -join ', '). " +
+               'A verdict the runner cannot read is a measurement it did not get, so this row is VOID.'
+        if ($idBlank) {
+            $why += ' It also arrived with NO ID, so this void cannot be attributed to a named check' +
+                    ' and two such rows cannot be told apart.'
+        }
+        if (-not $evidenceBound) {
+            $why += ' It also arrived SHORT, with no evidence argument bound, so the argument list' +
+                    ' shifted and the runner does not know what else in this phase was mis-bound.'
+        }
+        if (-not $countable) {
+            $why += ' The extent of the damage is therefore unknown, which makes this instrument-level:' +
+                    ' a runner that cannot count what it lost cannot certify what survived.'
+        }
+
+        $final           = 'VOID'
+        $malformedReason = "malformed verdict: $(if ($idBlank) { '<unnamed row>' } else { "$id" }) $name -- $why"
+        $emitEvidence    = ("$evidence" + $(if ("$evidence") { ' | ' } else { '' }) + "RUNNER: $why")
+
+        [void]$script:CF_Malformed.Add([pscustomobject]@{
+            Id = "$id"; Name = "$name"; Raw = $shown; Countable = $countable; Reason = $malformedReason
+        })
+    }
+
     [void]$script:CF_Results.Add([pscustomobject]@{
-        Id = $id; Name = $name; Verdict = $verdict; Evidence = $evidence
+        Id = $id; Name = $name; Verdict = $final; RawVerdict = $raw
+        MalformedReason = $malformedReason; Evidence = $emitEvidence
     })
-    W ("  [{0}] {1} :: {2}" -f $verdict, $id, $name)
-    if ($evidence) { W ("        {0}" -f ($evidence -replace "`r?`n", ' | ')) }
+    W ("  [{0}] {1} :: {2}" -f $final, $id, $name)
+    if ($emitEvidence) { W ("        {0}" -f ($emitEvidence -replace "`r?`n", ' | ')) }
 }
 
 function Register-Control {
@@ -241,9 +365,39 @@ function Complete-Phase {
     foreach ($u in $unmet)   { $instrumentReasons += "precondition not met: $($u.Id) $($u.Name) -- $($u.Reason)" }
     foreach ($u in $unfired) { $instrumentReasons += "positive control did not fire: $($u.Id) $($u.Name)" }
 
+    # An UNCOUNTABLE malformed verdict is instrument-level. Record already made
+    # the call, because only Record could see the shape of the invocation.
+    foreach ($m in @($script:CF_Malformed | Where-Object { -not $_.Countable })) {
+        $instrumentReasons += $m.Reason
+    }
+
+    # THE BACKSTOP. Record normalises every verdict into $script:CF_Verdicts, so
+    # this can only fire if something bypassed it -- a future edit, or a row
+    # pushed into CF_Results directly. It exists because the tally below counts
+    # by exact name, and a row it cannot count is a row that vanishes silently.
+    # An assertion that never fires is the cheapest thing in this file and it is
+    # the one that would have caught card 254 on its own.
+    $unreadable = @($script:CF_Results | Where-Object { $script:CF_Verdicts -notcontains "$($_.Verdict)" })
+    if ($unreadable.Count -gt 0) {
+        $instrumentReasons += ("$($unreadable.Count) row(s) carry a verdict this runner cannot count: " +
+            (@($unreadable | ForEach-Object { "$($_.Id)=[$($_.Verdict)]" }) -join ', ') +
+            '. The tally would have dropped them, so the phase total is not a total.')
+    }
+
     $rowVoids = @($script:CF_Results | Where-Object { $_.Verdict -eq 'VOID' })
     $rowReasons = @()
-    foreach ($r in $rowVoids) { $rowReasons += "a check could not be measured: $($r.Id) $($r.Name)" }
+    foreach ($r in $rowVoids) {
+        # A malformed row explains itself and names its raw value. A deliberate
+        # VOID from Require-Precondition or Compare-Independent does not, so it
+        # keeps the generic line.
+        if ("$($r.MalformedReason)") {
+            # Skip the uncountable ones: they are already listed above as
+            # instrument reasons, and printing one defect twice makes a reader
+            # chase two ghosts, which is the thing the ordering comment warns of.
+            if ($instrumentReasons -notcontains $r.MalformedReason) { $rowReasons += $r.MalformedReason }
+        }
+        else { $rowReasons += "a check could not be measured: $($r.Id) $($r.Name)" }
+    }
 
     $instrumentVoid = ($instrumentReasons.Count -gt 0)
     $phaseVoid      = $instrumentVoid -or ($rowVoids.Count -gt 0)
@@ -259,7 +413,8 @@ function Complete-Phase {
         $v = $r.Verdict
         if ($instrumentVoid -and ($v -eq 'PASS' -or $v -eq 'FAIL')) { $v = 'VOID' }
         [void]$emitted.Add([pscustomobject]@{
-            Id = $r.Id; Name = $r.Name; Verdict = $v; OriginalVerdict = $r.Verdict; Evidence = $r.Evidence
+            Id = $r.Id; Name = $r.Name; Verdict = $v; OriginalVerdict = $r.Verdict
+            RawVerdict = $r.RawVerdict; MalformedReason = $r.MalformedReason; Evidence = $r.Evidence
         })
     }
 
@@ -273,7 +428,16 @@ function Complete-Phase {
     $nVoid = @($emitted | Where-Object Verdict -eq 'VOID').Count
     $nInfo = @($emitted | Where-Object Verdict -eq 'INFO').Count
     W ''
-    W "PASS=$nPass FAIL=$nFail VOID=$nVoid INFO=$nInfo"
+    # The tally is printed WITH the row count it was taken over. Card 254 printed
+    # a tally of five over a table of ten and nothing in the output said so.
+    W "PASS=$nPass FAIL=$nFail VOID=$nVoid INFO=$nInfo  (counted $($nPass + $nFail + $nVoid + $nInfo) of $($emitted.Count) recorded rows)"
+    if ($script:CF_Malformed.Count -gt 0) {
+        W ("malformed verdicts={0} (countable={1}, uncountable={2}) -- every one of these was recorded as VOID" -f `
+            $script:CF_Malformed.Count,
+            @($script:CF_Malformed | Where-Object Countable).Count,
+            @($script:CF_Malformed | Where-Object { -not $_.Countable }).Count)
+        foreach ($m in $script:CF_Malformed) { W ("    raw verdict {0} on row {1}" -f $m.Raw, $(if ("$($m.Id)") { $m.Id } else { '<unnamed>' })) }
+    }
     W "positive controls registered=$($script:CF_Controls.Count) fired=$(@($script:CF_Controls | Where-Object Fired).Count)"
     W "preconditions declared=$($script:CF_Preconditions.Count) met=$(@($script:CF_Preconditions | Where-Object Met).Count)"
 
@@ -295,6 +459,9 @@ function Complete-Phase {
         VoidReasons       = $voidReasons
         InstrumentReasons = $instrumentReasons
         RowVoidReasons    = $rowReasons
+        MalformedVerdicts = @($script:CF_Malformed)
+        RowsRecorded      = $emitted.Count
+        RowsCounted       = ($nPass + $nFail + $nVoid + $nInfo)
         Controls          = @($script:CF_Controls)
         Preconditions     = @($script:CF_Preconditions)
         Results           = @($emitted)

@@ -4,14 +4,14 @@
 
   WHY THIS EXISTS, AND WHY A CLEAN RUN WOULD NOT DO
   -------------------------------------------------
-  The four defects the runner now guards against all shipped while the harness
+  The five defects the runner now guards against all shipped while the harness
   was passing. Every one of them produced a clean-looking transcript. So a green
   run of the hardened harness is not evidence that the hardening works: it is
   evidence that the box was healthy, which is exactly the confusion that caused
   the defects in the first place.
 
   The only thing that demonstrates a guard is watching it fire. For each of the
-  four defect classes this constructs an input where the thing being measured is
+  five defect classes this constructs an input where the thing being measured is
   ABSENT, runs the REAL interim-v120-phaselib.ps1 over it in a child process, and
   asserts on the exit code and the emitted results file.
 
@@ -28,6 +28,20 @@
     findable
   4 independent list edited   FAIL naming BOTH numbers
     to disagree
+  5 the verdict argument      VOID, the row NAMED, phase pass withheld, and the
+    arrives EMPTY             sound row beside it left standing
+  5b the verdict is a word    VOID, naming the raw value
+    the runner does not know
+  5c the Record call arrives  VOID at INSTRUMENT level, sound rows downgraded
+    SHORT, so the damage is
+    uncountable
+
+  Note on 5. Every fault here has a paired control, but 5 also carries a proof
+  that the INJECTION landed, which is a different claim. An injection that
+  silently fails to inject scores a pass and looks exactly like a working guard,
+  so SELF.5.inject asserts on two things the guard does not produce: the
+  undefined-variable error in the child's stdout, and the RawVerdict the runner
+  stores verbatim before it normalises anything.
 
   Note on 4. It is the one case that is deliberately NOT void. A disagreement
   between the harness's copy and the product's report is a real finding about a
@@ -103,14 +117,37 @@ $Body
 Complete-Phase -ResultsJson '$rj' -MarkerPrefix 'SELFTEST'
 "@
     [IO.File]::WriteAllText($ps1, $full, (New-Object Text.UTF8Encoding($false)))
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ps1 *> (Join-Path $WorkDir "$Name.stdout.txt")
+
+    # REDIRECT THROUGH cmd.exe, and neither `*>` nor a bare `2>` will do.
+    #
+    # Windows PowerShell 5.1 wraps every stderr line from a NATIVE executable in
+    # a NativeCommandError ErrorRecord. This script runs under
+    # $ErrorActionPreference = 'Stop', so the first synthetic phase that writes
+    # anything to stderr kills the self-test instead of being measured by it.
+    # Fault 5 writes to stderr by design: that is what the injected fault DOES.
+    # Both `*> file` and `> out 2> err` were tried here and both still killed the
+    # run, because the wrapping happens before the redirection binds.
+    #
+    # cmd.exe does the redirection at the OS level, so PowerShell never sees the
+    # child's stderr as an error at all. cmd /c exits with the child's exit code,
+    # which is the value this function is built around.
+    #
+    # Keeping the two streams apart is also the better shape on its own terms.
+    # The card 254 root cause sat in a job's stderr for a whole session while the
+    # analysis read the transcript, which by construction holds only what the
+    # probe SUCCESSFULLY printed. stderr is a first-class evidence channel here.
+    $outFile = Join-Path $WorkDir "$Name.stdout.txt"
+    $errFile = Join-Path $WorkDir "$Name.stderr.txt"
+    & cmd.exe /c "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$ps1`" > `"$outFile`" 2> `"$errFile`""
     $rc = $LASTEXITCODE
     $res = if (Test-Path $rj) { Get-Content $rj -Raw | ConvertFrom-Json } else { $null }
     $txt = if (Test-Path $tr) { Get-Content $tr -Raw } else { '' }
-    return [pscustomobject]@{ Rc = $rc; Results = $res; Transcript = $txt }
+    $so  = if (Test-Path $outFile) { Get-Content $outFile -Raw } else { '' }
+    $se  = if (Test-Path $errFile) { Get-Content $errFile -Raw } else { '' }
+    return [pscustomobject]@{ Rc = $rc; Results = $res; Transcript = $txt; Stdout = $so; Stderr = $se }
 }
 
-Write-Host "`n===== HARNESS SELF-TEST: four injected faults =====`n" -ForegroundColor Cyan
+Write-Host "`n===== HARNESS SELF-TEST: five injected faults =====`n" -ForegroundColor Cyan
 Write-Host "Library under test: $PhaseLib"
 Write-Host "Work dir          : $WorkDir`n"
 
@@ -310,6 +347,109 @@ Verdict 'SELF.4d' 'FAULT 4b CONTROL: a row-level void withholds the phase pass b
     "rc=$($f4d.Rc) VoidKind=$($f4d.Results.VoidKind) F4d.1 survived as PASS=$f4dKept"
 
 # =====================================================================
+# FAULT 5. The verdict argument itself is empty.
+#
+# Card 254 question 6. A `$2` inside a double-quoted here-string was read by
+# PowerShell as a variable reference. Under strict mode an undefined variable
+# raises an error, the verdict subexpression produced NOTHING, and five of that
+# phase's ten Record calls arrived with an empty verdict. An empty string is not
+# PASS, not FAIL and not VOID, so the tally counted them as nothing and the
+# phase printed PHASE VERDICT: PASS over five checks that had said nothing.
+#
+# THE INJECTION IS THE REAL SHAPE, not a stand-in. The body below turns on
+# strict mode and references a variable that was never set, exactly as the VM
+# did. The local box behaved differently on the day only because strict mode was
+# off there, which is why executing the identical bytes locally reproduced the
+# correct behaviour and hid the defect. Setting it here is what makes this a
+# reproduction rather than an approximation.
+#
+# PROVING THE INJECTION LANDS, which matters more than the assertion that
+# follows it: a fault injection that does not inject scores a false pass and is
+# indistinguishable from a working control. Two independent pieces of evidence,
+# neither of which is the guard being tested:
+#   1. the child's STDERR must carry the undefined-variable error, so the fault
+#      genuinely fired rather than the expression quietly evaluating
+#   2. the row's RawVerdict, which the runner stores verbatim before it
+#      normalises anything, must be empty
+# =====================================================================
+Write-Host "`n--- FAULT 5: the verdict argument arrives EMPTY (card 254, question 6) ---" -ForegroundColor Yellow
+$f5 = Invoke-SyntheticPhase -Name 'fault5-emptyverdict' -Body @'
+Set-StrictMode -Version Latest
+Register-Control -Id 'F5.CTL' -Name 'the probe can reach a known-good target' -Fired $true -Evidence 'synthetic reachable target responded' | Out-Null
+Record 'F5.1' 'a measurement that was genuinely taken' 'PASS' 'a well-formed row beside the broken one'
+# The injected fault: $mntC is never assigned, so under strict mode the verdict
+# subexpression errors and yields nothing. Record is still reached, with an
+# empty verdict argument.
+Record 'F5.2' 'no second mount path to the workspace' $(if ($mntC) { 'PASS' } else { 'FAIL' }) 'this is the row that said nothing and was counted as nothing'
+'@
+$f5Row     = @($f5.Results.Results | Where-Object Id -eq 'F5.2')
+$f5Good    = @($f5.Results.Results | Where-Object { $_.Id -eq 'F5.1' -and $_.Verdict -eq 'PASS' }).Count -eq 1
+$f5Fired   = "$($f5.Stderr)$($f5.Stdout)" -match 'VariableIsUndefined|cannot be retrieved because it has not been set'
+$f5RawEmpty= [string]::IsNullOrWhiteSpace("$($f5Row.RawVerdict)")
+$f5Named   = "$($f5.Results.VoidReasons)" -match 'F5\.2'
+Verdict 'SELF.5.inject' 'FAULT 5 INJECTION LANDED: the fault fired and the verdict really did arrive empty' `
+    ($f5Fired -and $f5RawEmpty) `
+    "undefined-variable error present in child stderr=$f5Fired ; F5.2 RawVerdict=[$($f5Row.RawVerdict)] empty=$f5RawEmpty"
+Verdict 'SELF.5' 'FAULT 5: an empty verdict records VOID, names the row, and withholds the phase pass' `
+    (($f5.Rc -eq 4) -and ($f5.Results.PhaseVerdict -eq 'VOID') -and ($f5.Results.VoidKind -eq 'row') -and `
+     ($f5Row.Verdict -eq 'VOID') -and $f5Named -and $f5Good) `
+    "rc=$($f5.Rc) PhaseVerdict=$($f5.Results.PhaseVerdict) VoidKind=$($f5.Results.VoidKind) F5.2=$($f5Row.Verdict) named=$f5Named F5.1 survived as PASS=$f5Good rowsRecorded=$($f5.Results.RowsRecorded) rowsCounted=$($f5.Results.RowsCounted)"
+
+# Fault 5 control: the IDENTICAL body with the variable SET. Same expression,
+# same strict mode, one assignment different. Without this the void above proves
+# only that the runner voids everything it is handed.
+Write-Host "`n--- FAULT 5 CONTROL: the same phase with the variable SET must PASS ---" -ForegroundColor Yellow
+$f5c = Invoke-SyntheticPhase -Name 'fault5-control-wellformed' -Body @'
+Set-StrictMode -Version Latest
+$mntC = $true
+Register-Control -Id 'F5c.CTL' -Name 'the probe can reach a known-good target' -Fired $true -Evidence 'synthetic reachable target responded' | Out-Null
+Record 'F5c.1' 'a measurement that was genuinely taken' 'PASS' 'a well-formed row beside the one under test'
+Record 'F5c.2' 'no second mount path to the workspace' $(if ($mntC) { 'PASS' } else { 'FAIL' }) 'the same expression, evaluated'
+'@
+$f5cRow = @($f5c.Results.Results | Where-Object Id -eq 'F5c.2')
+Verdict 'SELF.5ctl' 'FAULT 5 CONTROL: a well-formed verdict from the same expression still reports PASS' `
+    (($f5c.Rc -eq 0) -and ($f5c.Results.PhaseVerdict -eq 'PASS') -and ($f5cRow.Verdict -eq 'PASS') -and `
+     ($f5c.Results.RowsCounted -eq $f5c.Results.RowsRecorded)) `
+    "rc=$($f5c.Rc) PhaseVerdict=$($f5c.Results.PhaseVerdict) F5c.2=$($f5cRow.Verdict) rowsCounted=$($f5c.Results.RowsCounted)/$($f5c.Results.RowsRecorded)"
+
+# Fault 5b. A verdict that is present and non-empty but is not one the runner
+# knows. This is the WIDER class the card 254 fix exposes: the tally counts four
+# words by exact name, so REVIEW, UNTESTED, BLOCKED, MEASURED-BYPASS and the
+# rest were already being counted as nothing, exactly like the empty string.
+# REVIEW is used at 28 live call sites in this directory.
+Write-Host "`n--- FAULT 5b: a verdict the runner does not recognise ---" -ForegroundColor Yellow
+$f5b = Invoke-SyntheticPhase -Name 'fault5b-unrecognised' -Body @'
+Register-Control -Id 'F5b.CTL' -Name 'the probe can reach a known-good target' -Fired $true -Evidence 'synthetic reachable target responded' | Out-Null
+Record 'F5b.1' 'a check whose author invented a verdict' 'REVIEW' 'a human is meant to look at this, which is not a pass'
+'@
+$f5bRow = @($f5b.Results.Results | Where-Object Id -eq 'F5b.1')
+Verdict 'SELF.5b' 'FAULT 5b: an unrecognised verdict records VOID and names its raw value' `
+    (($f5b.Rc -eq 4) -and ($f5b.Results.PhaseVerdict -eq 'VOID') -and ($f5bRow.Verdict -eq 'VOID') -and `
+     ("$($f5b.Results.VoidReasons)" -match "REVIEW")) `
+    "rc=$($f5b.Rc) PhaseVerdict=$($f5b.Results.PhaseVerdict) F5b.1=$($f5bRow.Verdict) RawVerdict=[$($f5bRow.RawVerdict)] reason=$($f5b.Results.VoidReasons -join ' / ')"
+
+# Fault 5c. The runner cannot establish HOW MANY rows were affected, so it must
+# go instrument-level rather than row-level. The call arrives short: three
+# arguments instead of four, so the evidence parameter is unbound and the
+# verdict slot is holding what was meant to be evidence. The runner does not
+# know which argument it has, and therefore does not know what else in the phase
+# was mis-bound. A runner that cannot count what it lost cannot certify what
+# survived, so the sound row beside it is downgraded too.
+Write-Host "`n--- FAULT 5c: a SHORT Record call, so the damage is uncountable ---" -ForegroundColor Yellow
+$f5d = Invoke-SyntheticPhase -Name 'fault5c-uncountable' -Body @'
+Register-Control -Id 'F5d.CTL' -Name 'the probe can reach a known-good target' -Fired $true -Evidence 'synthetic reachable target responded' | Out-Null
+Record 'F5d.1' 'a measurement that looked sound' 'PASS' 'it cannot be trusted once the runner has lost count'
+# The injected fault: the verdict argument was dropped, so 'the evidence text'
+# binds to $verdict and $evidence is never bound at all.
+Record 'F5d.2' 'a check whose argument list shifted' 'the evidence text that should have been the fourth argument'
+'@
+$f5dDowngraded = @($f5d.Results.Results | Where-Object { $_.Id -eq 'F5d.1' -and $_.OriginalVerdict -eq 'PASS' -and $_.Verdict -eq 'VOID' }).Count -eq 1
+Verdict 'SELF.5c' 'FAULT 5c: an uncountable malformed verdict is INSTRUMENT-level, and the sound row is downgraded with it' `
+    (($f5d.Rc -eq 4) -and ($f5d.Results.PhaseVerdict -eq 'VOID') -and ($f5d.Results.VoidKind -eq 'instrument') -and `
+     $f5dDowngraded -and ("$($f5d.Results.InstrumentReasons)" -match 'arrived SHORT')) `
+    "rc=$($f5d.Rc) PhaseVerdict=$($f5d.Results.PhaseVerdict) VoidKind=$($f5d.Results.VoidKind) F5d.1 downgraded PASS->VOID=$f5dDowngraded reason=$($f5d.Results.InstrumentReasons -join ' / ')"
+
+# =====================================================================
 Write-Host "`n===== HARNESS SELF-TEST RESULT =====" -ForegroundColor Cyan
 foreach ($f in $script:Findings) {
     Write-Host ("{0,-10} {1,-5} {2}" -f $f.Id, $(if ($f.Ok) { 'PASS' } else { 'FAIL' }), $f.Name)
@@ -327,6 +467,7 @@ if ($bad.Count -gt 0) {
     exit 1
 }
 Write-Host "`nHARNESS SELF-TEST PASSED: $($script:Findings.Count)/$($script:Findings.Count)." -ForegroundColor Green
-Write-Host 'Each of the four injected faults was caught, and each paired control shows the guard discriminates.'
+Write-Host 'Each of the five injected faults was caught, each paired control shows the guard discriminates,'
+Write-Host 'and fault 5 additionally proved that its injection landed rather than assuming it.'
 Write-Host 'HARNESS_SELFTEST_COMPLETE rc=0'
 exit 0
