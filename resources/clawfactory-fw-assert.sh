@@ -46,10 +46,50 @@ if [ "$BACKEND" != "nftables" ]; then
     exit "$FAIL"
 fi
 
-CHAIN="$(nft list chain inet clawfactory output 2>/dev/null)" || {
-    bad "cannot read chain inet clawfactory output (is the firewall applied?)"
+# THE CHAIN READ. Everything below is derived from this one capture, so a
+# transient failure here is not a shape finding, it is no finding at all.
+#
+# This script already distinguished "cannot read the chain" from "the rule is
+# absent", which is the harder half and is why it is not the file that broke the
+# install. But it took exactly ONE look and discarded stderr with 2>/dev/null,
+# so it could say THAT the read failed and never WHY. That matters more here
+# than anywhere else in the product: this runs as ExecStartPost on
+# clawfactory-allow-providers.service, on a five-hourly timer, on customer
+# machines, where a single transient failure marks the unit failed hours after
+# any validation went green and nobody is watching.
+#
+# So: bounded poll on the condition, stderr kept, and the two failures still
+# reported separately. A healthy box pays one iteration.
+#
+# MEASURED, not assumed: on a live box with 34 refresh cycles across 15 boots
+# this unit had never failed, and 300 consecutive at-rest reads of this chain
+# produced 0 failures. The retry is therefore cheap insurance against a window
+# that is real but rare, not a workaround for a chronically flaky read.
+CHAIN_MAX_TRIES=30
+CHAIN_ERRF="$(mktemp)"
+chain_tries=0; CHAIN=''; chain_rc=0; chain_err=''; chain_ok=0
+chain_start="$(date +%s)"
+while [ "$chain_tries" -lt "$CHAIN_MAX_TRIES" ]; do
+    chain_tries=$((chain_tries + 1))
+    chain_rc=0
+    CHAIN="$(nft list chain inet clawfactory output 2>"$CHAIN_ERRF")" || chain_rc=$?
+    chain_err="$(cat "$CHAIN_ERRF" 2>/dev/null || true)"
+    # The condition is "readable AND non-empty", never "the grep succeeded".
+    # An empty capture with exit 0 would sail through every check below and
+    # report a clean shape over nothing at all.
+    if [ "$chain_rc" -eq 0 ] && [ -n "$CHAIN" ]; then chain_ok=1; break; fi
+    if [ "$chain_tries" -lt "$CHAIN_MAX_TRIES" ]; then sleep 1; fi
+done
+chain_elapsed=$(( $(date +%s) - chain_start ))
+rm -f "$CHAIN_ERRF"
+
+if [ "$chain_ok" != "1" ]; then
+    bad "cannot read chain inet clawfactory output after $chain_tries attempt(s) over ${chain_elapsed}s (is the firewall applied?). This is a READ failure and says NOTHING about which rules are present: nft exit status $chain_rc, nft stderr [${chain_err:-<empty>}], bytes returned ${#CHAIN}."
     exit 1
-}
+fi
+if [ "$chain_tries" -gt 1 ]; then
+    note "chain read succeeded on attempt $chain_tries of $CHAIN_MAX_TRIES after ${chain_elapsed}s; earlier attempts failed with [${chain_err:-<empty>}]"
+fi
 
 # 1. The chain must still scope itself to the agent uid at the top. Without this
 #    line the whole chain applies to root too, which would break the broker.
@@ -91,8 +131,44 @@ done <<<"$CHAIN"
 #     is the denied state and therefore safe, but it also means the control the
 #     product describes is not present. A missing control that fails safe is
 #     still a missing control, and silence here would let it stay missing.
-if ! nft list set inet clawfactory read_fetch_ipv4 >/dev/null 2>&1; then
-    bad "set inet clawfactory read_fetch_ipv4 is missing; Guard 3 is not applied (read-fetch is denied, but the control is absent)"
+# Same retry discipline as the chain read above, and for the same reason: a
+# transient netlink failure here marks the refresh unit failed on a customer
+# machine and reads as "the control is absent" when the control is fine.
+# Returns 0 only when the set was genuinely observed; sets SET_ERR on failure.
+#
+# DELIBERATELY 5 ATTEMPTS AND NOT 30, and the difference is not arbitrary.
+#
+# Two reasons. First, by the time this runs the chain read above has already
+# succeeded, which proves the table is readable right now; a set still unlisted
+# after a few tries is genuinely absent rather than transiently unreadable, so
+# the long bound buys nothing. Second, and this is the one that would have hurt:
+# this script runs as ExecStartPost on clawfactory-allow-providers.service,
+# which is Type=oneshot with no TimeoutStartSec, so systemd's 90s default
+# applies to ExecStart plus ExecStartPost together. At 30 attempts each, a box
+# genuinely missing both sets would spend 30 + 30 + 30 = 90s here and be KILLED
+# by the start timeout, turning a precise "set X is missing, nft said Y" into
+# "start operation timed out", which is a worse diagnostic than the single-look
+# check this replaced. 30 + 5 + 5 leaves comfortable room under the timeout.
+SET_MAX_TRIES=5
+set_exists_retry() {
+    local name="$1" tries=0 rc=0 errf
+    errf="$(mktemp)"
+    SET_ERR=''
+    while [ "$tries" -lt "$SET_MAX_TRIES" ]; do
+        tries=$((tries + 1))
+        rc=0
+        nft list set inet clawfactory "$name" >/dev/null 2>"$errf" || rc=$?
+        if [ "$rc" -eq 0 ]; then rm -f "$errf"; return 0; fi
+        SET_ERR="$(cat "$errf" 2>/dev/null || true)"
+        if [ "$tries" -lt "$SET_MAX_TRIES" ]; then sleep 1; fi
+    done
+    SET_ERR="after $tries attempt(s): nft exit $rc, stderr [${SET_ERR:-<empty>}]"
+    rm -f "$errf"
+    return 1
+}
+
+if ! set_exists_retry read_fetch_ipv4; then
+    bad "set inet clawfactory read_fetch_ipv4 is missing; Guard 3 is not applied (read-fetch is denied, but the control is absent). $SET_ERR"
 fi
 
 # 2c. The toolchain set and its accept must BOTH exist, checked by name.
@@ -104,8 +180,8 @@ fi
 #     set present is worse in the other direction: the set fills up on every
 #     refresh and nothing ever reads it, so the product holds a list it does not
 #     enforce, which is the shape of a control that looks present and is not.
-if ! nft list set inet clawfactory toolchain_ipv4 >/dev/null 2>&1; then
-    bad "set inet clawfactory toolchain_ipv4 is missing; the toolchain toggle is not applied (the toolchain route is denied, but the control is absent)"
+if ! set_exists_retry toolchain_ipv4; then
+    bad "set inet clawfactory toolchain_ipv4 is missing; the toolchain toggle is not applied (the toolchain route is denied, but the control is absent). $SET_ERR"
 fi
 if ! grep -qE '@toolchain_ipv4 tcp dport 443 accept' <<<"$CHAIN"; then
     bad "the toolchain accept rule is missing from the live chain; the toolchain set is not being enforced by anything"

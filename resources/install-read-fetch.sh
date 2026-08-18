@@ -115,10 +115,29 @@ SEEDED=/etc/clawfactory/toolchain-hosts.seed
 if [ -f "$SEEDED" ]; then
     # Ask the resolver for its list rather than scraping its source. See the
     # --list-hosts note in that file for what scraping cost.
-    MINE="$(/usr/local/sbin/clawfactory-toolchain.sh --list-hosts 2>/dev/null | tr ' ' '\n' | sed '/^$/d' | sort -u | tr '\n' ' ')"
+    #
+    # The resolver is run SEPARATELY from the pipeline that reshapes its output,
+    # and its stderr is kept. The old form was one pipeline under `pipefail` with
+    # `--list-hosts 2>/dev/null`, which is the same defect shape as the chain
+    # asserts below: if the resolver failed to run at all, MINE came back empty,
+    # the comparison failed, and the install aborted claiming host-list DRIFT.
+    # That is a misdiagnosis pointing at the wrong file, and the message it
+    # printed named two lists when the real fault was that one was never read.
+    TC_LIST_ERRF="$(mktemp)"
+    tc_list_rc=0
+    TC_LIST_RAW="$(/usr/local/sbin/clawfactory-toolchain.sh --list-hosts 2>"$TC_LIST_ERRF")" || tc_list_rc=$?
+    TC_LIST_ERR="$(cat "$TC_LIST_ERRF" 2>/dev/null || true)"
+    rm -f "$TC_LIST_ERRF"
+    if [ "$tc_list_rc" -ne 0 ]; then
+        fatal "could not ASK clawfactory-toolchain.sh for its host list: exit status $tc_list_rc, stderr [${TC_LIST_ERR:-<empty>}]. This is a RESOLVER failure and NOT a drift finding, so the two host lists were never compared."
+    fi
+    MINE="$(printf '%s' "$TC_LIST_RAW" | tr ' ' '\n' | sed '/^$/d' | sort -u | tr '\n' ' ')"
     THEIRS="$(tr ' ' '\n' < "$SEEDED" | sed '/^$/d' | sort -u | tr '\n' ' ')"
+    if [ -z "$MINE" ]; then
+        fatal "clawfactory-toolchain.sh --list-hosts exited 0 but returned NO hosts (stderr [${TC_LIST_ERR:-<empty>}]). An empty list would compare unequal to the seed and read as DRIFT, which would blame the wrong thing, so this is reported as the empty read it is."
+    fi
     if [ "$MINE" != "$THEIRS" ]; then
-        fatal "toolchain host list DRIFT. setup.ps1 seeded [$THEIRS] but clawfactory-toolchain.sh owns [$MINE]. A host in one and not the other is either unreachable during install or silently dropped at the first refresh. Fix both and rebuild."
+        fatal "toolchain host list DRIFT. setup.ps1 seeded [$THEIRS] but clawfactory-toolchain.sh owns [$MINE]. Both lists were read successfully, so this is a real disagreement. A host in one and not the other is either unreachable during install or silently dropped at the first refresh. Fix both and rebuild."
     fi
     note "toolchain host lists agree between setup.ps1 and the resolver ($(printf '%s' "$MINE" | wc -w | tr -d ' ') hosts)"
 else
@@ -135,23 +154,70 @@ fi
 # Check the mechanism instead: the set and its 443-scoped accept.
 BACKEND="$(cat /etc/clawfactory/fw-backend 2>/dev/null || echo nftables)"
 if [ "$BACKEND" = "nftables" ]; then
-    nft list set inet clawfactory read_fetch_ipv4 >/dev/null 2>&1 \
-        || fatal "set inet clawfactory read_fetch_ipv4 is missing from the live ruleset; Guard 3 would claim a control it does not have"
-    nft list chain inet clawfactory output 2>/dev/null \
-        | grep -qE '@read_fetch_ipv4 tcp dport 443 accept' \
-        || fatal "the read-fetch accept is missing or is not scoped to tcp dport 443"
-    note "live chain carries @read_fetch_ipv4 with a 443-scoped accept"
+    # ONE read of the chain, retried, from which every assertion here is made.
+    #
+    # This replaces four single-look checks. Two of them took SEPARATE listings
+    # twelve lines apart to check two rules that CANNOT differ: both accepts are
+    # static lines in the same /etc/nftables.conf, which opens with
+    # `flush ruleset`, so no code path can affect one without affecting all. On
+    # cfv-165 the first listing passed and the second failed twelve lines later,
+    # which is only possible if the READ differed rather than the rules.
+    #
+    # The old form was `nft list chain ... 2>/dev/null | grep -qE ... || fatal`.
+    # Under `set -o pipefail` that fatal fires when EITHER the listing failed or
+    # the rule was absent, and the message asserted the second. It could not tell
+    # the two apart, and 2>/dev/null discarded the one thing that would have
+    # said which. So the message the installer printed was a claim the code was
+    # not in a position to make.
+    #
+    # Two rules, both load-bearing:
+    #   - poll the CONDITION, never "the grep succeeded". A retry loop around a
+    #     check that can pass for the wrong reason is worse than no retry.
+    #   - an unreadable chain and an absent rule are DIFFERENT failures with
+    #     different owners, and are reported as such.
+    # Bounded poll at 30 x 1s, matching install-send.sh and install-quarantine.sh.
+    # A healthy box pays exactly one iteration because the loop exits on success.
+    CHAIN_MAX_TRIES=30
+    CHAIN_ERRF="$(mktemp)"
+    chain_tries=0; chain_txt=''; chain_rc=0; chain_err=''; chain_readable=0
+    have_rf_set=0; have_tc_set=0; have_rf_accept=0; have_tc_accept=0
+    chain_start="$(date +%s)"
 
-    # The toolchain toggle, checked the same way and for the same reason. Its
-    # default state is ON, so unlike read-fetch this one CAN be checked by
-    # outcome as well as by mechanism: a fresh install should have resolved
-    # addresses into the set. Both are checked, because a populated set with no
-    # accept rule is a list nothing enforces.
-    nft list set inet clawfactory toolchain_ipv4 >/dev/null 2>&1 \
-        || fatal "set inet clawfactory toolchain_ipv4 is missing from the live ruleset; the toolchain toggle would claim a control it does not have"
-    nft list chain inet clawfactory output 2>/dev/null \
-        | grep -qE '@toolchain_ipv4 tcp dport 443 accept' \
-        || fatal "the toolchain accept is missing or is not scoped to tcp dport 443"
+    while [ "$chain_tries" -lt "$CHAIN_MAX_TRIES" ]; do
+        chain_tries=$((chain_tries + 1))
+        chain_rc=0
+        chain_txt="$(nft list chain inet clawfactory output 2>"$CHAIN_ERRF")" || chain_rc=$?
+        chain_err="$(cat "$CHAIN_ERRF" 2>/dev/null || true)"
+        if [ "$chain_rc" -eq 0 ]; then chain_readable=1; else chain_readable=0; fi
+
+        if [ "$chain_readable" = "1" ]; then
+            if printf '%s\n' "$chain_txt" | grep -qE '@read_fetch_ipv4 tcp dport 443 accept'; then have_rf_accept=1; else have_rf_accept=0; fi
+            if printf '%s\n' "$chain_txt" | grep -qE '@toolchain_ipv4 tcp dport 443 accept';  then have_tc_accept=1; else have_tc_accept=0; fi
+            if nft list set inet clawfactory read_fetch_ipv4 >/dev/null 2>&1; then have_rf_set=1; else have_rf_set=0; fi
+            if nft list set inet clawfactory toolchain_ipv4  >/dev/null 2>&1; then have_tc_set=1; else have_tc_set=0; fi
+            if [ "$have_rf_set$have_rf_accept$have_tc_set$have_tc_accept" = "1111" ]; then break; fi
+        fi
+        if [ "$chain_tries" -lt "$CHAIN_MAX_TRIES" ]; then sleep 1; fi
+    done
+    chain_elapsed=$(( $(date +%s) - chain_start ))
+    rm -f "$CHAIN_ERRF"
+
+    # Failure 1: the chain could not be READ. Says so, and does not pretend to
+    # know anything about which rules are present.
+    if [ "$chain_readable" != "1" ]; then
+        fatal "could not READ chain inet clawfactory output after $chain_tries attempt(s) over ${chain_elapsed}s. This is a READ failure and NOT a statement about any rule: nft exit status $chain_rc, nft stderr [${chain_err:-<empty>}]. The firewall may not be applied, or the netlink socket was busy for the whole window."
+    fi
+
+    # Failure 2: the chain WAS readable and something is genuinely absent. Prints
+    # the full chain text so the next reader does not have to reproduce it.
+    if [ "$have_rf_set$have_rf_accept$have_tc_set$have_tc_accept" != "1111" ]; then
+        echo "[install-read-fetch] --- full chain text from the final attempt ---" >&2
+        printf '%s\n' "$chain_txt" >&2
+        echo "[install-read-fetch] --- end chain text ---" >&2
+        fatal "the chain WAS readable (nft exit 0) after $chain_tries attempt(s) over ${chain_elapsed}s, so these rules are genuinely ABSENT rather than unread: read_fetch set=$have_rf_set accept443=$have_rf_accept, toolchain set=$have_tc_set accept443=$have_tc_accept. A missing set means the control is not applied; a missing or non-443 accept means the set is a list nothing enforces."
+    fi
+
+    note "live chain carries @read_fetch_ipv4 and @toolchain_ipv4, both with 443-scoped accepts, and both sets exist (read in $chain_tries attempt(s) over ${chain_elapsed}s)"
     TC_N="$(wc -l < /etc/clawfactory/toolchain-ips.txt 2>/dev/null | tr -d ' ')"
     [ -n "$TC_N" ] || TC_N=0
     if [ "$TC_N" -eq 0 ]; then
@@ -161,7 +227,7 @@ if [ "$BACKEND" = "nftables" ]; then
         # direction is denial rather than exposure.
         note "WARNING: the toolchain switch is on but resolved 0 addresses. Skill installation, GitHub and npm will be unreachable until the next refresh."
     fi
-    note "live chain carries @toolchain_ipv4 with a 443-scoped accept ($TC_N address(es))"
+    note "toolchain set holds $TC_N address(es)"
 else
     note "backend=$BACKEND: the read-fetch list is applied as individual ACCEPT rules by fw-apply.sh"
 fi
