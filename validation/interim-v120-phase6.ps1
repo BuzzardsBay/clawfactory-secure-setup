@@ -206,8 +206,11 @@ node -e 'const p=require("/etc/clawfactory/egress-policy.json");console.log("POL
     Record "G3.3c.$tag" 'Revoking in the UI actually removes the route' `
         $(if ($sRevok) { 'PASS' } else { 'FAIL' }) `
         'this is why read_fetch_ipv4 is a separate set: the provider set is refreshed additively and could not be revoked'
+    # VERDICT TRIAGE. The remaining branch is the marker missing altogether, so
+    # the preservation question was never answered: VOID. The zero case stays
+    # INFO because there was no send destination to preserve.
     Record "G3.3d.$tag" 'The send destination survived a read-fetch write (shared policy file, shared lock)' `
-        $(if ($add.Out -match 'SEND_ACTIONS_PRESERVED=[1-9]') { 'PASS' } elseif ($add.Out -match 'SEND_ACTIONS_PRESERVED=0') { 'INFO' } else { 'REVIEW' }) `
+        $(if ($add.Out -match 'SEND_ACTIONS_PRESERVED=[1-9]') { 'PASS' } elseif ($add.Out -match 'SEND_ACTIONS_PRESERVED=0') { 'INFO' } else { 'VOID' }) `
         'Guard 3 must never be the reason a user loses their authorized SMTP destination'
 }
 

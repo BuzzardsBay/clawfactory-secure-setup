@@ -244,8 +244,12 @@ node /usr/local/sbin/clawfactory-quarantinectl.js list 2>&1
     Record 'PNL.3' 'Restore from the Studio panel returns the file byte-exact' `
         $(if ($present -and $shaMatch -and $lenOk -and $ctlOk) { 'PASS' } else { 'FAIL' }) `
         "present=$present sha256Match=$shaMatch lengthMatch=$lenOk expected=$($state.victimSha)"
+    # VERDICT TRIAGE. REVIEW collapsed two different failures. If the OWNER line
+    # was never printed the ownership was not measured, which is VOID. If it was
+    # printed and is not clawuser, the agent cannot read back what it lost, which
+    # is the product claim failing: FAIL.
     Record 'PNL.3b' 'Restored file ownership is correct' `
-        $(if ($ownerOk) { 'PASS' } else { 'REVIEW' }) `
+        $(if ($ownerSeen -eq 'not read') { 'VOID' } elseif ($ownerOk) { 'PASS' } else { 'FAIL' }) `
         "observed '$ownerSeen'; the agent must be able to read back what it lost"
 }
 
@@ -314,8 +318,12 @@ su -s /bin/bash clawuser -c 'cat /etc/clawfactory/send-credential.json' 2>&1 | h
     if (-not $state.slug) { W 'No grant state. Run prep-quarantine first.'; W "PANELS_PROBE_COMPLETE rc=4"; exit 4 }
     Section "Warm the agent before the load-bearing turn (L17)"
     $warm = Warm-Agent
+    # VERDICT TRIAGE. This is the L17 warm, a PRECONDITION for the load-bearing
+    # turn that follows. If the agent never answered, the turn below is cold and
+    # its result is not a product verdict. VOID, with the reason named.
     Record 'PNL.WARM2' 'Agent answers a trivial turn before the send is queued' `
-        $(if ($warm.Ok) { 'PASS' } else { 'REVIEW' }) "attempts=$($warm.Attempts)"
+        $(if ($warm.Ok) { 'PASS' } else { 'VOID' }) `
+        "attempts=$($warm.Attempts); a failed warm means the turn below is cold and cannot be read as a product result"
 
     Section "Queue a real send, so Approvals has a genuine card to render"
 
@@ -398,12 +406,21 @@ journalctl -u clawfactory-send.service --no-pager -n 30 2>&1 | tail -30
     $pendingCount = if ($v.Out -match 'PENDING_COUNT=(\d+)') { [int]$Matches[1] } else { -1 }
     Record 'PNL.7ctl' 'CONTROL: the receipts directory exists' `
         $(if ($receiptDir) { 'PASS' } else { 'VOID' }) 'a zero count from a missing directory is not a zero'
+    # VERDICT TRIAGE. The remaining branch is receiptCount = -1, meaning the
+    # RECEIPT_COUNT line was never parsed, so nothing was measured. VOID.
     Record 'PNL.7' 'Approval from the panel executed the send and wrote a receipt' `
-        $(if ($receiptDir -and $receiptCount -gt 0) { 'PASS' } elseif ($receiptCount -eq 0) { 'FAIL' } else { 'REVIEW' }) `
-        "receipts=$receiptCount pendingRemaining=$pendingCount"
+        $(if ($receiptDir -and $receiptCount -gt 0) { 'PASS' } elseif ($receiptCount -eq 0) { 'FAIL' } else { 'VOID' }) `
+        "receipts=$receiptCount pendingRemaining=$pendingCount receiptsDirPresent=$receiptDir"
+    # VERDICT TRIAGE, and this one is a FINDING about the check rather than a
+    # relabelling. It counts the WHOLE pending queue, so it can only answer its
+    # own question when the queue is empty. A nonzero count does not distinguish
+    # "our approved request is still pending", which is a defect, from "something
+    # else was queued", which is not, and the old evidence string admitted as
+    # much. So: zero is a real PASS, anything else is VOID and says why. To make
+    # this a FAIL-capable check it must count ITS OWN requestId, not the queue.
     Record 'PNL.7b' 'The approved request left the pending queue' `
-        $(if ($pendingCount -eq 0) { 'PASS' } else { 'REVIEW' }) `
-        "pending=$pendingCount; nonzero is only a defect if nothing else was queued"
+        $(if ($pendingCount -eq 0) { 'PASS' } else { 'VOID' }) `
+        "pending=$pendingCount; this check counts the whole queue, so only an empty queue answers it. A nonzero count cannot separate our request from an unrelated one, and -1 means the count was never read."
     W 'NOTE: the recipient domain is example.invalid, which cannot resolve. This step'
     W 'proves the APPROVAL executed and was recorded, not that mail was delivered.'
     W 'External delivery is card #198 and was proven separately in the interim run.'
@@ -453,13 +470,19 @@ journalctl -u clawfactory-send.service --no-pager -n 25 2>&1 | tail -25
     # record in pending/, root:root 600, carrying state=denied, the bound hash and
     # the decision timestamp. That is an audit trail, it is unreadable to uid 1000,
     # and keeping it is better than discarding it. Verified directly on cfv-160.
+    # VERDICT TRIAGE. The remaining branch means inStaging is 0 or -1 while one of
+    # the two controls did NOT hold: a zero read from a missing directory, or read
+    # by a scanner proven blind. Neither is a pass and neither is a product
+    # failure. VOID, naming which control failed.
     Record 'PNL.8' 'Denial discarded the staged attachment bytes' `
         $(if ($dirPresent -and $scannerOk -and $inStaging -eq 0) { 'PASS' } `
-          elseif ($inStaging -gt 0) { 'FAIL' } else { 'REVIEW' }) `
-        "deniedBytesInStaging=$inStaging"
+          elseif ($inStaging -gt 0) { 'FAIL' } else { 'VOID' }) `
+        "deniedBytesInStaging=$inStaging stagingDirPresent=$dirPresent scannerProvenSighted=$scannerOk"
+    # VERDICT TRIAGE. Zero retained records is the documented audit trail being
+    # absent, which is a FAIL. -1 means the count was never read, which is VOID.
     Record 'PNL.8b' 'The denial is recorded in a root-only audit record' `
-        $(if ($inStore -ge 1) { 'PASS' } else { 'REVIEW' }) `
-        "recordsRetaining the request=$inStore; retention is deliberate, and the record is mode 600 root:root"
+        $(if ($inStore -ge 1) { 'PASS' } elseif ($inStore -eq 0) { 'FAIL' } else { 'VOID' }) `
+        "recordsRetainingTheRequest=$inStore; retention is deliberate, and the record is mode 600 root:root"
 }
 
 }

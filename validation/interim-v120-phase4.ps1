@@ -74,8 +74,15 @@ Record "S.1ctlA.$tag" 'CONTROL (must succeed): allowlisted 443 connects' `
     $(if ($ctlA) { 'PASS' } else { 'FAIL' }) 'without this the blocks above could be a dead network'
 Record "S.1ctlB.$tag" 'CONTROL (must fail): non-allowlisted 443 blocked' `
     $(if ($ctlB) { 'PASS' } else { 'FAIL' }) 'proves the allowlist discriminates by host, not just by port'
+# VERDICT TRIAGE. VOID rather than FAIL, and the difference from ctlA and ctlB
+# above is real. Those two measure the PRODUCT: a provider route that does not
+# connect is a bricked agent, and a non-allowlisted host that does connect is a
+# broken allowlist, so both are product failures. This one measures the
+# INSTRUMENT. If /dev/tcp probing does not work in this shell then nothing above
+# was measured, which is a void phase and not a defect in the firewall.
 Record "S.1ctlC.$tag" 'CONTROL (must succeed): the probe can observe a real listener' `
-    $(if ($ctlC) { 'PASS' } else { 'REVIEW' }) 'proves /dev/tcp probing works at all in this shell'
+    $(if ($ctlC) { 'PASS' } else { 'VOID' }) `
+    'proves /dev/tcp probing works at all in this shell; without it the blocks above are unmeasured rather than proven'
 
 if (-not $PostReboot) {
     # -------------------------------------------------- 2. shipped refresh
@@ -198,7 +205,8 @@ $unreadable = $cred.Out -match 'Permission denied'
 Record "S.4.$tag" 'Credential unreadable by the agent uid' `
     $(if ($unreadable) { 'PASS' } else { 'FAIL' }) '0600 root:root'
 if ($cred.Out -match 'NO_SECRET_CONFIGURED') {
-    Record "S.4leak.$tag" 'Credential value absent from logs, receipts, errors, process listing' 'BLOCKED' `
+    # VERDICT TRIAGE. Missing precondition, never a product verdict.
+    Record "S.4leak.$tag" 'Credential value absent from logs, receipts, errors, process listing' 'VOID' `
         'no real credential configured at run time; a synthetic secret would make this a synthetic test'
 } else {
     $blind = $cred.Out -match 'CONTROL_SCANNER_BLIND'
@@ -243,12 +251,19 @@ su -s /bin/bash -c "printf 'post kill\n' > /tmp/kb3.txt; clawfactory-send --to s
     $liveAfter = if ($kill.Out -match 'LIVE_PENDING_AFTER=(\d+)') { [int]$Matches[1] } else { -1 }
     $stagAfter = if ($kill.Out -match '(?s)--- AFTER ---.*?staging dirs  : (\d+)') { [int]$Matches[1] } else { -1 }
     $cancelled = if ($kill.Out -match '"cancelled"\s*:\s*(\d+)') { [int]$Matches[1] } else { -1 }
+    # VERDICT TRIAGE. Any of the three counts reading -1 means it was never
+    # parsed, so the kill was not measured: VOID. All three parsed but not in the
+    # expected state is the kill switch failing to do what it claims: FAIL.
     Record 'S.5' 'Kill switch cancels pending sends and purges staging' `
-        $(if ($liveAfter -eq 0 -and $stagAfter -eq 0 -and $cancelled -gt 0) { 'PASS' } else { 'REVIEW' }) `
-        "broker reported cancelled=$cancelled; live queue after=$liveAfter; staging dirs after=$stagAfter"
+        $(if ($liveAfter -lt 0 -or $stagAfter -lt 0 -or $cancelled -lt 0) { 'VOID' } `
+          elseif ($liveAfter -eq 0 -and $stagAfter -eq 0 -and $cancelled -gt 0) { 'PASS' } else { 'FAIL' }) `
+        "broker reported cancelled=$cancelled; live queue after=$liveAfter; staging dirs after=$stagAfter (-1 on any of these means the value was never read)"
+    # VERDICT TRIAGE. FAIL, not VOID. A broker that will not accept a new request
+    # after the kill has been bricked BY the kill, and that is a product defect
+    # rather than an instrument failure: the evidence line already says so.
     Record 'S.5c' 'CONTROL: the broker still accepts a new request after the kill' `
-        $(if ($kill.Out -match 'pending') { 'PASS' } else { 'REVIEW' }) `
-        'proves kill cancelled the queue rather than bricking the broker'
+        $(if ($kill.Out -match 'pending') { 'PASS' } else { 'FAIL' }) `
+        'proves kill cancelled the queue rather than bricking the broker; no new request accepted means the kill took the broker with it'
 }
 
 $outJson = if ($PostReboot) { 'C:\cfv\phase4-results-postreboot.json' } else { 'C:\cfv\phase4-results.json' }

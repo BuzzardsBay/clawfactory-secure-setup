@@ -137,7 +137,15 @@ try {
     W "ProgramData\ClawFactory exists : $(Test-Path 'C:\ProgramData\ClawFactory')"
     W "Program Files\ClawFactory      : $(Test-Path 'C:\Program Files\ClawFactory')"
     Record 'P1.0' 'Clean-box baseline recorded' 'INFO' "distros=$($distros -join ',')"
-} catch { Record 'P1.0' 'Clean-box baseline recorded' 'WARN' $_.Exception.Message }
+} catch {
+    # INFO, not VOID. The success path is INFO too: this row captures context and
+    # no claim in this phase is contingent on it. Box cleanliness is established
+    # by provenance, a freshly provisioned VM from the baseline image, not by this
+    # probe. Voiding the phase over a Get-CimInstance hiccup would be a false
+    # alarm about the product. The row stays honest by naming the failure instead
+    # of asserting a baseline it did not read.
+    Record 'P1.0' 'Clean-box baseline recorded' 'INFO' "baseline NOT collected: $($_.Exception.Message)"
+}
 
 # ----------------------------------------------------------------- 2. install
 Section "2. Install"

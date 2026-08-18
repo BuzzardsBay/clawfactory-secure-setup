@@ -91,9 +91,12 @@ $rNow    = if ($t12.Out  -match 'RECEIPTS_NOW=(\d+)')    { [int]$Matches[1] } el
 Record 'G2B.1' 'Test 1: agent enqueues, status pending, NOTHING sent' `
     $(if (($t12.Out -match 'pending') -and ($rBefore -ge 0) -and ($rNow -eq $rBefore)) { 'PASS' } else { 'FAIL' }) `
     "requestId=$reqId; receipts before=$rBefore after=$rNow (unchanged means nothing was sent)"
+# VERDICT TRIAGE. No source hash means the comparison was never made: VOID.
+# With it, a mismatch is the claim failing: FAIL.
 Record 'G2B.2' 'Test 2: card carries the full payload; staged hash equals source hash' `
-    $(if ($srcSha -and ($t12.Out -match "STAGED .*sha=$srcSha") -and ($t12.Out -match [regex]::Escape($Recipient))) { 'PASS' } else { 'REVIEW' }) `
-    "recipient, subject and full body rendered; staged copy hash equals source hash ($srcSha)"
+    $(if (-not $srcSha) { 'VOID' } `
+      elseif (($t12.Out -match "STAGED .*sha=$srcSha") -and ($t12.Out -match [regex]::Escape($Recipient))) { 'PASS' } else { 'FAIL' }) `
+    "recipient, subject and full body rendered; sourceShaRead=$([bool]$srcSha) stagedShaEqualsSource ($srcSha)"
 
 # ------------------------------------- test 3 / card #198: REAL external send
 Section "Test 3 and card #198: approve, and the message actually leaves for a third-party mailbox"
@@ -119,16 +122,26 @@ grep -c 'BODY-' "/var/lib/clawfactory/send/receipts/$ID.json" 2>/dev/null | sed 
     $sent = ($t3.Out -match '"status"\s*:\s*"sent"') -or ($t3.Out -match '250')
     Record 'G2B.3' 'Test 3: approve executes a REAL send and writes a receipt' `
         $(if ($sent) { 'PASS' } else { 'FAIL' }) 'provider reference recorded in the receipt'
-    Record 'G2B.198' 'Card #198: external delivery to a third-party mailbox' `
-        $(if ($sent) { 'SENT-AWAITING-INBOX-CONFIRM' } else { 'FAIL' }) `
-        "sender gmail, recipient $Recipient (different provider). Transmission proven here; ARRIVAL is confirmed in the mailbox, which is the only place it can be confirmed."
+    # VERDICT TRIAGE. Transmission IS machine-observable and is already the
+    # subject of G2B.3 immediately above, so this row's only distinct content is
+    # arrival, which this box cannot observe at all. It therefore makes no claim:
+    # INFO, carried as a manual item. Recording a pass here would assert delivery
+    # on the strength of a 250, which is transmission and not arrival.
+    Record 'G2B.198' 'Card #198: external delivery to a third-party mailbox' 'INFO' `
+        "transmitted=$sent. Sender gmail, recipient $Recipient (different provider). Transmission is proven by G2B.3; ARRIVAL is confirmed in the mailbox, which is the only place it can be confirmed. This row asserts nothing."
     Record 'G2B.3b' 'Staging purged after the send' `
         $(if ($t3.Out -match 'STAGING_PURGED') { 'PASS' } else { 'FAIL' }) ''
+    # VERDICT TRIAGE. The body appearing in the receipt is a real leak: FAIL. But
+    # the count line missing entirely means the probe never reported, which is
+    # VOID rather than a leak.
     Record 'G2B.3c' 'Receipt carries a provider reference but NOT the message body' `
-        $(if ($t3.Out -match 'body_in_receipt=0') { 'PASS' } else { 'REVIEW' }) ''
+        $(if ($t3.Out -match 'body_in_receipt=0') { 'PASS' } `
+          elseif ($t3.Out -match 'body_in_receipt=') { 'FAIL' } else { 'VOID' }) `
+        'a nonzero count is the message body sitting in the receipt; an absent count is a probe that did not report'
 } else {
-    Record 'G2B.3' 'Test 3: approve executes a REAL send and writes a receipt' 'UNTESTED' 'no requestId from test 1'
-    Record 'G2B.198' 'Card #198: external delivery to a third-party mailbox' 'UNTESTED' 'nothing was queued'
+    # VERDICT TRIAGE. Missing precondition, never a product verdict.
+    Record 'G2B.3' 'Test 3: approve executes a REAL send and writes a receipt' 'VOID' 'no requestId from test 1, so the approve path was not exercised'
+    Record 'G2B.198' 'Card #198: external delivery to a third-party mailbox' 'VOID' 'nothing was queued, so no delivery was attempted'
 }
 
 # ------------------------------------ tests 4, 5, 5b, 6, 7: refusal behaviours
@@ -210,17 +223,29 @@ $CTL kill >/dev/null 2>&1
 '@
 $t4 = Invoke-WslFile -Tag 'p3b-t4' -User 'root' -Body ($b4.Replace('__RECIP__', $Recipient).Replace('__TAG__', $rand))
 W $t4.Out
+# LIVENESS GATE for the tests-4-to-7 cluster, which all read one probe body.
+# Each verdict is a search for an expected refusal string, so a probe that died
+# early looks identical to a broker that refused nothing. The 11c control banner
+# is emitted at the END of the body, so its presence means the body ran through.
+# Without it these are VOID: not measured, rather than measured and failed.
+$t4Ran = $t4.Out -match 'TEST 11c CONTROL'
+if (-not $t4Ran) { W 'WARNING: the refusal probe did not run to completion; tests 4 to 7 are VOID rather than failed.' }
+
 Record 'G2B.4' 'Test 4: deny sends nothing, receipt records denied, staging purged' `
-    $(if (($t4.Out -match 'denied') -and ($t4.Out -match 'DENY_STAGING_PURGED')) { 'PASS' } else { 'REVIEW' }) ''
+    $(if (-not $t4Ran) { 'VOID' } elseif (($t4.Out -match 'denied') -and ($t4.Out -match 'DENY_STAGING_PURGED')) { 'PASS' } else { 'FAIL' }) `
+    "probeRanToCompletion=$t4Ran"
 Record 'G2B.5' 'Test 5: replay of a consumed approval refused' `
-    $(if ($t4.Out -match 'ESTATE|already') { 'PASS' } else { 'REVIEW' }) ''
+    $(if (-not $t4Ran) { 'VOID' } elseif ($t4.Out -match 'ESTATE|already') { 'PASS' } else { 'FAIL' }) `
+    "probeRanToCompletion=$t4Ran"
 Record 'G2B.5b' 'Test 5b: wrong payload hash voids the approval' `
-    $(if ($t4.Out -match 'EHASH|changed|voided') { 'PASS' } else { 'REVIEW' }) ''
+    $(if (-not $t4Ran) { 'VOID' } elseif ($t4.Out -match 'EHASH|changed|voided') { 'PASS' } else { 'FAIL' }) `
+    "probeRanToCompletion=$t4Ran"
 Record 'G2B.6' 'Test 6: attachment rewritten after approval, the STAGED bytes are what transmit' `
-    $(if ($t4.Out -match 'STAGED_SHA=') { 'PASS' } else { 'REVIEW' }) `
-    'staged hash captured before the rewrite; the approved copy is the one sent, verified in the delivered attachment'
+    $(if (-not $t4Ran) { 'VOID' } elseif ($t4.Out -match 'STAGED_SHA=') { 'PASS' } else { 'FAIL' }) `
+    "staged hash captured before the rewrite; the approved copy is the one sent, verified in the delivered attachment; probeRanToCompletion=$t4Ran"
 Record 'G2B.7' 'Test 7: expired approval refused, nothing sent' `
-    $(if ($t4.Out -match 'EEXPIRED|expired|closed') { 'PASS' } else { 'REVIEW' }) ''
+    $(if (-not $t4Ran) { 'VOID' } elseif ($t4.Out -match 'EEXPIRED|expired|closed') { 'PASS' } else { 'FAIL' }) `
+    "probeRanToCompletion=$t4Ran"
 Record 'G2B.11c' 'CONTROL: a readable attachment is accepted' `
     $(if ($t4.Out -match 'pending') { 'PASS' } else { 'FAIL' }) `
     'proves the /etc/shadow refusal in phase 3 was targeted, not a broken enqueue path'
@@ -268,7 +293,8 @@ grep -qF -- "$SECRET" /etc/clawfactory/send-credential.json && echo CONTROL_SCAN
 '@
 W $t13.Out
 if ($t13.Out -match 'NO_SECRET_CONFIGURED') {
-    Record 'G2B.13' 'Test 13: credential value absent from every surface' 'BLOCKED' 'no credential configured'
+    # VERDICT TRIAGE. Missing precondition, never a product verdict.
+    Record 'G2B.13' 'Test 13: credential value absent from every surface' 'VOID' 'no credential configured, so there was no real secret to scan for'
 } else {
     $blind = $t13.Out -match 'CONTROL_SCANNER_BLIND'
     $zero  = ($t13.Out -match 'TOTAL_FILE_HITS=0') -and ($t13.Out -match 'journal hits=0') -and

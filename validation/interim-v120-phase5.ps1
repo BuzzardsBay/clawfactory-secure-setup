@@ -152,7 +152,7 @@ $backendReachable = ($net.Out -match ':3000 CONNECTED') -or ($net.Out -match ':5
 $sanityBlocked = $net.Out -match '65123 blocked'
 
 Record 'G2.8f.3ctl' 'CONTROL: is the WSL-to-Windows network path open at all?' `
-    $(if ($rdpReachable) { 'PASS' } else { 'NOTE' }) `
+    $(if ($rdpReachable) { 'PASS' } else { 'VOID' }) `
     $(if ($rdpReachable) {
         'RDP reachable from clawuser, so the path is OPEN and 8f.2 is load-bearing: a Studio listener WOULD have been reachable.'
       } else {
