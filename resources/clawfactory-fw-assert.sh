@@ -91,6 +91,25 @@ if [ "$chain_tries" -gt 1 ]; then
     note "chain read succeeded on attempt $chain_tries of $CHAIN_MAX_TRIES after ${chain_elapsed}s; earlier attempts failed with [${chain_err:-<empty>}]"
 fi
 
+# RETRY READS, NEVER RETRY FINDINGS. Read this before "fixing" the apparent
+# inconsistency below, because it is deliberate.
+#
+# The chain read above retries, and set_exists_retry below retries, because both
+# are READS: each is a syscall that can fail transiently and tell you nothing
+# about the ruleset when it does. Every shape check from here down is a grep over
+# text ALREADY IN HAND, so there is no read left to fail. Retrying one of those
+# would not be robustness, it would be waiting for a rule to come back, which is
+# tamper TOLERANCE and is the opposite of what a tripwire is for.
+#
+# Measured on cfv-167. With the toolchain accept deleted and restored 5s later,
+# this script failed in 1s rather than riding it out, which is correct: a deleted
+# accept is exactly the drift it exists to catch, and 40 concurrent full re-applies
+# of /etc/nftables.conf in the same run did NOT produce a single false finding,
+# because nft -f is one atomic netlink transaction and presents no window where
+# the chain exists without its rules. The INSTALLER is the opposite case and
+# polls the accepts on purpose: during install, timers are racing and a transient
+# absence is expected, so there it is a read problem and not tampering.
+
 # 1. The chain must still scope itself to the agent uid at the top. Without this
 #    line the whole chain applies to root too, which would break the broker.
 if ! grep -qE 'meta skuid != (clawuser|1000) return' <<<"$CHAIN"; then

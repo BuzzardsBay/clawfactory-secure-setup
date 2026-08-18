@@ -4,14 +4,29 @@ Session 2026-08-18. Dispatch card #256. Input artifact 1.3.3, signed
 `5bef35dc3a4a944583470bdb0afe893d413d96eafcdf1df0ba66311a417522ab`, verified byte
 for byte on disk before anything was changed.
 
-**STATUS: IN PROGRESS.** This file is written before the VM phase completes so
-that a close-out exists whatever happens to the session. Sections marked OWED are
-not done. If this line is still present, the session ended early and the OWED
-items are genuinely outstanding.
+**STATUS: COMPLETE for tasks 0, 1 and 2. Tasks 3 and 4 not started, deliberately
+and by the job's own decision rule.** Section 9 says what is owed and why.
 
 ---
 
-## 1. The two answers worth reading first
+## 1. The three answers worth reading first
+
+**TC.3 is outcome C, and the toolchain toggle is exonerated.** With the toggle
+OFF a real agent turn failed and 91 packets were dropped to `160.79.104.10`.
+With the toggle ON, the control turn **also failed**, dropping 78 packets to the
+**same address**. `160.79.104.10` is `api.anthropic.com`, the AI provider, which
+the toolchain toggle explicitly does not govern and which `fetchctl` itself
+describes as "the provider route is untouched". So the turn does not fail because
+of the toggle. It fails because the address the gateway dials for the model is
+not in `@allowed_ipv4` and hits the terminal drop. The card #245 inference, that
+"the stall is downstream in the gateway", pointed at the wrong subsystem.
+
+**The control did not fire, and that is the finding rather than a spoiled run.**
+A control that fails in the same run voids the attribution it was there to
+support, and here it does more: because it failed the SAME way, on the SAME
+address, it converts "the toggle broke the turn" into "something else broke the
+turn and the toggle was never implicated". Had I run only the subject, the
+obvious and wrong conclusion was sitting right there.
 
 **The verdict triage is done and proven, and two of the card's four labelled
 guesses were wrong.** Not because the guesses were careless, but because the word
@@ -265,12 +280,51 @@ was wrong.
 
 Commit `29f683e`.
 
-### 4.5 OWED: the on-VM proof
+### 4.5 The on-VM proof, on cfv-167
 
-Not yet run. A clean install proves nothing on its own, because the unfixed
-artifact also installed cleanly once. Owed: delay held inside the bound,
-concurrent `nft` load during the assert, and the bound-exceeded control on a real
-installed box.
+1.3.4 installed clean on a fresh box: `INSTALLER_DONE=success`, with all three
+accepts and all three sets present afterwards. That is test 1, and on its own it
+proves nothing, because the unfixed artifact also installed cleanly once. The
+injected directions are what matter.
+
+| Test | Result |
+| --- | --- |
+| 1. Install completes clean | **PASS.** `INSTALLER_DONE=success`; chain carries all three 443-scoped accepts, all three sets present |
+| 2. Concurrent `nft` load during the assert | **PASS.** rc=0 in 1s while 40 full re-applies of `/etc/nftables.conf` hammered the same table |
+| 3. CONTROL, exceed the bound | **PASS.** rc=1, `SAYS_ACCEPT_MISSING=1`, `SAYS_CANNOT_READ=0`. Chain readable, rule genuinely absent, and it said exactly that |
+| 4. CONTROL, unreadable chain | **PASS.** rc=1, `SAYS_CANNOT_READ=1`, `CARRIES_NFT_STDERR=1`, 30 attempts over 30s, `bytes returned 0`, and no claim about any rule. Injection proven landed: 5 references rewritten, 0 real remaining |
+
+Tests 3 and 4 together are the whole point of the fix: the same script, given two
+different faults, produces two different and correct diagnoses. Before this
+change both produced the same message, and that message asserted the wrong one.
+
+**Test 1's delay-inside-the-bound direction did not behave as I specified it, and
+the specification was wrong rather than the code.** With the toolchain accept
+deleted and restored 5s later, `fw-assert` failed in 1s instead of riding it out.
+I had written the expectation as "must ride it out". That is wrong for a
+tripwire: a deleted accept is precisely the drift it exists to catch, and
+polling would be tamper TOLERANCE, delaying detection of real tampering.
+
+The principle, now written into the file so the apparent inconsistency is not
+"fixed" later: **retry reads, never retry findings.** The chain read and the set
+checks retry because they are syscalls that can fail transiently and tell you
+nothing when they do. The shape checks are greps over text already in hand, with
+no read left to fail. The INSTALLER is the opposite case and polls the accepts on
+purpose, because during install the timers are racing and a transient absence is
+a read problem rather than tampering.
+
+Test 2 also quietly settles card #255's inference 2. Forty concurrent full
+re-applies produced **zero** false findings, because `nft -f` is a single atomic
+netlink transaction and presents no window in which the chain exists without its
+rules. So contention does not manufacture a missing rule. Combined with 4.1, the
+surviving explanation for cfv-165 is a failed READ, which is exactly what the new
+message can now distinguish, and what the old one could not.
+
+**A defect in my own probe, recorded rather than quietly corrected.** The
+`INJECTION_LANDED_ACCEPT_GONE=0` line reads as a failed injection and is the
+opposite: 0 matching lines after deleting the rule IS the proof it landed. The
+label was inverted. It did not affect any verdict, but a reader of the raw output
+would misread it.
 
 ---
 
@@ -306,23 +360,123 @@ NICs, public IPs or NSGs to sweep.
 
 ---
 
-## 7. OWED
+## 7. Task 2: TC.3, isolated by measurement
 
-- **Task 1 on-VM proof.** Section 4.5.
-- **Task 2, TC.3 isolation.** Not started. The isolation method is designed and
-  written: a log rule inserted immediately before the terminal drop, because a
-  packet capture is the WRONG instrument here (nft's output filter hook drops
-  before the device layer, so tcpdump would show a clean nothing for exactly the
-  case under investigation) and conntrack is no better (a dropped SYN never
-  becomes a tracked connection). Calibration against a known-dropped destination
-  is built in and gates the subject run.
-- **Task 3, panel copy.** Deliberately not touched, per the job: the copy depends
-  on the TC.3 outcome.
-- **Task 4, the two #245 deferrals.** `MANUAL.*` and `TC.*.POSTREBOOT`.
-- **VM2, clean-install validation of the shipping artifact.**
+### 7.1 The instrument, and why the two obvious ones are wrong
 
-## 8. Git
+A packet capture cannot see this. nft's output filter hook drops the packet
+BEFORE it reaches the device layer, so `tcpdump` reports a clean nothing for
+exactly the case under investigation, which would read as "not a network
+problem" and send the next session after the wrong subsystem. conntrack is no
+better: a dropped SYN never becomes a tracked connection. What does see it is the
+ruleset, so a rate-limited `log` rule was inserted immediately before the
+terminal drop, scoped to uid 1000, and the kernel names the destination.
 
-Three commits on `main`, pushed: `034f6b8` (verdict triage), `29f683e`
-(chain-read fix), `f84732a` (build 1.3.4 and ledger). No tag, per the job.
-Studio untouched, so nothing to push there.
+**Calibrated first, and the calibration gated the subject.** The rule was pointed
+at `example.org`, which is in no allowlist and must be dropped. It was named,
+`CALIBRATION OK`. Had it not been, the probe was written to refuse to run the
+subject at all, because a null result from an uncalibrated instrument is
+uninterpretable and would have read as "no network dependency".
+
+### 7.2 What was measured
+
+| Run | Toggle | Turn | Seconds | Packets dropped, and to where |
+| --- | --- | --- | --- | --- |
+| CONTROL | **ON**, 25 addresses in the set | **FAILED**, empty body | 301 | 78 to `160.79.104.10` |
+| SUBJECT | **OFF**, 0 addresses in the set | **FAILED**, `{"error":{"message":"internal error"}}` | 165 | 91 to `160.79.104.10` |
+| SECOND, no gateway restart | OFF | **FAILED** | 162 | 84 to `160.79.104.10` |
+
+`160.79.104.10` is `api.anthropic.com`, verified by resolution. For contrast the
+toolchain hosts resolve elsewhere entirely: `api.github.com` to `140.82.114.6`,
+`registry.npmjs.org` into `104.16.x.34`.
+
+### 7.3 The answer, and which outcome applies
+
+**Outcome C.** The block is real and it is a network block, but not on anything
+the toolchain toggle governs. The gateway cannot reach the model provider,
+because the address it dials is not in `@allowed_ipv4` and falls through to the
+terminal drop. The toggle is exonerated: the turn fails identically with it ON,
+and `fetchctl` correctly reports "the provider route is untouched" when switching
+it off.
+
+Per the job's decision rule for C: stop and report, ship tasks 0 and 1, and card
+TC.3 with the isolation evidence. The 4.1 diagnosis was wrong and a fix aimed at
+the toolchain list would have been aimed at the wrong subsystem.
+
+**Per turn or per gateway start:** per turn. The third turn, with the gateway not
+restarted, failed the same way with the same destination.
+
+**This probably explains cfv-166's original observation.** That run saw a turn
+fail with the toggle off and attributed it to the toggle. The 4.5 minute stall
+reported there matches the 301s and 165s timeouts seen here. If no control turn
+with the toggle ON was run, the attribution had nothing holding it up.
+
+### 7.4 What this does NOT establish, stated because it matters
+
+I did not determine WHY the provider address is missing from `@allowed_ipv4`.
+The candidates are that the refresh resolved a different address than the one the
+gateway later dialled (Anthropic publishes several, and an address set cannot
+follow that), or that the refresh silently did not populate. Both are testable in
+one short VM run and neither was run here.
+
+**This is more serious than the toggle question it displaced.** On a clean 1.3.4
+install the agent could not reach its own model on any of three turns over ten
+minutes. That should be treated as a ship-blocker until explained, and it is not
+the blocker the work package expected to find.
+
+## 8. Judgement calls, and the reasoning behind them
+
+Recorded because the operator asked for reasoning rather than questions.
+
+**One VM, TC.3 first, rather than the full two-VM plan.** The job says a session
+that triages the verdicts, fixes the chain read and precisely names the TC.3
+dependency is a successful session even if the toggle does not ship. With finite
+budget, naming the blocker beat validating copy that the blocker might change.
+It was the right call: TC.3 turned out not to be a toolchain problem at all, so
+tasks 3 and 4 would have been work against a premise that has now moved.
+
+**The VM was torn down rather than kept for the provider follow-up.** The
+question in 7.4 needs a fresh install to answer honestly anyway, and a kept VM
+bills while a session writes its close-out. One VM once ran 64 hours for nothing.
+
+**`fw-assert` was NOT changed when test 1 surprised me.** The temptation was to
+make it poll the accepts like the installer does. That would have been a
+regression dressed as a fix: it would delay detection of exactly the tampering
+the tripwire exists to catch. A comment was added instead, because the next
+reader will see the same apparent inconsistency and reach for the same wrong fix.
+
+**No 1.3.5 build.** Nothing shipped after 1.3.4 that changes installed behaviour;
+the only later edit is a comment in `fw-assert.sh`. Bumping to consume a version
+number for a comment would waste a ledger row.
+
+## 9. OWED, and none of it silently
+
+- **The provider-route root cause, 7.4.** This is now the top item, above
+  anything remaining from the original work package.
+- **Task 3, panel copy.** Not touched, correctly: the job says not to touch it
+  until the TC.3 outcome is known, and the outcome moved the premise. Under
+  outcome C the copy question is now open rather than answered, because the
+  control being renamed was predicated on outcome A.
+- **Task 4, the two #245 deferrals.** `MANUAL.*` and `TC.*.POSTREBOOT`. Neither
+  was recorded as a pass and neither became one.
+- **VM2, clean-install validation of the shipping artifact.** Not run.
+- **The ratified claim sentence** was not touched, so it is unchanged. Nothing in
+  this session made the agent reach anything it could not reach before; the only
+  behavioural changes are retries on reads and a resolver error path.
+- **Test table items 5 to 11** from the work package: not run.
+
+## 10. Resource ledger, closing state
+
+Licence slot released: `Machine deactivated successfully` for machine_id
+`ff9f7887-e31b-4f8e-8656-08df4e6385de`. `cfv-167` and all five child resources
+deleted, each `rc=0`, NIC first. Unfiltered resource list shows exactly the
+expected residual: the storage account, the VNET and the two baseline images.
+Zero VMs in the subscription. Verified by an unfiltered list, not a grep for the
+VM name.
+
+## 11. Git
+
+Commits on `main`: `034f6b8` (verdict triage), `29f683e` (chain-read fix),
+`f84732a` (build 1.3.4 and ledger), `4203aaa` (interim close-out), plus this
+close-out and the `fw-assert` comment. No tag, per the job. Studio untouched, so
+nothing to push there.
