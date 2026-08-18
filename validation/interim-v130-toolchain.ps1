@@ -141,6 +141,45 @@ Register-Control -Id "TC.1.CTL.$tag" -Name 'the reachability probe can both conn
 Record "TC.1c.$tag" 'With the switch ON, the software sources are reachable for uid 1000' `
     $(if ($tcOn) { 'PASS' } else { 'FAIL' }) "github and npm reachable=$tcOn"
 
+# --- TC.3's CONTROL TURN, and it is load-bearing ----------------------------
+# RE-SPECIFIED 2026-08-18, card #257. The old TC.3 ran ONE turn, with the toggle
+# OFF, and recorded FAIL when it did not complete. That attribution was wrong.
+# On cfv-167 the turn failed with the toggle OFF and failed IDENTICALLY with it
+# ON, dropping to the same provider address both times, so the finding was never
+# about the toggle at all. Only a control turn with the toggle ON exposed that,
+# and the old test had none, so the obvious and wrong conclusion was sitting
+# right there for anyone who ran only the subject.
+#
+# So the control runs HERE, while the toggle is still ON, and TC.3 below is
+# gated on it. A turn that cannot complete with the toggle ON says nothing
+# whatever about a toggle that has not been touched yet: it says the agent
+# cannot reach its model, which is a different and larger finding.
+#
+# The failure string is the ABSENCE of TOOLCHAINONOK. That token appears nowhere
+# else in this probe's own output, so this control cannot pass by finding its own
+# echo. Warmed first (L17) for the same reason TC.3 is: a cold first turn failing
+# would be recorded as a product verdict it has nothing to do with.
+W '--- warming the agent (L17), then the TC.3 control turn with the toggle still ON ---'
+$null = Invoke-WslFile -Tag "tc-warm-$tag" -User 'clawuser' -Body @'
+TOKEN=$(node -e 'const j=require("/home/clawuser/.openclaw/openclaw.json");process.stdout.write((j.gateway&&j.gateway.auth&&j.gateway.auth.token)||"")')
+printf '%s' '{"model":"openclaw/main","stream":false,"messages":[{"role":"user","content":"Reply with exactly: WARMUP"}]}' > /var/tmp/tc-warm.json
+curl -s --max-time 120 -X POST http://127.0.0.1:8787/v1/chat/completions -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -H "x-openclaw-agent-id: main" --data @/var/tmp/tc-warm.json | head -c 400
+rm -f /var/tmp/tc-warm.json
+echo
+'@
+$ctlTurn = Invoke-WslFile -Tag "tc-turn-on-$tag" -User 'clawuser' -Body @'
+TOKEN=$(node -e 'const j=require("/home/clawuser/.openclaw/openclaw.json");process.stdout.write((j.gateway&&j.gateway.auth&&j.gateway.auth.token)||"")')
+printf '%s' '{"model":"openclaw/main","stream":false,"messages":[{"role":"user","content":"Reply with exactly: TOOLCHAINONOK"}]}' > /var/tmp/tc-on.json
+curl -s --max-time 200 -X POST http://127.0.0.1:8787/v1/chat/completions -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -H "x-openclaw-agent-id: main" --data @/var/tmp/tc-on.json | head -c 900
+rm -f /var/tmp/tc-on.json
+echo
+'@
+W $ctlTurn.Out
+$tc3ControlOk = $ctlTurn.Out -match 'TOOLCHAINONOK'
+Record "TC.1d.$tag" 'A real agent turn completes with the toolchain toggle ON' `
+    $(if ($tc3ControlOk) { 'PASS' } else { 'FAIL' }) `
+    'this is the control turn for TC.3. It is recorded as its own row as well as gating TC.3, because "the agent cannot reach its model with the toggle ON" is a ship-blocker in its own right and must not be visible only as the VOID reason of another row.'
+
 # =========================================================================
 Section '2. Switch OFF: the sources become unreachable AND the addresses actually leave the set'
 $off = Invoke-WslFile -Tag "tc-off-$tag" -User 'root' -Body @'
@@ -175,16 +214,38 @@ Record "TC.2c.$tag" 'With the switch OFF, the software sources are unreachable f
     $(if ($tcOff) { 'PASS' } else { 'FAIL' }) "github, npm and raw all blocked=$tcOff"
 
 # =========================================================================
-Section '3. CONTROL for test 2: a real agent turn still completes with the switch OFF'
+Section '3. CONTROL-GATED: a real agent turn still completes with the switch OFF'
 # The point of the whole design. Narrowing the box must not brick the agent, and
 # an agent that cannot reach its model is a bricked product regardless of how
-# good the firewall looks. Warmed first (L17): a cold first turn failing would be
-# recorded as a toolchain regression it has nothing to do with.
+# good the firewall looks.
+#
+# DO NOT RE-RUN THIS TEST UNTIL THE PROVIDER ROUTE WORKS. Until then the control
+# below cannot pass, so this test cannot say anything, and a VOID here is the
+# correct and only available outcome. Re-running it to see it go red again buys
+# nothing and invites the same attribution error a second time. See card #257 and
+# docs/session_reports/2026-08-18_provider_route_source_read.md.
+#
+# THE CONTROL IS LOAD-BEARING, which is the whole of the re-specification. The
+# toggle-ON turn recorded at TC.1d must have completed for the toggle-OFF result
+# to mean anything. If it did not, the subject is NOT run and TC.3 records VOID
+# with a named reason, because a turn that already fails with the toggle ON
+# cannot become evidence about the toggle by being run again with it OFF. That is
+# precisely the inference cfv-166 made and cfv-167 refuted.
+$tc3Pre = Require-Precondition -Id "TC.3.PRE.$tag" `
+    -Name 'a real agent turn completes with the toolchain toggle ON' `
+    -Met $tc3ControlOk `
+    -Reason 'the toggle-OFF turn is only interpretable if the same turn succeeds with the toggle ON in the SAME run. A turn failing in both states is a provider-route failure, not a toggle finding, and recording it as a toggle finding is the error this rewrite exists to prevent.'
+
+if (-not $tc3Pre) {
+    Record "TC.3.$tag" 'A real agent turn completes end to end with the toolchain switch OFF' 'VOID' `
+        'NOT RUN. The control turn at TC.1d did not complete with the toggle ON, so the agent could not reach its model before the toggle was touched. Nothing measured after that point is a statement about the toggle. Fix the provider route, then re-run.'
+    W '--- TC.3 subject deliberately NOT run: its control did not fire ---'
+} else {
 $turnBody = @'
 TOKEN=$(node -e 'const j=require("/home/clawuser/.openclaw/openclaw.json");process.stdout.write((j.gateway&&j.gateway.auth&&j.gateway.auth.token)||"")')
-printf '%s' '{"model":"openclaw/main","stream":false,"messages":[{"role":"user","content":"Reply with exactly: TOOLCHAINOFFOK"}]}' > /tmp/tc-turn.json
-curl -s --max-time 180 -X POST http://127.0.0.1:8787/v1/chat/completions -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -H "x-openclaw-agent-id: main" --data @/tmp/tc-turn.json
-rm -f /tmp/tc-turn.json
+printf '%s' '{"model":"openclaw/main","stream":false,"messages":[{"role":"user","content":"Reply with exactly: TOOLCHAINOFFOK"}]}' > /var/tmp/tc-turn.json
+curl -s --max-time 180 -X POST http://127.0.0.1:8787/v1/chat/completions -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -H "x-openclaw-agent-id: main" --data @/var/tmp/tc-turn.json
+rm -f /var/tmp/tc-turn.json
 '@
 $turn = Invoke-WslFile -Tag "tc-turn-$tag" -User 'clawuser' -Body $turnBody
 W $turn.Out
@@ -197,7 +258,8 @@ if ($turn.Out -notmatch 'TOOLCHAINOFFOK') {
 $turnOk = $turn.Out -match 'TOOLCHAINOFFOK'
 Record "TC.3.$tag" 'A real agent turn completes end to end with the toolchain switch OFF' `
     $(if ($turnOk) { 'PASS' } else { 'FAIL' }) `
-    'the switch narrows the box without bricking the agent; the model reply is the evidence'
+    'the switch narrows the box without bricking the agent; the model reply is the evidence. This verdict is only interpretable because the control turn at TC.1d completed with the toggle ON in this same run.'
+}
 
 # =========================================================================
 Section '4. THE TEST THIS FEATURE EXISTS FOR: the switch survives a REAL five-hourly refresh'
