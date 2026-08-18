@@ -76,6 +76,30 @@ firewall dropped for the agent's uid.
 For contrast, the toolchain hosts resolve nowhere near it:
 `api.github.com` → `140.82.114.6`; `registry.npmjs.org` → `104.16.x.34`.
 
+### 2.1a How it was measured, which constrains how the follow-up must be
+
+Worth carrying into the next job, because the two obvious instruments both give
+a confidently wrong answer here.
+
+**A packet capture cannot see this.** nftables' output filter hook drops the
+packet BEFORE it reaches the device layer, so `tcpdump` on the interface shows a
+clean nothing for exactly the case under investigation. That reads as "not a
+network problem" and sends the next session after the wrong subsystem.
+
+**conntrack is no better.** A dropped SYN never becomes a tracked connection, so
+there is nothing to list.
+
+**What does see it** is the rule set itself: a rate-limited `log` rule inserted
+immediately before the terminal `drop`, scoped to the agent's uid. The kernel
+then names the destination it refused, which is where `160.79.104.10` came from.
+
+**The calibration gated the result.** Before trusting the log rule to find an
+unknown destination, it was pointed at `example.org`, which is in no allow-list
+and must be dropped. It was named, so a null result afterwards would have meant
+something. The probe was written to REFUSE to run the real test if that
+calibration found nothing, because a null result from an uncalibrated instrument
+is uninterpretable and would have read as "no network dependency".
+
 ### 2.2 What it means
 
 **The toolchain toggle is exonerated.** The turn fails identically with the
