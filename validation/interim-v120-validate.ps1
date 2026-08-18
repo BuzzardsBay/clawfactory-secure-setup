@@ -142,8 +142,14 @@ $CombinedExe = Join-Path $RepoRoot 'Output\ClawFactory-Secure-Setup.exe'
 # "Failed to pre-configure gateway". 1.3.3 seeds @toolchain_ipv4 at firewall time,
 # which closes the window without making anything unrevocable, because the set is
 # still flushed and rebuilt from policy on every later run. See close-out 8.4.
-$Sha256      = '5bef35dc3a4a944583470bdb0afe893d413d96eafcdf1df0ba66311a417522ab'
-$ExpectBytes = 440606872
+# Repinned to 1.3.4 for the provider-route diagnosis, card #257. 1.3.3 is the
+# build that produced the observation under investigation: on a fresh box the
+# agent could not reach its own model, three turns over ten minutes, every one
+# dropped to the provider address. 1.3.4 changes only the verdict triage and the
+# chain-read diagnostics, so it carries the same seeding code and reproduces the
+# same condition, while being the artifact any fix would actually ship on.
+$Sha256      = 'ee6a5cd0232d7eb039182fe45e967cf2407e4ccd70f2e06540e06c93b89b5214'
+$ExpectBytes = 440607456
 
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $run = "{0}-{1}" -f $VmName, (Get-Date -Format 'yyyyMMdd-HHmmss')
