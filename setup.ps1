@@ -1411,9 +1411,23 @@ function Step-EgressFirewall {
         # reachable for uid 1000. The toggle looked installed and could not
         # actually close the route it advertises.
         #
-        # There are THREE places a hostname can enter the unrevocable set: here,
-        # AUX_HOSTS at install, and AUX_HOSTS in the refresh script. A revocable
-        # host must be absent from all three. Missing one is silent.
+        # There are FOUR places a hostname can enter the unrevocable set: here,
+        # AUX_HOSTS at install, AUX_HOSTS in the refresh script, and BASE_HOSTS in
+        # resources/switch-provider.ps1. A revocable host must be absent from all
+        # four. Missing one is silent.
+        #
+        # THIS COMMENT SAID THREE UNTIL 2026-08-19 AND THE FOURTH WAS THE ONE THAT
+        # SHIPPED THE DEFECT. switch-provider.ps1 flushed and rebuilt @allowed_ipv4
+        # from its own stale mirror of this list, so one click on the Start Menu
+        # item "Switch AI Provider" put all seven toolchain hosts straight back into
+        # the set nothing can revoke, persisted them, and left the panel still
+        # reporting the toggle as off. A wrong enumeration in a security product is
+        # not a stale comment, it is the audit trail, and a reader who trusted this
+        # one stopped looking exactly one site early.
+        #
+        # The full enumeration now lives in docs/reference/HOSTNAME_WRITE_CENSUS.md
+        # and is a deliverable rather than a comment. Add a site there before you
+        # add it here.
         #
         # Nothing is lost when the toggle is ON, which is the default: the same
         # addresses are resolved into @toolchain_ipv4 instead. Install-time work
