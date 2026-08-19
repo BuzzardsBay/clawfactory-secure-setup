@@ -6,7 +6,7 @@
 ; refuses any binary build_release.ps1 did not stamp.
 
 #define MyAppName      "ClawFactory Secure Setup"
-#define MyAppVersion   "1.3.4"
+#define MyAppVersion   "1.3.5"
 #define MyAppPublisher "Frontier Automation Systems LLC"
 #define MyAppURL       "https://openclaw.ai"
 ; v1.1.0 (JOB 3B): the combined installer also bundles ClawFactory Studio, whose
