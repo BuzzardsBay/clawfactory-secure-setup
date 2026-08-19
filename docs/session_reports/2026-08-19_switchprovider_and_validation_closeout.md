@@ -113,7 +113,7 @@ a pre-existing gap independent of this card.
 
 ## 3. The fixes
 
-### 3.1 switch-provider (`3818bc0`) — the ship-blocker
+### 3.1 switch-provider (`3818bc0`): the ship-blocker
 
 The mirror was not edited, it was **deleted**. `setup.ps1` now records its own
 `$baseHosts`, provider deliberately excluded, to `/etc/clawfactory/base-hosts.seed`
@@ -192,7 +192,7 @@ an offline build box.
 The probe was calibrated on rigged inputs with known answers before being trusted:
 the OK arm connects to two real provider hosts, and the TCP arm and DNS arm each
 fire with their own distinct message. **The first calibration attempt failed its own
-positive control** because Git Bash has no `getent` — an environment defect in the
+positive control** because Git Bash has no `getent`, which is an environment defect in the
 calibration, not the probe; re-run under a `getent` shim with the probe body
 byte-identical.
 
@@ -218,7 +218,7 @@ strength of having been deferred again.
 
 ### What is staged
 
-- `validation/interim-v135-switchprovider.ps1` — the A/B on one box, toggle held
+- `validation/interim-v135-switchprovider.ps1` is the A/B on one box, toggle held
   OFF throughout, only the script text differing. Two boxes would have introduced a
   second variable into the one comparison this card exists to make. It is also
   self-cleaning: the fixed script's own flush removes the pollution the pre-fix arm
@@ -228,14 +228,14 @@ strength of having been deferred again.
     from commit `9710c5a` so it is provably the shipped 1.3.4 text, not a hand-copy.
   - POST arm = rendered **on the VM from the INSTALLED** `switch-provider.ps1`, so
     the fixed arm tests the artifact that was installed rather than a repo copy.
-- `validation/interim-v135-providergate.ps1` — rigs the provider unreachable via
+- `validation/interim-v135-providergate.ps1` rigs the provider unreachable via
   `/etc/hosts` and TEST-NET-1 rather than a firewall edit, because
   `Step-EgressFirewall` rewrites the ruleset and would undo a rigged rule during the
   very re-run meant to observe it. Level 1 calibrates the shipped probe in both
   directions in seconds; level 2 observes the installer actually aborting and costs
   a full install. **When level 2 is not run it writes an explicit INFO row**, because
   a skipped control and a passed control must never look the same in a results file.
-- `validation/RUNBOOK_v135.md` — phase order, exact commands, and the environment
+- `validation/RUNBOOK_v135.md` carries the phase order, exact commands, and the environment
   clauses.
 
 ### What was verified before any VM time
