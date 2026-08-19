@@ -2187,9 +2187,21 @@ fi
 # no switch for this half.
 AUX_HOSTS="api.anthropic.com console.anthropic.com api.openai.com auth.openai.com api.x.ai"
 if nft list table inet clawfactory >/dev/null 2>&1; then
+    # PERSIST, exactly as the iptables branch below has always done. Until
+    # 2026-08-19 this branch added the addresses to the live set and stopped
+    # there, so nothing survived a ruleset re-apply: the boot path rebuilds
+    # @allowed_ipv4 from /etc/clawfactory/allowed-ips.txt, and these addresses
+    # were not in it. It went unnoticed because on a normal install
+    # $providerHosts covers the same provider and IS persisted by
+    # Step-EgressFirewall. It BITES on -Provider later, where there is no
+    # provider host at all: the aux route then existed only in RAM and any
+    # re-apply dropped it until the five-hourly timer put it back.
+    mkdir -p /etc/clawfactory
+    touch /etc/clawfactory/allowed-ips.txt
     for h in $AUX_HOSTS; do
         for ip in $(getent ahostsv4 "$h" | awk '{print $1}' | sort -u); do
             nft add element inet clawfactory allowed_ipv4 "{ $ip }" 2>/dev/null || true
+            grep -qx "$ip" /etc/clawfactory/allowed-ips.txt || echo "$ip" >> /etc/clawfactory/allowed-ips.txt
         done
     done
 elif [ "$(cat /etc/clawfactory/fw-backend 2>/dev/null)" = "iptables-legacy" ]; then
@@ -2275,9 +2287,26 @@ AUX_HOSTS="api.anthropic.com console.anthropic.com api.openai.com auth.openai.co
 BACKEND="$(cat /etc/clawfactory/fw-backend 2>/dev/null || echo nftables)"
 if [ "$BACKEND" = "nftables" ]; then
     nft list table inet clawfactory >/dev/null 2>&1 || exit 0
+    # PERSIST, matching the iptables branch below and the install-time copy.
+    # Same defect, same reason: without this the refreshed addresses live only in
+    # the running set, so a ruleset re-apply between ticks drops the provider
+    # route and the box waits up to five hours to get it back.
+    #
+    # RESIDUAL, STATED PLAINLY BECAUSE THIS FIX CAUSES IT. Appending here means
+    # allowed-ips.txt accumulates every address the provider has ever resolved to
+    # and never drops one, so a long-retired provider address is re-added at each
+    # boot. It is bounded rather than permanent: set elements carry a 6h timeout,
+    # so an address that no longer resolves expires within 6h of the boot that
+    # re-added it. This is the same behaviour the iptables branch has always had.
+    # It is accepted because the provider route is deliberately always-open, and
+    # because the alternative, rewriting the file each tick, would drop the base
+    # hosts that Step-EgressFirewall wrote into the same file.
+    mkdir -p /etc/clawfactory
+    touch /etc/clawfactory/allowed-ips.txt
     for h in $AUX_HOSTS; do
         for ip in $(getent ahostsv4 "$h" | awk '{print $1}' | sort -u); do
             nft add element inet clawfactory allowed_ipv4 "{ $ip }" 2>/dev/null || true
+            grep -qx "$ip" /etc/clawfactory/allowed-ips.txt || echo "$ip" >> /etc/clawfactory/allowed-ips.txt
         done
     done
 elif [ "$BACKEND" = "iptables-legacy" ]; then
