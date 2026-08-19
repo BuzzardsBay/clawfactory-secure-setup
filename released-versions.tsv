@@ -39,3 +39,4 @@ version	artifact	digest_kind	sha256	bytes	date_utc	note
 1.3.2	ClawFactory-Secure-Setup.exe	unsigned	b87442f338b0f2806bdcbeca3e73fcf7be72b507aa3670baa20d08037fdd7b0d	440588235	2026-08-15	written by scripts/build_release.ps1 after all gates passed and the artifact was signed
 1.3.3	ClawFactory-Secure-Setup.exe	unsigned	3de5c5af5cc81182c523d18194ed9d76c824359495c3418e9e9e620769c947c6	440591218	2026-08-15	written by scripts/build_release.ps1 after all gates passed and the artifact was signed
 1.3.4	ClawFactory-Secure-Setup.exe	unsigned	df1d89210cf40b5d3721f8ea43283f3344cc093301c651d16932f92b9b5fb642	440591811	2026-08-18	written by scripts/build_release.ps1 after all gates passed and the artifact was signed
+1.3.5	ClawFactory-Secure-Setup.exe	unsigned	2c3e50f07afbdd67894d9fad76916e38666d00f6a30f5f3b3be9359112e38d55	440599315	2026-08-19	written by scripts/build_release.ps1 after all gates passed and the artifact was signed
