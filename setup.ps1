@@ -3151,6 +3151,98 @@ rm -f /tmp/install-chat-proxy.sh
     Save-Checkpoint 'InstallChatProxy'
 }
 
+function Step-AssertProviderRoute {
+    # THE PROVIDER-ROUTE GATE. Runs LAST, as CLAWUSER, INSIDE WSL, after every
+    # firewall write in the install.
+    #
+    # WHY IT HAS TO BE ALL THREE OF THOSE. The install already had checks, and not
+    # one of them could have caught a missing provider route. The final gateway
+    # health gate is a loopback curl that never leaves the box. The API key
+    # wizard's validation request runs on the WINDOWS side, outside the clawuser
+    # nft chain entirely, and is skipped under /SILENT. So the one route whose
+    # absence bricks the product outright was the only one of the three egress
+    # controls with no gate at all: install-read-fetch.sh already refuses to
+    # finish when Guard 3's set or accept is missing, on the grounds that a set
+    # nothing enforces is a list rather than a control. Same argument, applied to
+    # the route that matters most.
+    #
+    # A TCP connect on 443 is sufficient and costs no tokens. It proves the thing
+    # actually in question: that uid 1000 gets through the chain to the provider.
+    #
+    # TWO THINGS THIS GATE DOES NOT DO, said here rather than discovered later.
+    #   1. It does NOT cover the cfv-167 symptom. Those turns failed while a TCP
+    #      connect would have succeeded, so this gate would have passed there and
+    #      told nobody anything.
+    #   2. It WILL correctly fail an install on a machine whose provider is
+    #      unreachable for an unrelated reason: a corporate proxy, an egress
+    #      policy outside WSL, or an offline build box. That is a true finding
+    #      about that machine, not a false positive.
+    #
+    # Failing loudly is deliberate. A silently bricked agent is worse than a
+    # refused install, and refusing is what this product already does everywhere
+    # else.
+    if ($Provider -eq 'later') {
+        Write-Log INFO 'Step 15e: Provider-route gate SKIPPED, reason: provider deferred (-Provider later). There is no provider to reach yet; the route is proven when a provider is chosen.'
+        Save-Checkpoint 'AssertProviderRoute'
+        return
+    }
+    if ($Provider -eq 'ollama') {
+        Write-Log INFO 'Step 15e: Provider-route gate SKIPPED, reason: provider is ollama, whose endpoint is local (127.0.0.1:11434). There is no external provider route to prove.'
+        Save-Checkpoint 'AssertProviderRoute'
+        return
+    }
+
+    $providerHost = @($ThisProvider.AllowlistHosts) | Where-Object { $_ } | Select-Object -First 1
+    if (-not $providerHost) {
+        # Absent rather than empty: a provider with no host is a map defect, not a
+        # customer condition. Fail rather than skip, because skipping here would
+        # silently reintroduce exactly the gap this step exists to close.
+        throw "Provider-route gate: provider '$Provider' has no AllowlistHosts entry, so there is nothing to test. This is a defect in `$ProviderConfig, not a machine problem. Refusing rather than passing an untested install."
+    }
+
+    Write-Log INFO "Step 15e: Provider-route gate - TCP connect to ${providerHost}:443 as clawuser, after the last firewall write."
+
+    # Pure bash /dev/tcp: no curl, no request body, no credential, no tokens. DNS
+    # is checked separately from the connect so the failure message names the
+    # right subject; a resolver problem and a blocked route need different fixes.
+    # Three attempts because a transient failure at install time is plausible and
+    # a single sample would make this gate flaky, which is how a real gate gets
+    # disabled by the next person.
+    $probe = @"
+HOST='$providerHost'
+for attempt in 1 2 3; do
+    ADDRS="`$(getent ahostsv4 "`$HOST" 2>/dev/null | awk '{print `$1}' | sort -u | tr '\n' ' ')"
+    if [ -z "`$ADDRS" ]; then
+        echo "[provider-route] attempt `$attempt: DNS returned no A record for `$HOST"
+        [ "`$attempt" -lt 3 ] && sleep 5
+        continue
+    fi
+    if timeout 10 bash -c "exec 3<>/dev/tcp/`$HOST/443" 2>/dev/null; then
+        echo "[provider-route] OK: uid `$(id -u) connected to `$HOST:443 on attempt `$attempt (addresses: `$ADDRS)"
+        exit 0
+    fi
+    echo "[provider-route] attempt `$attempt: DNS resolved `$HOST to [`$ADDRS] but the TCP connect to 443 did not complete"
+    [ "`$attempt" -lt 3 ] && sleep 5
+done
+echo "[provider-route] FAILED after 3 attempts as uid `$(id -u)" >&2
+exit 1
+"@
+    $rcProbe = Invoke-WslBash -Script $probe -User 'clawuser'
+    if ($rcProbe -ne 0) {
+        throw ("Provider-route gate FAILED: clawuser (uid 1000) could not open a TCP connection to ${providerHost}:443 " +
+               'after three attempts, and this check runs after every firewall write in the install. ' +
+               'The agent cannot reach its model, so the install is refused rather than completing into a bricked product. ' +
+               'Causes, in the order worth checking: an egress restriction outside WSL such as a corporate proxy or ' +
+               'network policy; no internet on this machine; or DNS not resolving inside the distro. ' +
+               "Diagnose with: wsl -d Ubuntu -u clawuser -- bash -lc 'getent ahostsv4 $providerHost; " +
+               "timeout 10 bash -c `"exec 3<>/dev/tcp/$providerHost/443`"; echo rc=`$?'. " +
+               'If the provider is deliberately unreachable on this machine, install with the provider deferred instead, ' +
+               'which skips this gate by design.')
+    }
+    Write-Log INFO "Provider-route gate PASSED: clawuser reached ${providerHost}:443."
+    Save-Checkpoint 'AssertProviderRoute'
+}
+
 function Step-WindowsFirewallDeny {
     # [R4] Belt-and-suspenders inbound-deny on gateway port.
     Write-Log INFO "Step 13 [R4]: Creating Windows Firewall inbound-deny rule on TCP/$GatewayPort."
@@ -3623,6 +3715,7 @@ Invoke-WithRollback {
     Step-InstallSend             # Guard 2: approval-gated email. After the firewall steps: it asserts the live chain shape and refuses if it has drifted
     Step-InstallReadFetch        # Guard 3: web off by default. After Guard 2: shares its policy file and its egress-policy helpers
     Step-InstallChatProxy        # Blocker 1: gate ClawChat's HTTP path; real gateway -> private 8788
+    Step-AssertProviderRoute     # LAST on purpose: the provider route proven as clawuser, in WSL, after every firewall write
 }
 
 #--- Final gateway health gate ------------------------------------------------
