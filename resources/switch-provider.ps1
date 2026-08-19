@@ -156,7 +156,11 @@ PYEOF
 }
 
 # 2. Update egress firewall (backend-aware: nftables OR iptables-legacy)
-# baseHosts list must stay in sync with setup.ps1 Step-EgressFirewall ($baseHosts).
+# The base host list is NO LONGER MIRRORED HERE. It is read from
+# /etc/clawfactory/base-hosts.seed, which setup.ps1 Step-EgressFirewall writes.
+# The instruction that used to sit on this line -- "must stay in sync with
+# setup.ps1" -- was followed by nobody for the one change that mattered, and the
+# result was a shipped defect. See the rule at the top of $fwScript.
 # /etc/clawfactory/allowed-ips.txt is updated so the boot-time
 # clawfactory-fw.service re-applies the same allowlist on next WSL boot --
 # without this, the OLD provider's IPs would come back at boot.
@@ -164,11 +168,106 @@ $providerHostLiteral = if ($cfg.Host) { $cfg.Host } else { '' }
 $fwScript = @"
 set -euo pipefail
 
-# Full baseHosts list -- must stay in sync with setup.ps1 Step-EgressFirewall.
-# 16 hosts: github (4) + openclaw/clawhub (4) + npm/node (3) + ubuntu apt (5).
-# (Docker Hub hosts removed with Docker itself -- SECFIX_CLOSE_DOORS decision A.)
-BASE_HOSTS="api.github.com github.com raw.githubusercontent.com codeload.github.com openclaw.ai docs.openclaw.ai clawhub.ai api.clawhub.ai registry.npmjs.org nodejs.org deb.nodesource.com archive.ubuntu.com security.ubuntu.com ports.ubuntu.com esm.ubuntu.com ppa.launchpad.net"
+# THE RULE, AND IT IS THE WHOLE REASON THIS BLOCK LOOKS THE WAY IT DOES.
+#
+# Provider hosts go in @allowed_ipv4. That set is refreshed additively, its
+# elements carry a timeout that nothing ever lets expire, and it is persisted to
+# /etc/clawfactory/allowed-ips.txt and re-applied at every boot. ANYTHING WRITTEN
+# TO IT CAN NEVER BE TAKEN AWAY. Everything the user is told they can switch off
+# -- the toolchain hosts, the read-fetch destinations -- goes in a set that is
+# flushed and rebuilt from the root-owned policy on every resolver run, because
+# that is the only shape in which a switch can actually close a route.
+#
+# This script used to violate that rule. Until 2026-08-19 the list below was a
+# hardcoded 16-host mirror of setup.ps1's $baseHosts, and seven of those hosts
+# were the toolchain hosts: api.github.com, github.com, raw.githubusercontent.com,
+# codeload.github.com, clawhub.ai, api.clawhub.ai and registry.npmjs.org. Card
+# #245 moved them out of $baseHosts into @toolchain_ipv4 so the user's toggle
+# could revoke them; this mirror was not updated, and this mirror is what the
+# shipped Start Menu item "Switch AI Provider" runs. One click re-seeded all seven
+# into the unrevocable set, persisted them, and survived reboot -- after which the
+# toolchain toggle was permanently defeated AND THE PANEL STILL REPORTED IT AS
+# OFF. A control that lies to the user, reached through a normal advertised
+# action.
+#
+# The fix is not to edit the mirror. It is to delete it. setup.ps1 now records its
+# own $baseHosts to /etc/clawfactory/base-hosts.seed (root:root 0644) and this
+# script reads that. One owner, every other reader reads. Duplication is only
+# acceptable when something compares the copies, and the cheapest comparison is
+# not having a second copy.
+BASE_SEED=/etc/clawfactory/base-hosts.seed
+BASE_HOSTS=""
+
+# INPUT-SHAPE DECISIONS, stated because code that disagrees with its own comment
+# is a defect in a security product:
+#   ABSENT   -> this is an install that predates the seed file. Warn loudly and
+#               fall back to the built-in list below. Not fatal: refusing to
+#               switch provider on an older install would brick a working box
+#               over a file that only exists to prevent drift.
+#   EMPTY    -> FATAL. The base list is never legitimately empty, so an empty
+#               file is a truncated write or a tampered file, and a fault is not
+#               a preference.
+#   MALFORMED-> FATAL, same reasoning. Any line that is not hostname-shaped means
+#               the file is not what it claims to be, and resolving it would feed
+#               whatever it does contain into the unrevocable set.
+if [ -f "`$BASE_SEED" ]; then
+    if [ ! -s "`$BASE_SEED" ]; then
+        echo "[switch-provider] FATAL: `$BASE_SEED exists but is empty. The base allowlist is never legitimately empty, so this is a truncated or tampered file. Refusing to touch the firewall." >&2
+        exit 1
+    fi
+    while IFS= read -r line; do
+        [ -z "`$line" ] && continue
+        case "`$line" in
+            *[!A-Za-z0-9.-]*|.*|-*|*-|*..*)
+                echo "[switch-provider] FATAL: `$BASE_SEED contains a line that is not a hostname: [`$line]. Refusing to resolve it into the set nothing can revoke." >&2
+                exit 1 ;;
+        esac
+        case "`$line" in
+            *.*) : ;;
+            *)  echo "[switch-provider] FATAL: `$BASE_SEED contains [`$line], which has no dot and is not a hostname. Refusing to touch the firewall." >&2
+                exit 1 ;;
+        esac
+        BASE_HOSTS="`$BASE_HOSTS `$line"
+    done < "`$BASE_SEED"
+    echo "[switch-provider] base hosts read from `$BASE_SEED (`$(echo `$BASE_HOSTS | wc -w) host(s))"
+else
+    # Fallback for installs made before base-hosts.seed existed. TOOLCHAIN-FREE by
+    # construction: these are setup.ps1's $baseHosts and nothing else. If you are
+    # about to add a host here, it belongs in setup.ps1 instead.
+    BASE_HOSTS="openclaw.ai docs.openclaw.ai nodejs.org deb.nodesource.com archive.ubuntu.com security.ubuntu.com ports.ubuntu.com esm.ubuntu.com ppa.launchpad.net"
+    echo "[switch-provider] WARNING: `$BASE_SEED is absent (install predates it); using the built-in base host list (`$(echo `$BASE_HOSTS | wc -w) hosts)" >&2
+fi
+
 PROVIDER_HOST="$providerHostLiteral"
+
+# STRUCTURAL GUARD, not a comment asking the next person to be careful. Whatever
+# the base list turned out to be -- seed file, fallback, or a future edit to
+# either -- no toolchain host may reach @allowed_ipv4 through this script. The
+# toolchain resolver reports its own list via --list-hosts, which is the same
+# interface install-read-fetch.sh uses for its drift gate, so this compares
+# against the live owner rather than against another copy.
+#
+# This is what makes the defect class impossible here rather than merely fixed
+# once. If the resolver cannot be asked, that is a fault and it denies: a guard
+# that silently passes when it cannot measure is not a guard.
+if [ -x /usr/local/sbin/clawfactory-toolchain.sh ]; then
+    if TC_HOSTS="`$(/usr/local/sbin/clawfactory-toolchain.sh --list-hosts 2>/dev/null)"; then
+        for th in `$TC_HOSTS; do
+            for bh in `$BASE_HOSTS `$PROVIDER_HOST; do
+                if [ "`$th" = "`$bh" ]; then
+                    echo "[switch-provider] FATAL: [`$th] is a toolchain host and would be written into @allowed_ipv4, which nothing can revoke. That silently defeats the user's toolchain toggle while the panel still reports it as off. Refusing. Toolchain hosts belong in @toolchain_ipv4, which clawfactory-toolchain.sh flushes and rebuilds." >&2
+                    exit 1
+                fi
+            done
+        done
+        echo "[switch-provider] toolchain guard: no toolchain host in the allowlist rebuild (`$(echo `$TC_HOSTS | wc -w) checked)"
+    else
+        echo "[switch-provider] FATAL: could not ask clawfactory-toolchain.sh for its host list, so the toolchain guard could not run. Refusing to rebuild @allowed_ipv4 unverified." >&2
+        exit 1
+    fi
+else
+    echo "[switch-provider] WARNING: /usr/local/sbin/clawfactory-toolchain.sh is absent (install predates the toolchain toggle); guard skipped, and there is no toolchain set to defeat." >&2
+fi
 
 # Resolve all allowlist hosts to IPv4s.
 ALLOWED_IPS=""

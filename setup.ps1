@@ -1472,6 +1472,23 @@ function Step-EgressFirewall {
     $hostList      = ($allHosts -join ' ')
     Write-Log INFO "Allowlist hosts: $hostList"
 
+    # The base list WITHOUT the provider, persisted below to
+    # /etc/clawfactory/base-hosts.seed so switch-provider.ps1 can read it instead
+    # of carrying its own copy.
+    #
+    # WHY THIS FILE EXISTS. switch-provider.ps1 flushes @allowed_ipv4 and rebuilds
+    # it, so it needs the base list; it used to carry a hardcoded mirror of this
+    # variable. When card #245 moved the toolchain hosts out of $baseHosts the
+    # mirror was not updated, and the mirror is what the shipped Start Menu item
+    # "Switch AI Provider" ran: one click put all seven toolchain hosts back into
+    # the unrevocable set and defeated the toggle permanently.
+    #
+    # Duplication is only acceptable when something compares the copies. Rather
+    # than add a third comparison, this removes the second copy: one owner here,
+    # every other reader reads. Same discipline as toolchain-hosts.seed below,
+    # which exists for exactly the same reason.
+    $baseHostList = ((@($baseHosts) | Where-Object { $_ } | Sort-Object -Unique) -join ' ')
+
     # v1 Guard 3, the toolchain access toggle. These are seeded into
     # @toolchain_ipv4 HERE, at firewall time, and NOT into @allowed_ipv4.
     #
@@ -1608,6 +1625,8 @@ chmod 644 /etc/nftables.conf
 
 # --- Resolve allowlist hosts to IPv4s --------------------------------------
 HOSTS=`"$hostList`"
+# The same list minus the provider, recorded verbatim for switch-provider.ps1.
+BASE_HOSTS_SEED=`"$baseHostList`"
 ALLOWED_IPS=`"`"
 for h in `$HOSTS; do
     for ip in `$(getent ahostsv4 `"`$h`" 2>/dev/null | awk '{print `$1}' | sort -u); do
@@ -1700,6 +1719,17 @@ echo `"[clawfactory-fw] toolchain seed: `$(wc -l < /etc/clawfactory/toolchain-ip
 # Record the HOSTNAMES this step seeded, so install-read-fetch.sh can reconcile
 # them against the resolver's own copy and fail the install if the two drift.
 printf '%s\n' `"`$TOOLCHAIN_HOSTS`" > /etc/clawfactory/toolchain-hosts.seed
+
+# The base allowlist hostnames WITHOUT the provider, one per line, root-owned.
+# switch-provider.ps1 reads this rather than carrying its own copy; see the
+# comment at $baseHostList above for why that second copy had to go. Written
+# with the provider deliberately excluded: switch-provider supplies whichever
+# provider it is switching TO, and a stale provider host baked in here would be
+# re-seeded into the unrevocable set on every switch.
+printf '%s\n' `$BASE_HOSTS_SEED | sed '/^`$/d' > /etc/clawfactory/base-hosts.seed
+chown root:root /etc/clawfactory/base-hosts.seed
+chmod 644 /etc/clawfactory/base-hosts.seed
+echo `"[clawfactory-fw] base host seed: `$(wc -l < /etc/clawfactory/base-hosts.seed | tr -d ' ') host(s) recorded for switch-provider`"
 chmod 644 /etc/clawfactory/toolchain-hosts.seed
 
 # --- Boot-time apply script: re-applies whichever backend is active --------
