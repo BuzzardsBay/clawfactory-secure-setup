@@ -37,7 +37,10 @@ param(
     [string]$Transcript = 'C:\cfv\providergate-out-probe.txt',
     [string]$AppDir     = 'C:\Program Files\ClawFactory',
     [string]$ProviderHost = 'api.anthropic.com',
-    [string]$InstallLog = 'C:\ProgramData\ClawFactory\logs\install.log',
+    # setup.ps1 writes here. NOT under a logs\ subdirectory: that path was assumed
+    # when this phase was staged and it does not exist, so the phase would have
+    # read nothing and reported a clean absence. Confirmed against cfv-169.
+    [string]$InstallLog = 'C:\ProgramData\ClawFactory\install.log',
     [switch]$RunFullInstallControl,
     [switch]$DeferredProvider
 )

@@ -3182,12 +3182,12 @@ function Step-AssertProviderRoute {
     # refused install, and refusing is what this product already does everywhere
     # else.
     if ($Provider -eq 'later') {
-        Write-Log INFO 'Step 15e: Provider-route gate SKIPPED, reason: provider deferred (-Provider later). There is no provider to reach yet; the route is proven when a provider is chosen.'
+        Write-Log INFO 'Step 15h: Provider-route gate SKIPPED, reason: provider deferred (-Provider later). There is no provider to reach yet; the route is proven when a provider is chosen.'
         Save-Checkpoint 'AssertProviderRoute'
         return
     }
     if ($Provider -eq 'ollama') {
-        Write-Log INFO 'Step 15e: Provider-route gate SKIPPED, reason: provider is ollama, whose endpoint is local (127.0.0.1:11434). There is no external provider route to prove.'
+        Write-Log INFO 'Step 15h: Provider-route gate SKIPPED, reason: provider is ollama, whose endpoint is local (127.0.0.1:11434). There is no external provider route to prove.'
         Save-Checkpoint 'AssertProviderRoute'
         return
     }
@@ -3200,7 +3200,7 @@ function Step-AssertProviderRoute {
         throw "Provider-route gate: provider '$Provider' has no AllowlistHosts entry, so there is nothing to test. This is a defect in `$ProviderConfig, not a machine problem. Refusing rather than passing an untested install."
     }
 
-    Write-Log INFO "Step 15e: Provider-route gate - TCP connect to ${providerHost}:443 as clawuser, after the last firewall write."
+    Write-Log INFO "Step 15h: Provider-route gate - TCP connect to ${providerHost}:443 as clawuser, after the last firewall write."
 
     # Pure bash /dev/tcp: no curl, no request body, no credential, no tokens. DNS
     # is checked separately from the connect so the failure message names the
