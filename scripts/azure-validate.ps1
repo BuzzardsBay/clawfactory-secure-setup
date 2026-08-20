@@ -54,6 +54,25 @@ param(
     [string]$Blob          = "ClawFactory-Secure-Setup-v1.0.48.exe",
     [string]$ExpectSha256  = "e412a5163626122798e74a8c0b180ce4c09ffcd49925fe7dc6d41b89014c587c",
     [string]$AdminUser     = "clawadmin",
+    # The VM admin password. THE OPERATOR CHOOSES IT AND KEEPS IT; it is prompted
+    # for interactively when not supplied, never generated and never printed.
+    #
+    # WHY THIS IS A PARAMETER RATHER THAN A Get-Random, learned the expensive way.
+    # This script used to mint a random 24-character password, arm one-shot
+    # auto-logon with it, and never show it to anyone. That works right up until
+    # the first reboot: AutoLogonCount is 1, so after a reboot a human must log in
+    # over RDP to bring the interactive session back, and the only credential that
+    # would do it existed for a few seconds inside this process and was never
+    # recorded. The reboot pass has never passed, and this is at least part of why.
+    #
+    # It does NOT reduce what crosses the wire. Auto-logon needs the plaintext in
+    # HKLM Winlogon DefaultPassword, and az vm run-command is the only channel to
+    # write it, so the password reaches Azure either way. What changes is that a
+    # person knows it, which is the difference between a box that can be logged
+    # into after a reboot and one that cannot.
+    #
+    # Never echo this, never Save() it, never put it in a transcript.
+    [SecureString]$AdminPassword,
     [string]$OutDir        = (Join-Path (Split-Path -Parent $PSScriptRoot) "validation-runs"),
     [switch]$KeepVm,
     [switch]$ApiKeyFromCredMan,
@@ -147,7 +166,30 @@ try {
 
     # ---- 1. Provision -----------------------------------------------------
     Say "Provisioning $VmName ($Size, $Image, security-type Standard, non-zonal)..."
-    $pw = -join ((65..90) + (97..122) + (48..57) + (33,35,37,42) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
+    # The operator's password, prompted if it was not passed in. Never generated.
+    # See the -AdminPassword parameter comment for why this is not a Get-Random.
+    if (-not $AdminPassword) {
+        Write-Host ''
+        Write-Host "You choose the admin password for $VmName." -ForegroundColor Yellow
+        Write-Host 'SAVE IT IN YOUR PASSWORD MANAGER NOW. You will need it to log in over RDP' -ForegroundColor Yellow
+        Write-Host 'after the reboot, because auto-logon is one-shot and cannot be re-armed' -ForegroundColor Yellow
+        Write-Host 'without it. Nothing here prints it back, and it must not be pasted into' -ForegroundColor Yellow
+        Write-Host 'any chat or session transcript.' -ForegroundColor Yellow
+        $AdminPassword = Read-Host "Admin password for $AdminUser@$VmName" -AsSecureString
+    }
+    $pw = [Runtime.InteropServices.Marshal]::PtrToStringBSTR(
+              [Runtime.InteropServices.Marshal]::SecureStringToBSTR($AdminPassword))
+    # Refuse client-side rather than let ARM reject it after the resource names are
+    # committed. Azure's Windows rule is 12-123 chars and 3 of 4 character classes;
+    # a rejection here costs nothing, a rejection at ARM costs a half-built VM.
+    $classes = @(($pw -cmatch '[A-Z]'), ($pw -cmatch '[a-z]'), ($pw -match '\d'),
+                 ($pw -match '[^a-zA-Z0-9]')) | Where-Object { $_ }
+    if ($pw.Length -lt 12 -or $pw.Length -gt 123 -or $classes.Count -lt 3) {
+        throw ("The admin password does not meet Azure's Windows rule (12-123 characters and at " +
+               "least 3 of: uppercase, lowercase, digit, symbol). Length seen: $($pw.Length), " +
+               "character classes seen: $($classes.Count). The password itself is not printed. " +
+               'Nothing has been provisioned; re-run and enter a conforming password.')
+    }
     # L3: every child resource gets a DETERMINISTIC, explicit name at create time.
     # Without this the OS disk gets a random GUID suffix, which is why the old
     # teardown fell back to a `--query [?starts_with(...)]` filter -- the filter the
