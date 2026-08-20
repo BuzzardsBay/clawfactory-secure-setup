@@ -78,20 +78,40 @@ echo "--- the toolchain hosts resolved right now, so set membership can be compa
 for h in api.github.com github.com raw.githubusercontent.com codeload.github.com clawhub.ai api.clawhub.ai registry.npmjs.org; do
   for ip in $(getent ahostsv4 "$h" 2>/dev/null | awk '{print $1}' | sort -u); do echo "TCADDR=$ip $h"; done
 done
+# The BASE hosts resolved too. Their addresses are in @allowed_ipv4 legitimately
+# and permanently, by design, so a toolchain address that is ALSO a base address
+# is a co-hosting collision rather than evidence that a toolchain host leaked in.
+# Conflating the two is how a probe reports four ship-blockers for one documented
+# residual, which is what the first run of this phase did.
+for h in $(cat /etc/clawfactory/base-hosts.seed 2>/dev/null); do
+  for ip in $(getent ahostsv4 "$h" 2>/dev/null | awk '{print $1}' | sort -u); do echo "BASEADDR=$ip $h"; done
+done
 '@
     W $r.Out
-    $setIps  = @(); $fileIps = @(); $tcAddrs = @{}
+    $setIps  = @(); $fileIps = @(); $tcAddrs = @{}; $baseAddrs = @{}
     if ($r.Out -match 'ALLOWED_SET=(.*)')  { $setIps  = @(($Matches[1] -split '\s+') | Where-Object { $_ -match '^\d+\.' }) }
     if ($r.Out -match 'ALLOWED_FILE=(.*)') { $fileIps = @(($Matches[1] -split '\s+') | Where-Object { $_ -match '^\d+\.' }) }
-    foreach ($ln in ($r.Out -split "`r?`n")) { if ($ln -match '^TCADDR=(\S+)\s+(\S+)') { $tcAddrs[$Matches[1]] = $Matches[2] } }
+    foreach ($ln in ($r.Out -split "`r?`n")) {
+        if ($ln -match '^TCADDR=(\S+)\s+(\S+)')   { $tcAddrs[$Matches[1]]   = $Matches[2] }
+        if ($ln -match '^BASEADDR=(\S+)\s+(\S+)') { $baseAddrs[$Matches[1]] = $Matches[2] }
+    }
+    # A toolchain address that is ALSO a base address is co-hosting, not leakage.
+    # Measured on cfv-169: openclaw.ai and clawhub.ai both resolve to 216.150.1.1,
+    # and openclaw.ai is a base host that is permanently and deliberately allowed.
+    # The two are reported as SEPARATE findings, because the fix under test is
+    # about leakage and the collision is a different, pre-existing property that
+    # no change to switch-provider can affect.
+    $collide = @($tcAddrs.Keys | Where-Object { $baseAddrs.ContainsKey($_) })
     return @{
-        SetIps = $setIps; FileIps = $fileIps; TcAddrs = $tcAddrs
+        SetIps = $setIps; FileIps = $fileIps; TcAddrs = $tcAddrs; BaseAddrs = $baseAddrs
         TcSetN = $(if ($r.Out -match 'TOOLCHAIN_SET_N=(\d+)') { [int]$Matches[1] } else { -1 })
         Policy = $(if ($r.Out -match 'POLICY_ENABLED=(\w+)') { $Matches[1] } else { 'unknown' })
-        # The intersection is the finding: which toolchain ADDRESSES are sitting
-        # in the unrevocable set. Address-level, because that is what nft holds.
-        SetHits  = @($setIps  | Where-Object { $tcAddrs.ContainsKey($_) })
-        FileHits = @($fileIps | Where-Object { $tcAddrs.ContainsKey($_) })
+        Collisions = $collide
+        CollisionDetail = (($collide | ForEach-Object { "$_ is both $($tcAddrs[$_]) (toolchain) and $($baseAddrs[$_]) (base)" }) -join '; ')
+        # LEAKAGE: a toolchain address in the unrevocable set that is NOT
+        # explained by a base host. This is what the switch-provider fix controls.
+        SetHits  = @($setIps  | Where-Object { $tcAddrs.ContainsKey($_) -and -not $baseAddrs.ContainsKey($_) })
+        FileHits = @($fileIps | Where-Object { $tcAddrs.ContainsKey($_) -and -not $baseAddrs.ContainsKey($_) })
         Raw = $r.Out
     }
 }
@@ -103,6 +123,8 @@ echo "whoami=`$(id -un) uid=`$(id -u)"
 $ProbeFn
 echo '--- SUBJECT: the software sources the toggle claims to control ---'
 for h in api.github.com registry.npmjs.org raw.githubusercontent.com; do probe `$h 443; done
+echo '--- the SKILL HUB, named in the panel copy, measured separately because it co-hosts with openclaw.ai ---'
+for h in clawhub.ai api.clawhub.ai; do probe `$h 443; done
 echo '--- CONTROL A (MUST CONNECT): the provider route, which no switch may affect ---'
 probe api.anthropic.com 443
 echo '--- CONTROL B (MUST BE REFUSED): a site nobody allowlisted ---'
@@ -113,6 +135,8 @@ probe example.org 443
         Github  = $r.Out -match 'api\.github\.com:443 CONNECTED'
         Npm     = $r.Out -match 'registry\.npmjs\.org:443 CONNECTED'
         Raw2    = $r.Out -match 'raw\.githubusercontent\.com:443 CONNECTED'
+        Hub     = $r.Out -match '(?m)^clawhub\.ai:443 CONNECTED'
+        ApiHub  = $r.Out -match 'api\.clawhub\.ai:443 CONNECTED'
         CtlPos  = $r.Out -match 'api\.anthropic\.com:443 CONNECTED'
         CtlNeg  = $r.Out -match 'example\.org:443 blocked'
         Out     = $r.Out
@@ -157,7 +181,11 @@ if [ -e /etc/clawfactory/base-hosts.seed ]; then stat -c 'PRESENT %n %U:%G %a' /
 echo "--- CONTROL: a path that must be absent ---"
 [ -e /etc/clawfactory/not-a-real-seed.seed ] && echo "CONTROL FAILED" || echo "CONTROL OK (absent)"
 echo "--- the toolchain resolver, whose list the new guard compares against ---"
-if [ -x /usr/local/sbin/clawfactory-toolchain.sh ]; then /usr/local/sbin/clawfactory-toolchain.sh --list-hosts | sed 's/^/TCHOST=/'; else echo "ABSENT resolver"; fi
+# tr, because --list-hosts prints all eight hosts on ONE space-separated line
+# (printf '%s\n' "$TOOLCHAIN_HOSTS", quoted). Without the split, a per-line regex
+# captures only the first token and the comparison reports total drift against a
+# resolver that is actually correct. That is what the first run of this phase did.
+if [ -x /usr/local/sbin/clawfactory-toolchain.sh ]; then /usr/local/sbin/clawfactory-toolchain.sh --list-hosts | tr ' ' '\n' | sed '/^$/d' | sed 's/^/TCHOST=/'; else echo "ABSENT resolver"; fi
 echo "--- the three sets and their accepts ---"
 /usr/local/sbin/clawfactory-fw-assert.sh 2>&1; echo "fw_assert_rc=$?"
 '@
@@ -204,6 +232,20 @@ Record "SP.1b.$tag" 'BASELINE: with the toggle OFF, no toolchain address sits in
     $(if ($base.FileHits.Count -eq 0) { 'PASS' } else { 'FAIL' }) `
     "toolchain addresses persisted: $($base.FileHits.Count) [$($base.FileHits -join ' ')]"
 
+# The collision, reported as ITSELF rather than smeared across the leakage rows.
+# This is a pre-existing property of address-based allowlisting that no change to
+# switch-provider can affect, and egress-policy.json already states the general
+# case. What it does NOT state is that the collision lands on clawhub.ai, which is
+# the one host the panel copy names when it says the toggle stops skill
+# installation. Recorded at whatever the measurement says, every run.
+Record "SP.1z.$tag" 'CO-HOSTING: which toolchain addresses are also base-host addresses' `
+    $(if ($base.Collisions.Count -eq 0) { 'PASS' } else { 'INFO' }) `
+    $(if ($base.Collisions.Count -eq 0) {
+        'no toolchain host shares an address with a base host on this box, so the toggle can close every host it names'
+      } else {
+        "$($base.Collisions.Count) collision(s): $($base.CollisionDetail). These addresses are in allowed_ipv4 because a BASE host resolves to them, and base hosts are permanently allowed by design. The consequence is that the co-hosted toolchain host stays reachable with the toggle OFF. INFO rather than FAIL because switch-provider cannot cause or cure it; see SP.8 for the user-visible consequence"
+      })
+
 $r0 = Measure-Reach -Label "baseline-$tag"
 Register-Control -Id "SP.1.CTL.$tag" -Name 'the reachability probe both connects and is refused in the same run' `
     -Fired ($r0.CtlPos -and $r0.CtlNeg) `
@@ -211,6 +253,18 @@ Register-Control -Id "SP.1.CTL.$tag" -Name 'the reachability probe both connects
 Record "SP.1c.$tag" 'BASELINE: with the toggle OFF, GitHub and npm are unreachable for uid 1000' `
     $(if (-not ($r0.Github -or $r0.Npm -or $r0.Raw2)) { 'PASS' } else { 'FAIL' }) `
     "github=$($r0.Github) npm=$($r0.Npm) raw=$($r0.Raw2) (all must be false)"
+
+# THE USER-VISIBLE CONSEQUENCE OF THE COLLISION, stated as its own finding.
+# The Studio panel says switching the toolchain off "stops skill installation,
+# GitHub and npm". GitHub and npm do stop. This row measures whether the skill hub
+# stops, which is the third of that promise.
+Record "SP.8.$tag" 'PANEL-COPY CHECK: with the toggle OFF, is the SKILL HUB actually unreachable?' `
+    $(if (-not $r0.Hub) { 'PASS' } else { 'FAIL' }) `
+    $(if (-not $r0.Hub) {
+        "clawhub.ai blocked and api.clawhub.ai blocked=$(-not $r0.ApiHub); the panel's claim holds in full"
+      } else {
+        "clawhub.ai:443 CONNECTED with the toggle OFF (api.clawhub.ai blocked=$(-not $r0.ApiHub)). The panel copy says the toggle stops skill installation, and on this box it does not, because clawhub.ai shares an address with the permanently-allowed base host openclaw.ai. PRE-EXISTING and not caused by the switch-provider fix, which is proven separately by SP.5a. The finding is that a control's copy overstates what the control can do"
+      })
 
 # =========================================================================
 Section '2. THE DEFECT, DEMONSTRATED. The 1.3.4 firewall block, verbatim, with the toggle still OFF.'
