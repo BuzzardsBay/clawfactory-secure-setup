@@ -235,7 +235,12 @@ try {
     Add-Content -Path $sweep -Value "$VmName $ResourceGroup" -Encoding ascii
     Say "  registered '$VmName' in $sweep (sweep list -- survives a killed harness)" DarkGray
 
-    Say "Provisioned. (admin password generated in-memory; never printed or written)" Green
+    # Says what actually happened. This line read "admin password generated
+    # in-memory" until 2026-08-20, which stopped being true the moment the
+    # password became operator-supplied, and a log that misdescribes how a
+    # credential was obtained is a defect in a security product rather than a
+    # cosmetic one. Caught by reading a live run's console output.
+    Say "Provisioned. (admin password supplied by the operator; never printed or written)" Green
 
     # Trap 6, made cheap: `run-command invoke` has NO client-side timeout, so if the
     # guest agent is unhealthy the invoke just HANGS -- cfv-0715d wedged for 20+
