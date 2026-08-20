@@ -314,3 +314,117 @@ this: a TCP connect would have succeeded on that box.
 The operator starts the VM run. `validation/RUNBOOK_v135.md` carries the phase
 order and the exact commands. The provisioning handoff card was printed at the end
 of this session.
+
+---
+
+# ADDENDUM 2026-08-20: the validation run, in progress on cfv-169
+
+The interim close-out above said the validation had not run. It has now partly run.
+This addendum records what is measured, what is not, and what was found. The
+sections above are left as written rather than edited, because they were true when
+written and a close-out that quietly rewrites itself is not a record.
+
+**VM cfv-169**, 40.64.120.61, image clawfactory-win11-baseline-v2, D2s_v4.
+DEALLOCATED at a human handoff; state preserved, compute billing stopped.
+
+## Matrix status
+
+| # | Test | Status |
+| --- | --- | --- |
+| 1 | Clean install, all resources, all pins | **PASS** (INSTALLER_DONE=success, 34/34 resources, artifact sha256 verified on the box) |
+| 2 | Provider gate passes healthy + CONTROL fails blocked | **PASS**, both halves in one run |
+| 3 | Gate skipped with a stated reason under deferred provider | NOT RUN (needs a second install with -Provider later) |
+| 4 | `SP.*` no toolchain address enters after a switch | **PASS** |
+| 5 | `SP.*` toggle OFF, GitHub and npm unreachable after a switch | **PASS** |
+| 6 | CONTROL for 5: toggle ON, they are reachable | **PASS** |
+| 7 | `TC.3` re-run | NOT RUN |
+| 8 | `TC.1,2,4,5,6,7,8` regression | NOT RUN |
+| 9 | Five MANUAL panel checks | NOT RUN |
+| 10 | Reboot pass | NOT RUN |
+| 11 | Harness self-test 15/15 | build machine PASS; on the box NOT RUN |
+| 12 | Zero malformed verdict rows | so far zero across two phases |
+
+## The ship-blocker fix is PROVEN, before and after, on one box
+
+Phase `switchprovider2`: PASS=39 FAIL=1 INFO=1, 13/13 positive controls fired.
+
+- `SP.2a/2b` the 1.3.4 script puts toolchain addresses into `allowed_ipv4` AND
+  persists them. The fault-landed control fired first, so this is a measurement
+  rather than an assumption.
+- `SP.2c` with the toggle OFF, GitHub and npm became reachable again. The security
+  failure, demonstrated.
+- `SP.2d` the panel still reported the toggle as OFF while the route was open.
+- `SP.4a/4b` after the FIXED switch, no toolchain address in the set or the file.
+- `SP.5a` GitHub and npm remain unreachable after a provider switch.
+- `SP.6a` with the toggle ON they are reachable, so the probe discriminates.
+- `SP.7a` a toolchain host injected into the seed makes the fixed script REFUSE.
+- `SP.7c/7d` empty and malformed seeds are fatal and leave the firewall untouched.
+
+The provider gate (phase `providergate`) is PASS=11 FAIL=0: the gate passed on the
+healthy box, and with the provider rigged to TEST-NET-1 the shipped probe failed all
+three attempts and named the reason. Level 2, the installer's loud abort, is
+recorded INFO as NOT RUN.
+
+## NEW FINDING: the toolchain toggle cannot close the skill hub
+
+`SP.8` FAILS, and it is a real finding rather than a probe artifact.
+
+`clawhub.ai` and `openclaw.ai` both resolve to **216.150.1.1**. `openclaw.ai` is a
+BASE host, permanently in `allowed_ipv4` by design. So with the toolchain toggle
+OFF, measured on cfv-169:
+
+```
+api.github.com:443          blocked
+registry.npmjs.org:443      blocked
+raw.githubusercontent.com   blocked
+api.clawhub.ai:443          blocked
+clawhub.ai:443              CONNECTED
+```
+
+The Studio panel says switching the toggle off "stops skill installation, GitHub and
+npm". GitHub and npm stop. Skill installation does not.
+
+PRE-EXISTING and not caused by the switch-provider fix, which `SP.5a` proves
+separately. `egress-policy.json` already documents the general case, that matching is
+by address and a co-hosted host stays reachable. What was never written down is that
+this collision lands on the one host the panel copy names. The `$baseHosts` comment
+reasoned that keeping `openclaw.ai` was safe because "the panel copy does not name
+them", which was true of `openclaw.ai` and missed its co-tenant.
+
+**Not adjudicated. It is a product-copy decision (narrow the claim) or a routing
+decision (narrow the route, and the product's own site goes dark for the agent).**
+
+## Probe defects found and fixed during the run, recorded because they nearly cost a verdict
+
+1. The first `switchprovider` run reported FIVE failures. Four were the probe's own:
+   `--list-hosts` emits eight hosts on one line and the regex took the first token;
+   and any toolchain address in `allowed_ipv4` was counted as leakage, so one
+   documented collision was reported as four failures of the thing under test.
+   Leakage is now defined as a toolchain address NOT explained by a base host,
+   calibrated in both directions on rigged inputs.
+2. `Step 15e` was used by BOTH Guard 1 and the new provider gate. Renumbered 15h.
+   The validated artifact 1.3.5 still carries the duplicate label; the fix is in the
+   repo and rides in the next build. Not rebuilt, deliberately: rebuilding would
+   discard this run for a log label with no behavioural effect.
+3. The provider-gate phase looked for the install log under a `logs\` subdirectory
+   that does not exist. It would have read an empty string and reported a clean
+   absence for every assertion.
+4. A staging script wrote all three files to a single path because bash collapsed
+   `\$n`, and every size check passed by measuring the file it had just written.
+   `FETCH_OK` printed while nothing was staged.
+
+## The long-standing smoke FAIL is explained and is NOT a no-key artifact
+
+`auth-profiles.json present for all 5 agents` FAILED in the probe run. Measured
+afterwards: all six profiles present, mode 600, `key_len=108`, and the check returns
+OK through both the file channel and the smoke test's own nested-inline channel.
+The probe's `NEEDS-KEY (no provider key on this VM by design)` line is stale
+boilerplate; a key WAS seeded this run.
+
+The two smoke instruments disagree with each other about the same box: the probe's
+run reported gateway PASS and auth-profiles FAIL, the scheduled run at 17:07:36
+reported gateway FAIL. Both straddle the probe's deliberate gateway stop in its
+meter-unknown section. That is a measurement-timing artifact.
+
+The prior attribution, that this FAIL is a no-API-key artifact, is DISPROVEN: there
+was a key.
