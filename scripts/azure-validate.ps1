@@ -356,6 +356,51 @@ try {
     #     never printed.
     #   - start a pktmon ETW capture so Task 5 has install-phase egress.
     $preLines = @()
+
+    # -ApiKeyFromCredMan: read the provider key from THIS machine's Windows
+    # Credential Manager and feed the existing seed path, so the key never appears
+    # on a command line, in shell history, or in a session transcript.
+    #
+    # The switch has existed since v1.0.39 and the header above says the agent-turn
+    # phases need it, but until 2026-08-20 IT WAS DECLARED AND NEVER READ. The only
+    # working route was -SeedKeyB64, which puts a base64'd credential on argv. A
+    # dead switch that the documentation promises is worse than an absent one,
+    # because it reads as a safe option and silently is not one.
+    #
+    # Reports the LENGTH at most, never the value.
+    if ($ApiKeyFromCredMan) {
+        if ($SeedKeyB64) {
+            throw 'Pass either -ApiKeyFromCredMan or -SeedKeyB64, not both. Two sources for one credential is how the wrong key gets seeded and the run blames the product.'
+        }
+        Add-Type -Namespace CFL -Name Cred -MemberDefinition @'
+[DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+public static extern bool CredRead(string target, uint type, uint flags, out IntPtr credential);
+[DllImport("advapi32.dll")] public static extern void CredFree(IntPtr buffer);
+[StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+public struct CREDENTIAL { public uint Flags; public uint Type; public string TargetName;
+  public string Comment; public long LastWritten; public uint CredentialBlobSize;
+  public IntPtr CredentialBlob; public uint Persist; public uint AttributeCount;
+  public IntPtr Attributes; public string TargetAlias; public string UserName; }
+'@ -ErrorAction Stop
+        $ptr = [IntPtr]::Zero
+        if (-not [CFL.Cred]::CredRead($SeedKeyTarget, 1, 0, [ref]$ptr)) {
+            throw ("-ApiKeyFromCredMan: no credential at target '$SeedKeyTarget' in this machine's " +
+                   'Windows Credential Manager. Nothing has been provisioned. Either store the provider ' +
+                   'key there, or re-run without the switch and accept that the agent-turn phases will ' +
+                   'be VOID for want of a key rather than reporting a product verdict.')
+        }
+        try {
+            $c   = [Runtime.InteropServices.Marshal]::PtrToStructure($ptr, [Type][CFL.Cred+CREDENTIAL])
+            $key = [Runtime.InteropServices.Marshal]::PtrToStringUni($c.CredentialBlob, $c.CredentialBlobSize / 2)
+        } finally { [CFL.Cred]::CredFree($ptr) }
+        if ([string]::IsNullOrWhiteSpace($key)) {
+            throw "-ApiKeyFromCredMan: the credential at '$SeedKeyTarget' is present but empty. A blank key would seed an install that 401s on every turn and look like a product failure. Refusing."
+        }
+        $SeedKeyB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($key))
+        Say "Provider key read from Credential Manager target '$SeedKeyTarget' (length $($key.Length)); it will be seeded machine-to-machine and is never printed." DarkGray
+        Remove-Variable key -ErrorAction SilentlyContinue
+    }
+
     if ($SeedKeyB64) {
         $seedPs = @"
 `$ErrorActionPreference='Stop'
