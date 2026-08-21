@@ -428,3 +428,88 @@ meter-unknown section. That is a measurement-timing artifact.
 
 The prior attribution, that this FAIL is a no-API-key artifact, is DISPROVEN: there
 was a key.
+
+---
+
+# ADDENDUM 2 (2026-08-20, end of day): the reboot pass, and a second address-matching finding
+
+cfv-169 DEALLOCATED. Nothing running, nothing billing compute.
+
+## The reboot pass ran, and it is the first time
+
+The deallocate/start cycle was a genuine power cycle, confirmed by
+`LastBootUpTime 23:32:12` and a fresh `rdp-tcp#0` session rather than a reconnect.
+The runner was restarted by hand and its heartbeat verified from the driver rather
+than inferred from a quiet console.
+
+Post-reboot phase: PASS=25 FAIL=2 VOID=0 INFO=2, 9/9 controls fired.
+
+- `SP.1a/1b` NO toolchain address came back through the boot path.
+- `SP.4a/4b` after a provider switch post-reboot, still no toolchain address in the
+  set or the persisted file.
+- `SP.5a` toggle OFF, GitHub and npm unreachable.
+- `SP.8` FAILS again, consistently: the clawhub.ai co-hosting finding.
+- `SP.6a` FAILS: `github=False npm=True` with the toggle ON.
+
+## SECOND NEW FINDING: the toolchain toggle ON does not reliably deliver GitHub
+
+`SP.6a` was NOT a probe artifact. Measured directly afterwards on the same box:
+
+```
+api.github.com resolved 6x:  140.82.116.6, .6, .5, .5, 20.29.134.17, .5
+toolchain_ipv4 held:         140.82.116.3/.4/.5/.6, 20.29.134.24   (.24, not .17)
+toggle ON, probed 5x:        CONNECTED, blocked, blocked, blocked, CONNECTED
+```
+
+ROOT CAUSE, structural rather than a bug. `allowed_ipv4` is ADDITIVE, so provider
+address churn accumulates and self-heals. `toolchain_ipv4` is FLUSHED AND REBUILT on
+every resolver run, which is exactly what makes the toggle able to revoke, so it only
+ever holds a fresh three-lookup sample. GitHub's pool is larger than three lookups
+can sample. **Revocability was bought at the cost of coverage and nothing wrote that
+trade-off down.**
+
+Reliability, not security: it fails CLOSED, denying more than advertised, never less.
+Pre-existing; untouched by this card's fix. Carded as #261.
+
+**VALIDATION CONSEQUENCE, stated because it narrows a claim.** Test 6 is the
+discriminating control for test 5. It could not fire for GitHub, so **test 5 is
+proven on npm alone**, not on GitHub. A future run must re-probe rather than read a
+GitHub result as a toggle verdict.
+
+## Matrix at end of day
+
+| # | Test | Status |
+| --- | --- | --- |
+| 1 | Clean install | **PASS** |
+| 2 | Provider gate healthy + blocked CONTROL | **PASS** |
+| 3 | Gate skipped under deferred provider | NOT RUN (needs a second install) |
+| 4 | No toolchain address enters after a switch | **PASS**, pre and post reboot |
+| 5 | Toggle OFF, sources unreachable after a switch | **PASS on npm**; GitHub arm VOID per #261 |
+| 6 | CONTROL: toggle ON, reachable | **FAIL for GitHub**, PASS for npm |
+| 7 | TC.3 re-run | NOT RUN |
+| 8 | TC.1,2,4,5,6,7,8 | NOT RUN |
+| 9 | Five MANUAL panel checks | NOT RUN, still never passed |
+| 10 | Reboot pass | **PARTIAL**: SP 4 and 5 done post-reboot; TC.2/3/4/8 not run |
+| 11 | Harness self-test | build machine PASS 15/15; on the box NOT RUN |
+| 12 | Zero malformed verdict rows | **zero across four phases** |
+
+## State to resume from
+
+- cfv-169 deallocated, disk retained, IP 40.64.120.61 Static, RDP rule scoped to
+  67.164.251.99/32.
+- **The toolchain toggle was left ON** by the #261 diagnostic, not OFF. A resuming
+  session must set its own precondition rather than assume the SP.9 end-state.
+- C:\cfv holds the runner, phaselib, wslchan and sp-prefix-fw.sh; all survived one
+  reboot.
+- Auto-logon is spent. Restarting the VM needs an RDP login and a manual runner
+  start until card #259 is done.
+
+## Open decisions, neither adjudicated by me
+
+1. **clawhub.ai co-hosting.** The panel says the toggle stops skill installation; it
+   cannot. Narrow the claim, or narrow the route and take openclaw.ai out of the base
+   list, which darkens the product's own site for the agent.
+2. **#261 GitHub intermittency.** Four options on the card, none chosen.
+
+Neither is caused by this card's work, and neither blocks the ship-blocker fix, which
+is proven.
