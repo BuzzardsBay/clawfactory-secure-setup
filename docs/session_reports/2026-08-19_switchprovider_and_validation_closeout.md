@@ -513,3 +513,18 @@ GitHub result as a toggle verdict.
 
 Neither is caused by this card's work, and neither blocks the ship-blocker fix, which
 is proven.
+
+---
+
+## Companion document
+
+The operating handoff for resuming this work is
+`docs/session_reports/HANDOFF_2026-08-20_card258.md`. It is self-contained and does
+not require the session transcript.
+
+**Which to read:** this file is the RECORD, written to be read later as evidence of
+what was proven and how. The handoff is the INSTRUCTIONS, written to be read next by
+whoever continues the matrix. It carries the resume commands, the precondition
+warning that the toolchain toggle was left ON rather than OFF, the environment
+constraints (this job needs Bret's local machine: repo, az login, Credential Manager,
+mstsc, signing), and the traps that cost time on 2026-08-20.
