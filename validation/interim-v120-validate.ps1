@@ -53,8 +53,18 @@ param(
     [string]$Phase1Script    = 'interim-v120-phase1.ps1',
     [string[]]$ExtraStage    = @(),
     [string]$InstallProvider = 'claude',
-    #   -Phase1Extra     switches passed to the install probe. cfv-172 passes ''
-    #                    because the capture's subject host is blocked there.
+    #   -Phase1Extra     switches passed to the install probe, or the literal
+    #                    'none' for no extra switches. cfv-172 passes 'none'
+    #                    because the capture's subject host is blocked there, so
+    #                    arming it would produce a silence with no meaning.
+    #
+    #                    'none' RATHER THAN AN EMPTY STRING, and that is not
+    #                    style. `powershell -File script.ps1 -Phase1Extra ''`
+    #                    DROPS the empty argument during -File parsing, so the
+    #                    next token binds to the wrong parameter or the parameter
+    #                    binds to nothing: this exact call failed with "Missing an
+    #                    argument for parameter 'Phase1Extra'". A sentinel word
+    #                    survives the round trip; an empty string does not.
     [string]$Phase1Extra     = '-LicenceCapture',
     [switch]$Resume
 )
@@ -449,7 +459,7 @@ if(-not [CFW.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
             # than assumed from a previous one. cfv-172 passes '' instead: the
             # capture's subject host is BLOCKED on that box, so arming it there
             # would produce a silence with no meaning.
-            $Phase1Extra,
+            $(if ($Phase1Extra -and $Phase1Extra -ne 'none') { $Phase1Extra }),
             '-Provider', $InstallProvider
         ) -join ' '
         $cmdLines = @(
