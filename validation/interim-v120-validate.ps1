@@ -387,6 +387,13 @@ try {
                    --container-name $Container --name $name --permissions r --expiry $exp -o tsv
             return "https://$StorageAcct.blob.core.windows.net/$Container/$name`?$s"
         }
+        $extraDl = ''; $extraAssert = ''
+        foreach ($x in $ExtraStage) {
+            $leaf = Split-Path $x -Leaf
+            $u    = Sas $leaf
+            $extraDl     += "Invoke-WebRequest -Uri '$u' -OutFile C:\cfv\$leaf -UseBasicParsing; "
+            $extraAssert += "if (-not (Test-Path 'C:\cfv\$leaf')) { throw 'EXTRA STAGE MISSING: $leaf' }; "
+        }
         $uExe = Sas "combined-$VmName.exe"; $uP1 = Sas $Phase1Script
         $uRun = Sas 'interim-v120-runner.ps1'; $uCh = Sas 'interim-v120-wslchan.ps1'
         $uLib = Sas 'interim-v120-phaselib.ps1'; $uSt = Sas 'harness-selftest.ps1'
@@ -397,6 +404,16 @@ try {
                  "Invoke-WebRequest -Uri '$uCh' -OutFile C:\cfv\interim-v120-wslchan.ps1 -UseBasicParsing; " +
                  "Invoke-WebRequest -Uri '$uLib' -OutFile C:\cfv\interim-v120-phaselib.ps1 -UseBasicParsing; " +
                  "Invoke-WebRequest -Uri '$uSt' -OutFile C:\cfv\harness-selftest.ps1 -UseBasicParsing; " +
+                 # THE EXTRAS MUST BE DOWNLOADED, NOT MERELY UPLOADED. The first
+                 # version of this added ExtraStage to the upload list and stopped
+                 # there, so cfv-172 ran with its v1.1.1 comparison control absent.
+                 # The phase did the right thing and voided itself on the missing
+                 # precondition rather than reporting the two rows that HAD passed,
+                 # but a whole box and twenty minutes went to a gap in this line.
+                 $extraDl +
+                 # And each one is asserted PRESENT on the box, so a future gap is
+                 # loud here instead of silent until a phase voids on it.
+                 $extraAssert +
                  "`$h=(Get-FileHash C:\cfv\combined-setup.exe -Algorithm SHA256).Hash.ToLower(); " +
                  "if (`$h -ne '$Sha256') { throw `"ARTIFACT HASH MISMATCH ON VM: `$h`" }; " +
                  "`"OK staged; artifact=`$h size=`$((Get-Item C:\cfv\combined-setup.exe).Length)`""
