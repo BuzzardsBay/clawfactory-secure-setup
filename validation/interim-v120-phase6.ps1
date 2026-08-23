@@ -1,4 +1,4 @@
-<#
+﻿<#
   Phase 6: v1 Guard 3 (web off by default) plus the approvals-panel polish.
 
   Runs in the interactive auto-logon session on the VM, through the file-based
@@ -504,7 +504,20 @@ foreach ($m in @('web:list','web:allow','web:revoke','Web access','clawfactory-f
                  # 'stops skill installation' (stop against stops), so this PRESENT
                  # assertion and the ABSENT one below genuinely oppose each other.
                  'does not stop skill installation',
-                 'Frontier Automation Systems LLC · Apache-2.0')) {
+                 # ASCII ONLY, AND THAT IS LOAD-BEARING. This was the footer string
+                 # 'Frontier Automation Systems LLC <middot> Apache-2.0'. The middot is
+                 # U+00B7, and PowerShell 5.1 reads a BOM-less file as ANSI, so the two
+                 # UTF-8 bytes became two characters and the search could never match.
+                 # The marker reported MISSING against an asar that demonstrably
+                 # CONTAINS the footer, which is a false failure of exactly the kind
+                 # this phase exists to catch in the product.
+                 # These two are ours alone, so they still discriminate, and they test
+                 # the other footer correction as well: 'runs entirely on your machine'
+                 # was replaced because next to a licence it read as a claim about DATA.
+                 # A bare 'Apache-2.0' is still refused as a marker: node_modules licence
+                 # banners carry it, so it could never fail.
+                 'the sandbox runs on your machine',
+                 'your agent talks to a hosted AI model')) {
   if ($t.Contains($m)) { "PRESENT  $m" } else { "MISSING  $m" }
 }
 # Stale strings. Each is a sentence that was FALSE in the shipped product at the
