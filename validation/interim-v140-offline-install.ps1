@@ -1,17 +1,16 @@
 <#
-  v1.4.0 release gate, box B. Two matrix rows that cannot be taken on box A
-  because both are properties of the INSTALL ITSELF and box A is already
+  v1.4.0 release gate, box B. One matrix row that cannot be taken on box A,
+  because it is a property of the INSTALL ITSELF and box A is already
   installed.
 
     row 2  the install completes on a machine that cannot reach
            api.clawfactory.app. It must not fail closed the way it used to.
-    row 4  the provider gate is SKIPPED, with a stated reason, under
-           -Provider later.
 
-  The two conditions are independent: one is a network block on a host nothing
-  contacts any more, the other a wizard argument. They are combined onto one box
-  deliberately and that combination is stated in the close-out rather than left
-  for a reader to notice.
+  Row 4, the deferred-provider gate skip, was going to ride here too. It does
+  not: interim-v135-providergate.ps1 -DeferredProvider already covers it, and
+  covers it better (PG.3a asserts the skip NAMES its reason, PG.3b that the
+  install still completed). A second, weaker copy of an existing check is how
+  two checks drift apart.
 
   WHY THERE IS A SECOND INSTALLER ON THIS BOX.
   A subject that completes under a block proves nothing on its own. It could
@@ -51,7 +50,7 @@ function Finish($code) {
 $SUBJECT = 'api.clawfactory.app'
 $CONTROL = 'openclaw.ai'
 
-Start-Phase -Name 'ClawFactory v1.4.0 release gate, box B (offline licence host + deferred provider)' `
+Start-Phase -Name 'ClawFactory v1.4.0 release gate, box B (install with the licence host unreachable)' `
     -Transcript $Transcript -Sentinel 'OFFLINE_PROBE_COMPLETE'
 
 # ---------------------------------------------------------------- 1. the block
@@ -127,7 +126,7 @@ if ($havePrior) {
 }
 
 # --------------------------------------------------- 3. the subject: v1.4.0
-Section '3. SUBJECT: v1.4.0 installs to completion under the identical block, provider deferred'
+Section '3. SUBJECT: v1.4.0 installs to completion under the identical block'
 
 if (-not (Test-Path $CombinedExe)) {
     Record 'B3.0' 'v1.4.0 present on the box' 'FAIL' "missing at $CombinedExe"
@@ -139,7 +138,7 @@ W "subject artifact sha256: $((Get-FileHash $CombinedExe -Algorithm SHA256).Hash
 
 $sw2 = [Diagnostics.Stopwatch]::StartNew()
 Start-Process -FilePath $CombinedExe -ArgumentList `
-    '/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/LOG=C:\cfv\install.log','/PROVIDER=later' -Wait
+    '/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/LOG=C:\cfv\install.log','/PROVIDER=claude' -Wait
 $sw2.Stop()
 W "v1.4.0 returned after $([int]$sw2.Elapsed.TotalMinutes) min"
 Marker 'OFFLINE_INSTALL_RETURNED'
@@ -159,37 +158,6 @@ $subjReachAfter = TryConnect $SUBJECT
 Record 'B3.1' 'the block was still in force when the install finished' `
     $(if (-not $subjReachAfter) { 'PASS' } else { 'FAIL' }) `
     "subject reachable after install=$subjReachAfter (must be False). A lapsed block would silently turn row 2 into an ordinary install."
-
-# ------------------------------------------ 4. row 4, the deferred provider
-Section '4. ROW 4: the provider gate is SKIPPED, with a stated reason'
-
-$setupLog = @(
-    'C:\ProgramData\ClawFactory\install.log',
-    'C:\ProgramData\ClawFactory\logs\setup.log'
-) | Where-Object { Test-Path $_ } | Select-Object -First 1
-
-if (-not $setupLog) {
-    Record 'B4' 'ROW 4: provider gate skipped with a stated reason' 'VOID' `
-        'setup.ps1 install log not found, so the gate decision cannot be read. Not a product verdict.'
-} else {
-    $log = Get-Content $setupLog -Raw
-    # Named reason, not merely absent output. "The gate did not run" and "the gate
-    # ran and said nothing" are different products, and only one of them is
-    # honest about a deferred provider.
-    $gateLines = @([regex]::Matches($log, '(?im)^.*(provider gate|providergate|provider route|deferred|no provider|provider later).*$') |
-                    ForEach-Object { $_.Value.Trim() })
-    foreach ($ln in $gateLines) { W "   GATE> $ln" }
-    $skippedWithReason = ($gateLines | Where-Object { $_ -match '(?i)skip|defer|later|not configured' }).Count -gt 0
-    Record 'B4' 'ROW 4: provider gate skipped with a stated reason under -Provider later' `
-        $(if ($skippedWithReason) { 'PASS' } else { 'FAIL' }) `
-        "matched $($gateLines.Count) provider-gate line(s) in the install log; a skip with a named reason present=$skippedWithReason"
-
-    # Positive control for the search itself. If the log cannot be searched at
-    # all, an absent match reads exactly like a clean skip.
-    Assert-Searchable -Id 'B4.SEARCH' -Name 'the install log is searchable' `
-        -PositiveMarkerFound ($log -match '(?i)Step 1') `
-        -MarkerDescription 'the string "Step 1" inside the setup.ps1 install log' | Out-Null
-}
 
 Complete-Phase -ResultsJson 'C:\cfv\offline-results.json' -MarkerPrefix 'OFFLINE'
 Finish 0

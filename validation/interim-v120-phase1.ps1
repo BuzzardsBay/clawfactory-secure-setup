@@ -31,7 +31,13 @@ param(
     # every earlier caller of this phase behaves exactly as it did before. A new
     # probe inherits none of the preconditions of the phases beside it, so this
     # one carries its own calibration rather than borrowing anyone's.
-    [switch]$LicenceCapture
+    [switch]$LicenceCapture,
+    # v1.4.0: which provider the install is given. 'later' defers it, which is
+    # what matrix row 4 needs so interim-v135-providergate.ps1 -DeferredProvider
+    # has a deferred install to read. Default keeps every earlier caller on the
+    # provider they have always used.
+    [ValidateSet('grok','openai','claude','gemini','ollama','later')]
+    [string]$Provider = 'claude'
 )
 
 $ErrorActionPreference = 'Continue'
@@ -311,9 +317,10 @@ if ($LicenceCapture) {
 
 $sw = [Diagnostics.Stopwatch]::StartNew()
 W "Launching installer (/SILENT, log to C:\cfv\install.log)..."
+W "Provider argument for this install: /PROVIDER=$Provider"
 Start-Process -FilePath $CombinedExe -ArgumentList `
     '/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/LOG=C:\cfv\install.log', `
-    '/PROVIDER=claude' -Wait
+    "/PROVIDER=$Provider" -Wait
 $sw.Stop()
 W "Installer process returned after $([int]$sw.Elapsed.TotalMinutes) min."
 Marker 'PHASE1_INSTALL_RETURNED'
