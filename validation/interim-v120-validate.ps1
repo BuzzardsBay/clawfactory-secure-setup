@@ -436,8 +436,27 @@ if(-not [CFW.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
             throw "wrapper.cmd builder produced $($cmdLines.Count) lines, expected 5. The probe command was likely re-split from its redirect (cfv-149 signature). Refusing to arm a broken wrapper."
         }
         $cmdB64 = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(($cmdLines -join "`r`n") + "`r`n"))
+        # AUTO-LOGON NEEDS THE ACCOUNT CREDENTIAL TO EQUAL THE ONE IT WRITES.
+        #
+        # $pw is generated in memory above and never printed, and until 2026-08-23
+        # it was the only credential the account ever had, so the two agreed by
+        # construction. They stop agreeing the moment the OPERATOR sets their own
+        # for RDP, which the release runbook asks them to do at provisioning: the
+        # registry then carries $pw while the account carries theirs,
+        # AutoAdminLogon fails silently, wrapper.cmd never runs, and the poll
+        # below burns twelve minutes before fail-fast can name it. That is the
+        # cfv-162 shape reached from a different direction.
+        #
+        # run-command executes as SYSTEM, which can reset a local account on this
+        # throwaway validation VM without presenting the old value. So force the
+        # two back into agreement here rather than hoping nobody touched it. This
+        # DELIBERATELY overwrites an operator-chosen value: the operator sets
+        # theirs again before the first reboot, which is the same card they
+        # already receive for starting the runner by hand, so it costs no extra
+        # round trip. Nothing is printed, saved, or returned to the driver.
         $arm = "`$ErrorActionPreference='Stop'; " +
                "[IO.File]::WriteAllBytes('C:\cfv\wrapper.cmd', [Convert]::FromBase64String('$cmdB64')); " +
+               "net user '$AdminUser' '$pw' | Out-Null; " +
                "`$w='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'; " +
                "Set-ItemProperty `$w AutoAdminLogon '1'; Set-ItemProperty `$w DefaultUserName '$AdminUser'; " +
                "Set-ItemProperty `$w DefaultPassword '$pw'; Set-ItemProperty `$w AutoLogonCount 1 -Type DWord; " +
