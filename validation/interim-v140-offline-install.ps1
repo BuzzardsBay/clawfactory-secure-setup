@@ -34,7 +34,14 @@
 param(
     [string]$CombinedExe = 'C:\cfv\combined-setup.exe',
     [string]$PriorExe    = 'C:\cfv\prior-setup.exe',
-    [string]$Transcript  = 'C:\cfv\offline-out-probe.txt'
+    # Accepted so the driver can pass -Provider to whichever probe is acting
+    # as this box's install phase, without knowing which one it is.
+    [ValidateSet('grok','openai','claude','gemini','ollama','later')]
+    [string]$Provider    = 'claude',
+    # On box B this probe IS phase 1: it is the phase that installs. It reports
+    # through phase 1's transcript, results file and sentinel so the driver's
+    # evidence gate and retrieval need no special case.
+    [string]$Transcript  = 'C:\cfv\phase1-out-probe.txt'
 )
 
 $ErrorActionPreference = 'Continue'
@@ -43,7 +50,7 @@ $ErrorActionPreference = 'Continue'
 
 function Finish($code) {
     W ''
-    W "OFFLINE_PROBE_COMPLETE rc=$code"
+    W "PHASE1_PROBE_COMPLETE rc=$code"
     exit $code
 }
 
@@ -51,7 +58,7 @@ $SUBJECT = 'api.clawfactory.app'
 $CONTROL = 'openclaw.ai'
 
 Start-Phase -Name 'ClawFactory v1.4.0 release gate, box B (install with the licence host unreachable)' `
-    -Transcript $Transcript -Sentinel 'OFFLINE_PROBE_COMPLETE'
+    -Transcript $Transcript -Sentinel 'PHASE1_PROBE_COMPLETE'
 
 # ---------------------------------------------------------------- 1. the block
 Section '1. Make the licence host unreachable, and prove the block is real'
@@ -68,7 +75,7 @@ W "control $CONTROL -> $(if ($controlIps) { $controlIps -join ',' } else { '(did
 $canBlock = Require-Precondition -Id 'B0' -Name "$SUBJECT resolves, so there is something to block" `
     -Met ($subjectIps.Count -gt 0) `
     -Reason "a host that does not resolve cannot be blocked, and an install that completes without it would prove nothing about a blocked one"
-if (-not $canBlock) { Marker 'OFFLINE_FEASIBILITY_FAIL'; Complete-Phase -ResultsJson 'C:\cfv\offline-results.json' -MarkerPrefix 'OFFLINE'; Finish 4 }
+if (-not $canBlock) { Marker 'PHASE1_FEASIBILITY_FAIL'; Complete-Phase -ResultsJson 'C:\cfv\phase1-results.json' -MarkerPrefix 'PHASE1'; Finish 4 }
 
 Remove-NetFirewallRule -DisplayName 'cfv-block-licence-host' -ErrorAction SilentlyContinue
 foreach ($ip in $subjectIps) {
@@ -130,18 +137,18 @@ Section '3. SUBJECT: v1.4.0 installs to completion under the identical block'
 
 if (-not (Test-Path $CombinedExe)) {
     Record 'B3.0' 'v1.4.0 present on the box' 'FAIL' "missing at $CombinedExe"
-    Marker 'OFFLINE_FEASIBILITY_FAIL'
-    Complete-Phase -ResultsJson 'C:\cfv\offline-results.json' -MarkerPrefix 'OFFLINE'
+    Marker 'PHASE1_FEASIBILITY_FAIL'
+    Complete-Phase -ResultsJson 'C:\cfv\phase1-results.json' -MarkerPrefix 'PHASE1'
     Finish 2
 }
 W "subject artifact sha256: $((Get-FileHash $CombinedExe -Algorithm SHA256).Hash.ToLower())"
 
 $sw2 = [Diagnostics.Stopwatch]::StartNew()
 Start-Process -FilePath $CombinedExe -ArgumentList `
-    '/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/LOG=C:\cfv\install.log','/PROVIDER=claude' -Wait
+    '/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/LOG=C:\cfv\install.log',"/PROVIDER=$Provider" -Wait
 $sw2.Stop()
 W "v1.4.0 returned after $([int]$sw2.Elapsed.TotalMinutes) min"
-Marker 'OFFLINE_INSTALL_RETURNED'
+Marker 'PHASE1_INSTALL_RETURNED'
 
 # The Inno exit code is not the honest verdict. setup.ps1 writes the real one.
 $resultFile = 'C:\ProgramData\ClawFactory\install-result.txt'
@@ -159,5 +166,5 @@ Record 'B3.1' 'the block was still in force when the install finished' `
     $(if (-not $subjReachAfter) { 'PASS' } else { 'FAIL' }) `
     "subject reachable after install=$subjReachAfter (must be False). A lapsed block would silently turn row 2 into an ordinary install."
 
-Complete-Phase -ResultsJson 'C:\cfv\offline-results.json' -MarkerPrefix 'OFFLINE'
+Complete-Phase -ResultsJson 'C:\cfv\phase1-results.json' -MarkerPrefix 'PHASE1'
 Finish 0

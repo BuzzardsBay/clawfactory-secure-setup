@@ -40,6 +40,22 @@ param(
     [string]$SeedKeyTarget = 'ClawFactory/AnthropicApiKey',
     [string]$SeedKeyB64    = '',
     [string]$OutDir        = '',
+    # v1.4.0 release gate. Three additions, each defaulting to exactly what this
+    # driver did before, so any earlier invocation is byte-for-byte unchanged.
+    #   -Phase1Script    which probe runs as this box's install phase. cfv-172
+    #                    runs the offline probe instead, which reports through
+    #                    phase 1's own channels so nothing else here changes.
+    #   -ExtraStage      extra local files to stage into C:\cfv by leaf name.
+    #                    cfv-172 needs the v1.1.1 artifact as its abort control.
+    #   -InstallProvider which provider the install is given. cfv-171 uses
+    #                    'later' so interim-v135-providergate.ps1
+    #                    -DeferredProvider has a deferred install to read.
+    [string]$Phase1Script    = 'interim-v120-phase1.ps1',
+    [string[]]$ExtraStage    = @(),
+    [string]$InstallProvider = 'claude',
+    #   -Phase1Extra     switches passed to the install probe. cfv-172 passes ''
+    #                    because the capture's subject host is blocked there.
+    [string]$Phase1Extra     = '-LicenceCapture',
     [switch]$Resume
 )
 
@@ -336,6 +352,12 @@ try {
             # demonstrated ON THE BOX rather than only on the build machine.
             @{ p = (Join-Path $PSScriptRoot 'harness-selftest.ps1'); n = 'harness-selftest.ps1' }
         )
+        # The install probe, whichever one this box is using.
+        $files += @{ p = (Join-Path $PSScriptRoot $Phase1Script); n = $Phase1Script }
+        foreach ($x in $ExtraStage) {
+            $xp = if ([IO.Path]::IsPathRooted($x)) { $x } else { Join-Path $PSScriptRoot $x }
+            $files += @{ p = $xp; n = (Split-Path $xp -Leaf) }
+        }
         foreach ($f in $files) {
             if (-not (Test-Path $f.p)) { throw "Cannot stage '$($f.p)' -- not found." }
             az storage blob upload --account-name $StorageAcct --account-key $key --container-name $Container `
@@ -355,12 +377,12 @@ try {
                    --container-name $Container --name $name --permissions r --expiry $exp -o tsv
             return "https://$StorageAcct.blob.core.windows.net/$Container/$name`?$s"
         }
-        $uExe = Sas "combined-$VmName.exe"; $uP1 = Sas 'interim-v120-phase1.ps1'
+        $uExe = Sas "combined-$VmName.exe"; $uP1 = Sas $Phase1Script
         $uRun = Sas 'interim-v120-runner.ps1'; $uCh = Sas 'interim-v120-wslchan.ps1'
         $uLib = Sas 'interim-v120-phaselib.ps1'; $uSt = Sas 'harness-selftest.ps1'
         $stage = "`$ErrorActionPreference='Stop'; New-Item -ItemType Directory -Path C:\cfv\jobs -Force | Out-Null; New-Item -ItemType Directory -Path C:\cfv\wsl -Force | Out-Null; " +
                  "Invoke-WebRequest -Uri '$uExe' -OutFile C:\cfv\combined-setup.exe -UseBasicParsing; " +
-                 "Invoke-WebRequest -Uri '$uP1' -OutFile C:\cfv\interim-v120-phase1.ps1 -UseBasicParsing; " +
+                 "Invoke-WebRequest -Uri '$uP1' -OutFile C:\cfv\$Phase1Script -UseBasicParsing; " +
                  "Invoke-WebRequest -Uri '$uRun' -OutFile C:\cfv\interim-v120-runner.ps1 -UseBasicParsing; " +
                  "Invoke-WebRequest -Uri '$uCh' -OutFile C:\cfv\interim-v120-wslchan.ps1 -UseBasicParsing; " +
                  "Invoke-WebRequest -Uri '$uLib' -OutFile C:\cfv\interim-v120-phaselib.ps1 -UseBasicParsing; " +
@@ -418,12 +440,17 @@ if(-not [CFW.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
         # separate elements and silently orphaned the redirect.
         $probeArgs = @(
             '-NoProfile','-ExecutionPolicy','Bypass',
-            '-File','C:\cfv\interim-v120-phase1.ps1',
+            '-File',"C:\cfv\$Phase1Script",
             '-CombinedExe','C:\cfv\combined-setup.exe',
-            # v1.4.0: bracket the install with the licence-call capture. Its own
-            # calibration window rides inside phase 1, so the instrument is proven
-            # in the same run rather than assumed from a previous one.
-            '-LicenceCapture'
+            # Switches that belong to whichever probe is acting as this box's
+            # install phase. Default is '-LicenceCapture', which brackets the
+            # install with the licence-call capture; its calibration window rides
+            # inside the probe, so the instrument is proven in the same run rather
+            # than assumed from a previous one. cfv-172 passes '' instead: the
+            # capture's subject host is BLOCKED on that box, so arming it there
+            # would produce a silence with no meaning.
+            $Phase1Extra,
+            '-Provider', $InstallProvider
         ) -join ' '
         $cmdLines = @(
             '@echo off',
