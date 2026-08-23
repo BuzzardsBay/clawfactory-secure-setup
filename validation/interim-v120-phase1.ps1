@@ -26,7 +26,12 @@
 #>
 param(
     [string]$CombinedExe = 'C:\cfv\combined-setup.exe',
-    [string]$Transcript  = 'C:\cfv\phase1-out-probe.txt'
+    [string]$Transcript  = 'C:\cfv\phase1-out-probe.txt',
+    # v1.4.0: bracket the install with a licence-call capture. Off by default so
+    # every earlier caller of this phase behaves exactly as it did before. A new
+    # probe inherits none of the preconditions of the phases beside it, so this
+    # one carries its own calibration rather than borrowing anyone's.
+    [switch]$LicenceCapture
 )
 
 $ErrorActionPreference = 'Continue'
@@ -81,9 +86,9 @@ $PIN = @{
     # in desktop\release\win-unpacked\resources\app.asar. If the VM ever reports
     # a mismatch here on an otherwise-clean install, that is a HARNESS finding to
     # diagnose, not a product failure to report.
-    studioAsar    = 'dc24d41618545f6043d3160e7d4d3d93dd28eb90e620da0c44eb62fac2b6d7dd'
+    studioAsar    = '5c4ffbf420814939579f00f0b8e69e949ba34af20d239ddcdc6cf4da383e2d85'
 
-    version       = '1.3.4'
+    version       = '1.4.0'
 }
 
 # The names are transcribed from setup.ps1 Step-Preflight $required. Held here as
@@ -119,6 +124,104 @@ $REQUIRED = @(
     # v1 Guard 3, the toolchain access toggle
     'clawfactory-toolchain.sh'
 )
+
+# =============================================================================
+# LICENCE-CALL CAPTURE (v1.4.0)
+#
+# WHAT THIS EXISTS TO PROVE. v1.4.0 removed every licence check, including the
+# installer's POST to https://api.clawfactory.app/activate. The previous session
+# proved the REMOVAL with the Pascal compiler, which resolves the whole [Code]
+# unit, and explicitly recorded the obvious instrument as BLIND: a raw string
+# scan of the compiled .exe returns zero hits for api.clawfactory.app on an
+# artifact that demonstrably contains it, because Inno compresses [Code]. So a
+# string scan is not permitted as evidence here and is not used.
+#
+# WHY THE SHAPE IS TWO WINDOWS. A capture that records nothing is not a passing
+# result, it is an unproven instrument. Silence only becomes evidence once the
+# same instrument, on the same machine, against the SAME host, has been shown to
+# produce a signal in the same run.
+#
+#   Window A, SUBJECT      : arm, run the installer, disarm. Expect silence.
+#   Window B, CALIBRATION  : arm, deliberately fetch https://api.clawfactory.app/
+#                            from Windows, disarm. Expect a signal.
+#
+# Window B is the load-bearing control. If B is silent the instrument is blind
+# and the phase is VOID rather than passing. If B fires and A is silent, A's
+# silence is evidence.
+#
+# TWO INDEPENDENT INSTRUMENTS, because either can fail quietly:
+#   1. DNS. The removed call used a HOSTNAME, never a literal address, so it
+#      could not have been made without resolving that name. A background sampler
+#      reads the Windows DNS client cache every few seconds, which survives TTL
+#      expiry in a way a single after-the-fact read does not.
+#   2. Packets. pktmon filtered to the subject and control addresses.
+# A disagreement between the two is itself reportable.
+#
+# The GET in window B is deliberately a GET against a POST-only endpoint, so the
+# calibration creates no server-side state. Nothing is activated by this probe.
+# =============================================================================
+$LC = @{
+    SubjectHost = 'api.clawfactory.app'
+    ControlHost = 'openclaw.ai'
+    Dir         = 'C:\cfv\licencecap'
+}
+
+function LC-ResolveA([string]$h) {
+    try { @((Resolve-DnsName $h -Type A -ErrorAction Stop | Where-Object { $_.IPAddress }).IPAddress) }
+    catch { @() }
+}
+
+function LC-StartDnsSampler([string]$logPath) {
+    # A background sampler rather than one read at the end. A cache entry can
+    # expire inside a 20 minute install, and an expired entry and an entry that
+    # was never created look identical after the fact.
+    Remove-Item $logPath -Force -ErrorAction SilentlyContinue
+    Start-Job -ScriptBlock {
+        param($lp)
+        while ($true) {
+            try {
+                Get-DnsClientCache -ErrorAction SilentlyContinue |
+                    ForEach-Object { "$($_.Entry)" } |
+                    Out-File -FilePath $lp -Encoding utf8 -Append
+            } catch { }
+            Start-Sleep -Seconds 4
+        }
+    } -ArgumentList $logPath
+}
+
+function LC-StartPktmon([string]$etl, [string[]]$ips) {
+    # Returns $null on success, or a reason string. Never throws: a capture that
+    # cannot start must record VOID with a name, not abort the install phase.
+    try {
+        & pktmon filter remove 2>&1 | Out-Null
+        foreach ($ip in $ips) { & pktmon filter add ("cf" + ($ip -replace '\.','')) -i $ip 2>&1 | Out-Null }
+        $out = & pktmon start --capture --pkt-size 128 --file-name $etl --file-size 128 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { return "pktmon start exit $LASTEXITCODE : $out" }
+        return $null
+    } catch { return "pktmon start threw: $($_.Exception.Message)" }
+}
+
+function LC-StopPktmon([string]$etl, [string]$txt) {
+    try {
+        & pktmon stop 2>&1 | Out-Null
+        & pktmon etl2txt $etl --out $txt 2>&1 | Out-Null
+        if (-not (Test-Path $txt)) { & pktmon format $etl -o $txt 2>&1 | Out-Null }
+        & pktmon filter remove 2>&1 | Out-Null
+        if (Test-Path $txt) { return (Get-Content $txt -Raw) }
+        return ''
+    } catch { & pktmon filter remove 2>&1 | Out-Null; return '' }
+}
+
+function LC-CountIps([string]$text, [string[]]$ips) {
+    $n = 0
+    foreach ($ip in $ips) { $n += ([regex]::Matches($text, [regex]::Escape($ip))).Count }
+    return $n
+}
+
+function LC-DnsHit([string]$logPath, [string]$needle) {
+    if (-not (Test-Path $logPath)) { return $false }
+    return ((Select-String -Path $logPath -SimpleMatch $needle -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)
+}
 
 Start-Phase -Name "ClawFactory v$($PIN.version) INTERIM validation, Phase 1 (install)" `
     -Transcript $Transcript -Sentinel 'PHASE1_PROBE_COMPLETE'
@@ -156,6 +259,29 @@ $sha = (Get-FileHash $CombinedExe -Algorithm SHA256).Hash.ToLower()
 W "On-VM artifact sha256: $sha"
 Record 'P1.1' 'Installer present, hash re-derived on VM' 'INFO' $sha
 
+
+# --- WINDOW A: arm the licence capture, BEFORE the installer starts ----------
+$lcArmed = $false; $lcPktReason = ''; $lcSubjIps = @(); $lcCtlIps = @()
+$lcDnsLogA = ''; $lcEtlA = ''; $lcTxtA = ''; $lcJobA = $null
+if ($LicenceCapture) {
+    New-Item -ItemType Directory -Path $LC.Dir -Force | Out-Null
+    $lcSubjIps = LC-ResolveA $LC.SubjectHost
+    $lcCtlIps  = LC-ResolveA $LC.ControlHost
+    W "Licence capture: subject $($LC.SubjectHost) -> $(if ($lcSubjIps) { $lcSubjIps -join ',' } else { '(did not resolve)' })"
+    W "Licence capture: control $($LC.ControlHost) -> $(if ($lcCtlIps) { $lcCtlIps -join ',' } else { '(did not resolve)' })"
+    $lcDnsLogA = Join-Path $LC.Dir 'dns-A.txt'
+    $lcEtlA    = Join-Path $LC.Dir 'A.etl'
+    $lcTxtA    = Join-Path $LC.Dir 'A.txt'
+    Remove-Item $lcEtlA, $lcTxtA -Force -ErrorAction SilentlyContinue
+    $lcPktReason = LC-StartPktmon $lcEtlA (@($lcSubjIps) + @($lcCtlIps))
+    # The resolutions above put BOTH names in the cache. Clear it, so anything the
+    # sampler sees during window A was resolved by the install and not by this probe.
+    Clear-DnsClientCache -ErrorAction SilentlyContinue
+    $lcJobA = LC-StartDnsSampler $lcDnsLogA
+    $lcArmed = $true
+    W "Licence capture ARMED. pktmon: $(if ($lcPktReason) { "NOT RUNNING -- $lcPktReason" } else { 'running' }); DNS sampler job $($lcJobA.Id)."
+}
+
 $sw = [Diagnostics.Stopwatch]::StartNew()
 W "Launching installer (/SILENT, log to C:\cfv\install.log)..."
 Start-Process -FilePath $CombinedExe -ArgumentList `
@@ -164,6 +290,79 @@ Start-Process -FilePath $CombinedExe -ArgumentList `
 $sw.Stop()
 W "Installer process returned after $([int]$sw.Elapsed.TotalMinutes) min."
 Marker 'PHASE1_INSTALL_RETURNED'
+
+# --- WINDOW A closes, then WINDOW B calibrates the same instrument -----------
+if ($LicenceCapture -and $lcArmed) {
+    Section "2b. Licence-call capture"
+
+    if ($lcJobA) { Stop-Job $lcJobA -ErrorAction SilentlyContinue; Receive-Job $lcJobA -ErrorAction SilentlyContinue | Out-Null; Remove-Job $lcJobA -Force -ErrorAction SilentlyContinue }
+    $txtA = LC-StopPktmon $lcEtlA $lcTxtA
+
+    $a_dnsSubject = LC-DnsHit $lcDnsLogA $LC.SubjectHost
+    $a_dnsControl = LC-DnsHit $lcDnsLogA $LC.ControlHost
+    $a_pktSubject = if ($lcPktReason) { -1 } else { LC-CountIps $txtA $lcSubjIps }
+    $a_pktControl = if ($lcPktReason) { -1 } else { LC-CountIps $txtA $lcCtlIps }
+    W "WINDOW A (install): dns subject=$a_dnsSubject control=$a_dnsControl ; pkt subject=$a_pktSubject control=$a_pktControl"
+
+    # WINDOW B. Same instrument, same host, deliberate Windows-side request.
+    $lcDnsLogB = Join-Path $LC.Dir 'dns-B.txt'
+    $lcEtlB    = Join-Path $LC.Dir 'B.etl'
+    $lcTxtB    = Join-Path $LC.Dir 'B.txt'
+    Remove-Item $lcEtlB, $lcTxtB -Force -ErrorAction SilentlyContinue
+    $lcPktReasonB = LC-StartPktmon $lcEtlB $lcSubjIps
+    Clear-DnsClientCache -ErrorAction SilentlyContinue
+    $lcJobB = LC-StartDnsSampler $lcDnsLogB
+    Start-Sleep -Seconds 6
+    $calStatus = ''
+    try {
+        # GET against a POST-only endpoint on purpose: proves reachability and
+        # creates no server-side state. Any HTTP answer at all, including 404 or
+        # 405, means the request left this machine, which is the whole question.
+        $r = Invoke-WebRequest -Uri ("https://" + $LC.SubjectHost + "/") -UseBasicParsing -TimeoutSec 20 -ErrorAction Stop
+        $calStatus = "HTTP $($r.StatusCode)"
+    } catch {
+        $calStatus = "request raised: $($_.Exception.Message)"
+    }
+    Start-Sleep -Seconds 8
+    if ($lcJobB) { Stop-Job $lcJobB -ErrorAction SilentlyContinue; Receive-Job $lcJobB -ErrorAction SilentlyContinue | Out-Null; Remove-Job $lcJobB -Force -ErrorAction SilentlyContinue }
+    $txtB = LC-StopPktmon $lcEtlB $lcTxtB
+    $b_dnsSubject = LC-DnsHit $lcDnsLogB $LC.SubjectHost
+    $b_pktSubject = if ($lcPktReasonB) { -1 } else { LC-CountIps $txtB $lcSubjIps }
+    W "WINDOW B (calibration, $calStatus): dns subject=$b_dnsSubject ; pkt subject=$b_pktSubject"
+
+    # The instrument is proven by window B alone. DNS is the primary channel
+    # because the removed call used a hostname and could not have been made
+    # without resolving it; pktmon is the corroborating one and is allowed to be
+    # unavailable without voiding the phase, provided DNS fired.
+    $instrumentProven = $b_dnsSubject -or ($b_pktSubject -gt 0)
+    Register-Control -Id 'P1.LC.CTL' `
+        -Name "the capture can see a Windows-side call to $($LC.SubjectHost)" `
+        -Fired $instrumentProven `
+        -Evidence "window B: $calStatus; dns=$b_dnsSubject pkt=$b_pktSubject" | Out-Null
+
+    # Secondary: was the capture actually live while the installer ran? A control
+    # host seen in window A proves it was, and separates "nothing happened" from
+    # "nothing was watching". Recorded rather than gating, because the control
+    # host is reached from inside WSL and Windows-side visibility of that traffic
+    # is not guaranteed on every build.
+    Record 'P1.LC.LIVE' "Capture was live during the install (control host $($LC.ControlHost) seen)" 'INFO' `
+        "dns=$a_dnsControl pkt=$a_pktControl -- window B is what proves the instrument, this row only says whether the install-time traffic was visible too"
+
+    if ($instrumentProven) {
+        $silent = (-not $a_dnsSubject) -and ($a_pktSubject -le 0)
+        Record 'P1.LC' "The installer makes NO outbound licence call to $($LC.SubjectHost)" `
+            $(if ($silent) { 'PASS' } else { 'FAIL' }) `
+            ("window A over the whole install: dns hit=$a_dnsSubject, packets=$a_pktSubject. " +
+             "Window B, same instrument same host, produced dns hit=$b_dnsSubject packets=$b_pktSubject ($calStatus), " +
+             "so this silence is evidence rather than an unproven instrument.")
+    } else {
+        Record 'P1.LC' "The installer makes NO outbound licence call to $($LC.SubjectHost)" 'VOID' `
+            "window B produced no signal ($calStatus), so the instrument was never shown to work and window A's silence proves nothing"
+    }
+    if ($lcPktReason)  { Record 'P1.LC.PKT'  'pktmon capture, window A' 'INFO' $lcPktReason }
+    if ($lcPktReasonB) { Record 'P1.LC.PKTB' 'pktmon capture, window B' 'INFO' $lcPktReasonB }
+}
+
 
 # The Inno exit code is NOT the honest verdict -- setup.ps1 writes the real one.
 $resultFile = 'C:\ProgramData\ClawFactory\install-result.txt'

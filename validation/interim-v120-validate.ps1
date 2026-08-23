@@ -147,8 +147,12 @@ $CombinedExe = Join-Path $RepoRoot 'Output\ClawFactory-Secure-Setup.exe'
 # dropped to the provider address. 1.3.4 changes only the verdict triage and the
 # chain-read diagnostics, so it carries the same seeding code and reproduces the
 # same condition, while being the artifact any fix would actually ship on.
-$Sha256      = 'ee6a5cd0232d7eb039182fe45e967cf2407e4ccd70f2e06540e06c93b89b5214'
-$ExpectBytes = 440607456
+# Repinned to 1.4.0, the free release, 2026-08-23. This is the artifact the
+# release gate runs against: licence checking removed, Apache-2.0, the corrected
+# claim copy, and Studio repinned to 1.3.1 so the packaged panel copy matches its
+# source for the first time. Signed, Authenticode Valid, CN=Bret Mckinney.
+$Sha256      = '257f30ff6284a3645144b70822a9c55c342d4f90df179e00705dae3c52e6c390'
+$ExpectBytes = 440613512
 
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $run = "{0}-{1}" -f $VmName, (Get-Date -Format 'yyyyMMdd-HHmmss')
@@ -415,7 +419,11 @@ if(-not [CFW.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
         $probeArgs = @(
             '-NoProfile','-ExecutionPolicy','Bypass',
             '-File','C:\cfv\interim-v120-phase1.ps1',
-            '-CombinedExe','C:\cfv\combined-setup.exe'
+            '-CombinedExe','C:\cfv\combined-setup.exe',
+            # v1.4.0: bracket the install with the licence-call capture. Its own
+            # calibration window rides inside phase 1, so the instrument is proven
+            # in the same run rather than assumed from a previous one.
+            '-LicenceCapture'
         ) -join ' '
         $cmdLines = @(
             '@echo off',
