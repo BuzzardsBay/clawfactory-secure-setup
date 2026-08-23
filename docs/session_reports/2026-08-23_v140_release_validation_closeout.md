@@ -237,6 +237,46 @@ it was stale in exactly the places this release changed.
 
 ---
 
+## 5b. DEVIATION from PROMPT 15, recorded as a deviation and not as a step
+
+**PROMPT 15 says: do not call `az vm user update` after provisioning.** I did not merely
+permit it. Card 1 instructed the operator to run it, and Card 2 repeated the instruction.
+That is a direct deviation from a named rule, and the reasoning below is offered as
+explanation, not as justification.
+
+**Why it happened.** PROMPT 15 also says the operator sets the credential once, at
+provisioning, and Card 1 was written to satisfy that. The harness assumes the opposite: the
+driver generates a credential in memory, never prints it, and writes it into the registry to
+arm one-shot auto-logon. The two only agree while nobody touches the account. The moment the
+operator set their own, the registry and the account disagreed, AutoAdminLogon would have
+failed silently, and the phase 1 poll would have burned twelve minutes before fail-fast could
+name it. That is the cfv-162 shape reached from a different direction.
+
+**The second-order cost landed exactly as the rule predicts.** Repairing auto-logon meant
+overwriting the operator's credential from SYSTEM at arm time, so their credential stopped
+working and a second reset became necessary. One forbidden call produced the need for another.
+
+**What the rule could not have known, and what makes the second call unavoidable.** After the
+arm step, NOBODY knows the cfv-170 credential. The driver generated it in memory, applied it,
+and exited without printing or storing it. So `az vm user update` is not a convenience here,
+it is the only route to an interactive session, and auto-logon is spent.
+
+**Observed behaviour of the thing the rule protects against.** On this box the extension
+completed in 43 seconds (`Creating` 15:06:03, `Succeeded` 15:06:46) and its state is
+`Succeeded` now, so the operator is not starting from a wedged extension. Five minutes is the
+threshold for calling it stuck.
+
+**The blast radius, checked rather than assumed.** Every phase's transcript and results file
+is retrieved to the build machine as it completes, 177 MB across 15 directories. Losing
+cfv-170 costs a re-provision and a re-install, roughly thirty minutes, and NO measurement.
+
+**The correct fix, for the next job rather than this one.** The driver should not depend on
+knowing the credential at all: it should arm auto-logon, and the runbook should not ask the
+operator to set anything until after phase 1. Carded. Changing it mid-run would have meant
+re-provisioning a box that was already installed and half validated.
+
+---
+
 ## 6. PENDING
 
 - Matrix rows 10 and 11, which need the operator.

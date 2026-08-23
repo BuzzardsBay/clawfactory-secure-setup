@@ -20,8 +20,29 @@ in, and no need to do it in one sitting.
 
 ## Before you start
 
-Open **ClawFactory Studio** from the Start menu, then click **Web access** in the top
-nav.
+Open **ClawFactory Studio** from the Start menu.
+
+### A. The SMTP credential, FIRST, before any of the checks below
+
+Go to the **send / approvals** setup and enter the throwaway Gmail app password.
+
+**This is first on purpose.** It and the panel checks are both Studio actions, and if a
+check surfaces something and Studio gets closed to chase it, the credential never lands and
+four blocked rows stay blocked: `S.4`, `S.4leak`, `S.5` and phase 3b. Doing it first means
+the trip is worth its full value even if everything after it goes sideways.
+
+The password is never typed into a script, a transcript, or anything I can see. You enter it
+into the panel yourself and it goes to a root-owned broker.
+
+### B. Then the checks
+
+Click **Web access** in the top nav and work through 1 to 7 below.
+
+### C. When you are done, LEAVE STUDIO RUNNING
+
+Phase 5 measures the Studio IPC bridge and it VOIDed on this box with `processes=0`,
+refusing to report five vacuously-true passes about a bridge that was not there. It re-runs
+against a live Studio and costs you nothing extra. Just tell me it is open.
 
 ---
 
@@ -31,25 +52,38 @@ On the Web access panel, find the card headed **"Software sources ClawFactory ne
 
 - [ ] The card is there.
 - [ ] It carries a **Switch off** button (so the switch currently reads ON).
-- [ ] The text beside it says switching it off **stops your agent fetching code from
-      GitHub and npm**.
-- [ ] The text says it **does NOT stop skill installation**, and gives the reason: the
-      skill hub shares a network address with ClawFactory's own site.
-- [ ] The same text says it **does not affect the AI provider**.
 
-**READ THIS BEFORE TICKING, because this check changed direction.** It used to require
-the sentence "stops skill installation". That sentence was measured FALSE on cfv-169: a
-real `openclaw skills install` completes with the switch off, because `clawhub.ai`
-resolves to an address it shares with `openclaw.ai`, which is a permanent base host no
-toggle can revoke. The claim was stronger than the mechanism, so v1.4.0 removed it.
+**Now compare the paragraph beside it against this, word for word.** It should match:
 
-So: if the panel still says the switch **stops skill installation**, that is a **FAIL**
-now. It is the old copy, and it would mean the shipped Studio is not the rebuilt one.
+> Your agent can reach the skill hub, GitHub and npm. Switching this off stops your agent
+> fetching code from GitHub and npm. It does not stop skill installation: the skill hub
+> shares a network address with ClawFactory's own site, which stays reachable and which
+> this switch does not cover. It does not affect the AI provider your agent talks to.
 
-The breakage sentence about GitHub and npm is still load-bearing and still mandatory.
-Turning the switch off breaks real features, and the failure shows up as a network
-timeout deep inside WSL that cannot be made to name this panel. A missing or reworded
-GitHub-and-npm sentence is a **FAIL**, even if the switch works.
+- [ ] Matches, word for word.
+
+Punctuation note so you do not fail it on nothing: the apostrophe in "ClawFactory's"
+renders as a curly quote. That is expected.
+
+**THIS IS A PRESENCE CHECK, NOT AN ABSENCE CHECK, AND THE DIFFERENCE IS THE POINT.** An
+earlier draft of this check only asked you to confirm the old claim was GONE. A panel with
+no breakage text at all, or a half-edited sentence, would have sailed through it. An absence
+check with no positive control is exactly the shape the automated harness has spent a month
+removing, and here it is worse, because a human running the check is the one place the phase
+runner cannot catch it. So the check is now the same shape as check 2: transcribe and
+compare.
+
+Three ways this fails, all of them **FAIL**:
+
+- The paragraph says the switch **stops skill installation**. That is the OLD copy. It was
+  measured false on cfv-169, where a real `openclaw skills install` completed with the switch
+  off because `clawhub.ai` shares an address with the permanently-allowed `openclaw.ai`. Its
+  presence means the shipped Studio is not the rebuilt one.
+- The GitHub-and-npm sentence is missing or reworded. That one is load-bearing: switching off
+  breaks real features and the failure surfaces as a network timeout deep inside WSL that
+  cannot be made to name this panel. Without the sentence the control ships as a support
+  problem.
+- The paragraph is absent, truncated, or says only some of it.
 
 ## 2. The footnote is the ratified text, word for word
 
