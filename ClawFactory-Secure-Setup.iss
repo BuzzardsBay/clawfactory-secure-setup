@@ -6,7 +6,7 @@
 ; refuses any binary build_release.ps1 did not stamp.
 
 #define MyAppName      "ClawFactory Secure Setup"
-#define MyAppVersion   "1.3.5"
+#define MyAppVersion   "1.4.0"
 #define MyAppPublisher "Frontier Automation Systems LLC"
 #define MyAppURL       "https://openclaw.ai"
 ; v1.1.0 (JOB 3B): the combined installer also bundles ClawFactory Studio, whose
@@ -45,6 +45,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Source: "setup.ps1";                         DestDir: "{app}";            Flags: ignoreversion
 Source: "README.md";                         DestDir: "{app}";            Flags: ignoreversion
 Source: "LICENSE";                           DestDir: "{app}";            Flags: ignoreversion
+Source: "NOTICE";                            DestDir: "{app}";            Flags: ignoreversion
 Source: "resources\safety-rules.md";         DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\persona.md";              DestDir: "{app}\resources";  Flags: ignoreversion
 Source: "resources\orchestrator-prompt.md";  DestDir: "{app}\resources";  Flags: ignoreversion
@@ -186,14 +187,8 @@ Name: "{group}\ClawFactory README"; Filename: "{app}\README.md"
 Name: "{group}\Uninstall ClawFactory"; Filename: "{uninstallexe}"
 
 [Code]
-const
-  LICENSE_API_URL = 'https://api.clawfactory.app/activate';
-  LICENSE_REG_KEY = 'SOFTWARE\ClawFactory';
-  LICENSE_REG_NAME = 'LicenseKey';
-
 var
   WelcomePage:    TOutputMsgWizardPage;
-  LicensePage:    TInputQueryWizardPage;
   ProviderPage:   TInputOptionWizardPage;
   KeyGuidePage:   TWizardPage;      { v1.0.46: how-to-get-your-key guidance }
   KeyGuideSteps:  TNewStaticText;   { numbered steps, per provider }
@@ -204,12 +199,10 @@ var
   ApiKeyLaterChk: TNewCheckBox;
   ApiKeyShowChk:  TNewCheckBox;     { v1.0.46: show/hide the masked key }
   GetKeyButton:   TNewButton;
-  BuyButton:      TNewButton;
   AckPage:        TInputOptionWizardPage;
   IsResumeRun:    Boolean;
   ResumeProvider: string;
   KeyChangeGuard: Boolean;          { re-entrancy guard for the trim-on-change }
-  ValidatedLicenseKey: string;  { populated after successful /activate response }
 
 function ResumeFlagPath: string;
 begin
@@ -433,13 +426,6 @@ begin
   ShellExec('open', URL, '', '', SW_SHOWNORMAL, ewNoWait, ResultCode);
 end;
 
-procedure BuyButtonClick(Sender: TObject);
-var
-  ResultCode: Integer;
-begin
-  ShellExec('open', 'https://clawfactory.app', '', '', SW_SHOWNORMAL, ewNoWait, ResultCode);
-end;
-
 { v1.0.46: show/hide toggle for the masked key field. TPasswordEdit.Password
   True = masked, False = revealed. }
 procedure ApiKeyShowChkClick(Sender: TObject);
@@ -468,86 +454,6 @@ begin
     KeyChangeGuard := True;
     ApiKeyPage.Edits[0].Text := Clean;
     KeyChangeGuard := False;
-  end;
-end;
-
-{ v1.0.30: aggressively strip everything except A-Z, 0-9, and dashes from a
-  user-typed license key. Prevents JSON injection in the WinHTTP POST body
-  (Pascal has no native JSON escaper) and catches transcription typos. }
-function SanitizeLicenseKey(Raw: string): string;
-var
-  i: Integer;
-  c: Char;
-begin
-  Result := '';
-  Raw := Uppercase(Trim(Raw));
-  for i := 1 to Length(Raw) do
-  begin
-    c := Raw[i];
-    if ((c >= 'A') and (c <= 'Z')) or
-       ((c >= '0') and (c <= '9')) or
-       (c = '-') then
-      Result := Result + c;
-  end;
-end;
-
-{ v1.0.30: machine identifier for license activation. Uses Windows'
-  per-install MachineGuid (stable, unique, persists across reboots). This is
-  the same UUID that Win32 generates at OS install. SYSTEM has read access
-  on every Win10/11. Falls back to empty string if the key is missing - the
-  server rejects empty machine IDs and the activation fails cleanly. }
-function GetStableMachineId: string;
-var
-  Guid: string;
-begin
-  Result := '';
-  if RegQueryStringValue(HKEY_LOCAL_MACHINE,
-                          'SOFTWARE\Microsoft\Cryptography',
-                          'MachineGuid', Guid) then
-    Result := Guid;
-end;
-
-{ v1.0.30: POST (key, machine_id, product) to the license API and return
-  True iff the response indicates a valid activation.
-
-  The key is sanitized to [A-Z0-9-] before being inlined into JSON. The
-  machine_id comes from MachineGuid (always a UUID, no escaping needed).
-  Network errors / timeouts / non-200 responses all fail closed.
-
-  10-second timeout (connect + send + receive). Don't want to make a user
-  wait through a full TCP retry on a flaky network. }
-function ValidateLicenseKey(Key: string): Boolean;
-var
-  WinHTTP: Variant;
-  Body, Response, SafeKey, MachineId: string;
-begin
-  Result := False;
-  SafeKey := SanitizeLicenseKey(Key);
-  if Length(SafeKey) < 5 then exit;
-
-  MachineId := GetStableMachineId;
-  if MachineId = '' then exit;
-
-  Body := '{"key":"' + SafeKey + '","machine_id":"' + MachineId +
-          '","product":"clawfactory"}';
-
-  try
-    WinHTTP := CreateOleObject('WinHttp.WinHttpRequest.5.1');
-    WinHTTP.Open('POST', LICENSE_API_URL, False);
-    WinHTTP.SetRequestHeader('Content-Type', 'application/json');
-    { Timeouts: resolve, connect, send, receive - all 10s }
-    WinHTTP.SetTimeouts(10000, 10000, 10000, 10000);
-    WinHTTP.Send(Body);
-
-    if WinHTTP.Status = 200 then
-    begin
-      Response := WinHTTP.ResponseText;
-      Result := (Pos('"valid":true', Response) > 0) or
-                (Pos('"valid": true', Response) > 0);
-      if Result then ValidatedLicenseKey := SafeKey;
-    end;
-  except
-    Result := False;
   end;
 end;
 
@@ -602,19 +508,6 @@ begin
   end;
 end;
 
-{ v1.0.30: read previously-validated license key from HKLM. Used by /resume
-  reruns and by post-install for re-verify on launch. Empty string if not
-  present. }
-function ReadStoredLicenseKey: string;
-var
-  Stored: string;
-begin
-  Result := '';
-  if RegQueryStringValue(HKEY_LOCAL_MACHINE, LICENSE_REG_KEY,
-                          LICENSE_REG_NAME, Stored) then
-    Result := Stored;
-end;
-
 { v1.0.26: read a `/SWITCH=value` command-line argument for headless validation.
   Used only inside a WizardSilent() gate, so interactive installs are unaffected. }
 function GetCmdLineValue(const SwitchName: string): string;
@@ -651,38 +544,27 @@ begin
     'ClawFactory Secure Setup configures WSL2 and OpenClaw with strict' + #13#10 +
     'security guardrails:' + #13#10 + #13#10 +
     '  - The agent runs as a non-root user (no sudo) inside a WSL2 VM.' + #13#10 +
-    '  - Outbound network is an allowlist: HTTPS to approved hosts only.' + #13#10 +
-    '  - OpenClaw gateway binds to 127.0.0.1 only.' + #13#10 +
-    '  - WSL automount is disabled (no access to your Windows files).' + #13#10 +
+    '  - Web access is denied by default. Your agent can reach the AI' + #13#10 +
+    '    provider, the software sources ClawFactory needs, and the network' + #13#10 +
+    '    addresses of the sites you have allowed. Nothing else.' + #13#10 +
+    '  - Your agent can write an email. It cannot send one. Every message' + #13#10 +
+    '    waits for you, and approving it sends exactly that message, once.' + #13#10 +
+    '  - When your agent deletes a file in a folder you granted it, the file' + #13#10 +
+    '    is held for 30 days and you can put it back. This covers deletion by' + #13#10 +
+    '    name, which is how deletion is ordinarily expressed; it does not' + #13#10 +
+    '    cover every possible way a program can destroy a file.' + #13#10 +
+    '  - Windows folders are reachable only through grants you make.' + #13#10 +
+    '  - The OpenClaw gateway binds to 127.0.0.1 only.' + #13#10 +
     '  - Safety rules are immutable; turns through the gateway are spend- and integrity-gated.' + #13#10 + #13#10 +
+    'The email control covers email. It is not a claim that no data can leave' + #13#10 +
+    'your machine: your agent talks to a hosted AI model, and anything it can' + #13#10 +
+    'read it can send there.' + #13#10 + #13#10 +
     'WARNING: AI agents will execute code inside this WSL2 environment.' + #13#10 +
     'You must personally review every skill before publishing.' + #13#10 +
     'Install takes 10-20 minutes and needs admin rights + internet.');
 
-  { --- Page 2: License key --- }
-  { v1.0.30: License gate. ValidateLicenseKey runs on Next click and calls
-    the activation API. Skipped under /resume (key already in HKLM) and
-    /SILENT (validated against /LICENSE=<key> command-line arg in this
-    same procedure below, before any wizard pages are shown to the user). }
-  LicensePage := CreateInputQueryPage(WelcomePage.ID,
-    'License Key',
-    'Enter your ClawFactory license key.',
-    'Find your key in the purchase email from licenses@clawfactory.app.' + #13#10 +
-    'Format: CF-XXXX-XXXX-XXXX-XXXX. Don''t have a key yet?' + #13#10 +
-    'Purchase at clawfactory.app.');
-  LicensePage.Add('License key:', False);
-
-  BuyButton := TNewButton.Create(LicensePage);
-  BuyButton.Parent := LicensePage.Surface;
-  BuyButton.Top    := LicensePage.Edits[0].Top + LicensePage.Edits[0].Height + ScaleY(12);
-  BuyButton.Left   := LicensePage.Edits[0].Left;
-  BuyButton.Width  := ScaleX(220);
-  BuyButton.Height := ScaleY(24);
-  BuyButton.Caption := 'Buy a license at clawfactory.app';
-  BuyButton.OnClick := @BuyButtonClick;
-
-  { --- Page 3: Provider selection (radio) --- }
-  ProviderPage := CreateInputOptionPage(LicensePage.ID,
+  { --- Page 2: Provider selection (radio) --- }
+  ProviderPage := CreateInputOptionPage(WelcomePage.ID,
     'Choose your AI provider',
     'Which LLM should power your agents?',
     'You can switch providers later by re-running the installer or using the included' + #13#10 +
@@ -700,11 +582,7 @@ begin
   { v1.0.26: silent-mode /PROVIDER=<name> override. Lets `az vm run-command` headless
     validation pick a non-default provider. ShouldSkipPage already hides the radio
     page on silent runs, so SelectedValueIndex is the only state the rest of the
-    install reads. Interactive runs ignore this entirely.
-
-    v1.0.30: also validate /LICENSE=<key> here. Silent installs must pass a
-    valid license up front - any failure Aborts the wizard with a clear log
-    line. /resume reruns trust the HKLM-stored key from the first cycle. }
+    install reads. Interactive runs ignore this entirely. }
   if WizardSilent() then
   begin
     case LowerCase(GetCmdLineValue('/PROVIDER=')) of
@@ -715,20 +593,9 @@ begin
       'ollama': ProviderPage.SelectedValueIndex := 4;
       'later':  ProviderPage.SelectedValueIndex := 5;
     end;
-
-    if not IsResumeRun then
-    begin
-      if not ValidateLicenseKey(GetCmdLineValue('/LICENSE=')) then
-      begin
-        Log('License activation failed under /SILENT - missing or invalid /LICENSE= argument.');
-        Abort;
-      end;
-      RegWriteStringValue(HKEY_LOCAL_MACHINE, LICENSE_REG_KEY,
-                          LICENSE_REG_NAME, ValidatedLicenseKey);
-    end;
   end;
 
-  { --- Page 4: How to get your API key (guidance) [v1.0.46] ------------------
+  { --- Page 3: How to get your API key (guidance) [v1.0.46] ------------------
     The point of the wizard: walk a non-developer from "I bought this" to a
     working key without ever touching a terminal. Content is provider-specific
     and filled in / laid out by CurPageChanged (label heights aren't known until
@@ -777,7 +644,7 @@ begin
     'guardrail on the gateway path, not an absolute ceiling (see SECURITY.md). ' +
     'You can also set a hard spending limit in your provider account.';
 
-  { --- Page 5: API key entry (skipped for Ollama / Later via ShouldSkipPage) [R5] --- }
+  { --- Page 4: API key entry (skipped for Ollama / Later via ShouldSkipPage) [R5] --- }
   ApiKeyPage := CreateInputQueryPage(KeyGuidePage.ID,
     'Enter your API key',
     'Paste the key you just copied.',
@@ -818,15 +685,16 @@ begin
   ApiKeyLaterChk.Height  := ScaleY(20);
   ApiKeyLaterChk.Caption := 'I''ll add my API key later (agents will not run until I do)';
 
-  { --- Page 6: Security acknowledgement (mandatory) --- }
+  { --- Page 5: Security acknowledgement (mandatory) --- }
   AckPage := CreateInputOptionPage(ApiKeyPage.ID,
     'Security Acknowledgement',
     'Please confirm you understand what you are about to install.',
     'Tick the box below to continue. Installation is blocked until you do.',
     False, False);
   AckPage.Add('I understand agents execute code inside a hardened WSL2 environment ' +
-              '(non-root, network-restricted) and I will personally review every ' +
-              'skill before publishing.');
+              '(non-root, network-restricted), that anything my agent can read it ' +
+              'can send to the hosted AI model I chose, and that I will personally ' +
+              'review every skill before publishing.');
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
@@ -878,14 +746,14 @@ function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
   { On a /resume relaunch the user has already chosen a provider, supplied
-    the API key (DPAPI-stored, survives reboot), entered + validated their
-    license key (stored in HKLM), and acknowledged the security notice.
-    Skip all those pages so the wizard goes straight to the install step. }
+    the API key (DPAPI-stored, survives reboot), and acknowledged the
+    security notice. Skip all those pages so the wizard goes straight to
+    the install step. }
   if IsResumeRun then
   begin
-    if (PageID = WelcomePage.ID) or (PageID = LicensePage.ID) or
-       (PageID = ProviderPage.ID) or (PageID = KeyGuidePage.ID) or
-       (PageID = ApiKeyPage.ID) or (PageID = AckPage.ID) then
+    if (PageID = WelcomePage.ID) or (PageID = ProviderPage.ID) or
+       (PageID = KeyGuidePage.ID) or (PageID = ApiKeyPage.ID) or
+       (PageID = AckPage.ID) then
     begin
       Result := True;
       exit;
@@ -893,12 +761,9 @@ begin
   end;
   if WizardSilent() then
   begin
-    { LicensePage is also skipped under /SILENT - the /LICENSE=<key> CLI
-      arg was validated up front in InitializeWizard. If validation failed
-      InitializeWizard called Abort, so reaching here means license is OK.
-      KeyGuidePage / ApiKeyPage never show under /SILENT: the key is seeded
+    { KeyGuidePage / ApiKeyPage never show under /SILENT: the key is seeded
       into Credential Manager machine-to-machine before setup runs. }
-    if (PageID = LicensePage.ID) or (PageID = ProviderPage.ID) or
+    if (PageID = ProviderPage.ID) or
        (PageID = KeyGuidePage.ID) or (PageID = ApiKeyPage.ID) or
        (PageID = AckPage.ID) then
     begin
@@ -918,37 +783,6 @@ var
   CredTarget: string;
 begin
   Result := True;
-
-  { v1.0.30: license gate. Interactive validation calls the activation API
-    and persists the validated key to HKLM on success. /resume and /SILENT
-    paths skip this page (see ShouldSkipPage). }
-  if CurPageID = LicensePage.ID then
-  begin
-    Key := Trim(LicensePage.Values[0]);
-    if Key = '' then
-    begin
-      MsgBox('Please enter your license key. Purchase one at clawfactory.app if you don''t have a key yet.',
-             mbError, MB_OK);
-      Result := False;
-      exit;
-    end;
-    if not ValidateLicenseKey(Key) then
-    begin
-      MsgBox('License activation failed.' + #13#10 + #13#10 +
-             'This usually means:' + #13#10 +
-             '  - The key was mistyped (check for 0/O, 1/I)' + #13#10 +
-             '  - The key is already activated on 2 other machines' + #13#10 +
-             '  - The license server is unreachable (check internet)' + #13#10 + #13#10 +
-             'Visit clawfactory.app/deactivate to free a machine slot,' + #13#10 +
-             'or contact support@clawfactory.app for help.',
-             mbError, MB_OK);
-      Result := False;
-      exit;
-    end;
-    RegWriteStringValue(HKEY_LOCAL_MACHINE, LICENSE_REG_KEY,
-                        LICENSE_REG_NAME, ValidatedLicenseKey);
-    exit;
-  end;
 
   if CurPageID = ApiKeyPage.ID then
   begin

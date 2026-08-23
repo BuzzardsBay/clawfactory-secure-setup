@@ -6,6 +6,92 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). This project a
 
 ---
 
+## [1.4.0] - 2026-08-23
+
+ClawFactory ships free. This release removes the licensing machinery, swaps the licence
+file, and rewrites every public claim so that none of them is stronger than the mechanism
+behind it.
+
+### Removed
+
+- **Licence checking, in full. No outbound licence call remains anywhere in the product.**
+  The installer no longer has a licence page, a Buy button, a `/LICENSE=` argument, or an
+  HKLM licence key, and `ValidateLicenseKey` / `SanitizeLicenseKey` / `ReadStoredLicenseKey`
+  / `GetStableMachineId` are gone from `ClawFactory-Secure-Setup.iss` along with the
+  `https://api.clawfactory.app/activate` constant. The wizard is five pages, not six, and
+  `ProviderPage` is re-parented to the welcome page.
+- **The uninstaller's best-effort `POST /deactivate`** and the HKLM read that fed it
+  (`resources/uninstall.ps1` step 7; steps 8 and 9 renumbered to 7 and 8). Step 7 already
+  removed `HKLM\SOFTWARE\ClawFactory` wholesale, so an upgrade from a licensed install
+  still cleans up the stored key.
+- **Licence plumbing throughout the validation harness**, including two further outbound
+  `POST /deactivate` calls in `scripts/azure-validate.ps1` and `validation/job3-teardown.ps1`,
+  and the machine-id capture that existed only to feed them. The runtime never checked a
+  licence at all: `setup.ps1` contained zero references before this change.
+- **Guard 4 in every form.** Cut, not deferred. No FUSE work, no fanotify work, and the
+  spec is closed rather than carried.
+
+### Changed
+
+- **Licence swap: PolyForm Perimeter 1.0.0 -> Apache License 2.0.** PolyForm existed to
+  prevent free resale of a paid product, and that premise is gone. Apache-2.0 was chosen
+  because attribution is the mechanism by which a free release builds a reputation,
+  Apache-2.0 requires it, and its patent grant makes organisations comfortable evaluating
+  the code. `LICENSE` is the verbatim canonical text (sha256
+  `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`), byte-identical in
+  this repository and in ClawFactory-Studio, with a matching `NOTICE` and both files pinned
+  to LF in `.gitattributes` so the digest survives a checkout. `NOTICE` now ships with the
+  installer.
+- **`SECURITY_FINDINGS.md` rewritten and partitioned.** Structural guarantees and
+  gateway-path guarantees are separated explicitly, and the residuals list now names all
+  seven: same-identity runtime invocation (Door 2), address scoping, the baseline route,
+  ungated DNS, provider-key exposure, the limits of the quarantine delete, and the forgeable
+  build stamp. A "root ends everything" section states the shape of the model plainly. The
+  v2 roadmap entry names separate-identity isolation as the single change that closes the
+  most residuals, tracked as item #25 in `v1.1_backlog.md`.
+- **The software-source switch no longer claims to stop skill installation, on all three
+  surfaces that said so.** Measured on cfv-169 (`SK.3`, with its positive control firing in
+  the same run), a real `openclaw skills install` completes with the switch off, because
+  `clawhub.ai` resolves to an address it shares with `openclaw.ai`, a permanent base host
+  no toggle can revoke. Corrected in `resources/clawfactory-fetchctl.js` (usage text),
+  `resources/clawfactory-toolchain.sh` (the message printed at the moment of switching off),
+  and the Studio Web access panel source.
+- **The three ratified sentences now appear on the installer's welcome page**, together with
+  the boundary that travels with them: this covers email, and it is not a claim that no data
+  can leave your machine. The security acknowledgement now states that anything the agent
+  can read it can send to the hosted model.
+- **`README.md` rewritten** for the free release: the pricing table is gone, the licence and
+  version badges are current, the Docker reference in the disk requirement is gone (Docker
+  was removed in SECFIX_CLOSE_DOORS), Guards 1 to 3 and Studio are listed, the security table
+  carries a structural-versus-gateway-path column, and the agent-scaffolding claim says
+  plainly that three of the four pre-staged agents are scaffolding rather than finished
+  agents.
+- **`SECURITY.md`**: supported versions corrected to 1.3.x, the egress section now enumerates
+  the real unrevocable base host set and states that matching is by address rather than by
+  name, and three new sections document Guard 1, Guard 2 and Guard 3 with their limitations.
+  All ten `setup.ps1#L<n>` deep links were removed: every one of them pointed at the wrong
+  line (`Step-EgressFirewall` was cited at 347 and is at 1390), and a link that lands in the
+  wrong place is a claim that cannot be traced.
+- **The `browser` tool policy is described as gateway-path, not structural**, in
+  `resources/orchestrator-prompt.md` and in the `setup.ps1` comment that asserted it. The
+  denial is real and was validated consumer-side, but a full-path runtime invocation that
+  never crosses the gateway is not subject to it.
+- **`resources/orchestrator-prompt.md`** no longer tells the agent to restate "the five
+  agents you coordinate". There are three siblings.
+- **Version bump to 1.4.0** in both literals. 1.3.5 is already recorded in
+  `released-versions.tsv`, so the next build needs a new number regardless.
+
+### Notes
+
+- The embedded Studio payload is unchanged and still carries the old footer and the old panel
+  wording. The Studio source is fixed; the shipped artifact is not, and cannot be until Studio
+  is rebuilt and repinned. `scripts/build_release.ps1` carries a block describing exactly what
+  must change together when that happens.
+- No control was widened and no test was weakened. `validation/test-wrapper-render.ps1` had
+  three structural assertions riding on the `-LicenseKey` token; they now ride on
+  `-SeedKeyTarget`, which occupies the same last-argument position, and the re-pointed
+  assertion was calibrated by reinjecting the real cfv-149 defect and confirming it fires.
+
 ## [1.1.1] - 2026-07-22
 
 ### Changed

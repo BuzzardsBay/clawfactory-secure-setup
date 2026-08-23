@@ -169,6 +169,22 @@ Write-Host ("Bundle check OK: all {0} preflight resources are in [Files]." -f $r
 #   controls -- Workspace and Web access both present, so an "absent" above is a
 #               real absence rather than an unreadable payload
 # See docs/session_reports/2026-08-15_guard3_followups_closeout.md.
+#
+# STALE AS OF 2026-08-23, DELIBERATELY NOT REPINNED HERE. The free-release copy
+# audit changed Studio SOURCE in three places that this artifact predates:
+#   - the footer, PolyForm Perimeter 1.0.0 -> Apache-2.0
+#   - the footer's "runs entirely on your machine", which read as a data claim
+#   - the Web access panel's "stops skill installation", which cfv-169 measured
+#     to be false (SK.3, control firing in the same run)
+# The pinned 1.3.0 .exe still carries the OLD strings, so this digest and the
+# phase6 assertions in validation/interim-v120-phase6.ps1 are correct ABOUT THIS
+# ARTIFACT and must not be edited to describe copy no artifact produces.
+# When Studio is rebuilt, the repin is a THREE-part change made together:
+#   1. this $studioPinned digest and $studioName,
+#   2. move 'stops skill installation' and 'PolyForm Perimeter 1.0.0' from the
+#      phase6 PRESENT list to its stale/ABSENT list,
+#   3. add 'does not stop skill installation' and 'Apache-2.0' to PRESENT.
+# Doing 1 without 2 and 3 turns a green phase6 into a test of the wrong copy.
 $studioName   = 'ClawFactory-Studio-Setup-1.3.0.exe'
 $studioPinned = '46288d06aaf1e786e30310e4bc316e40af04513b013a97f51d24dafb6759fa79'
 $studioFile   = Join-Path $RepoRoot "resources\$studioName"

@@ -53,7 +53,7 @@ Set-StrictMode -Version 3.0
 # It sat at 1.0.34 from 2026-05 through v1.1.1, roughly fifteen releases, because
 # nothing referenced it and nothing compared it. It is still unreferenced today;
 # the assertion exists so that stops being possible rather than staying luck.
-$InstallerVersion      = '1.3.5'
+$InstallerVersion      = '1.4.0'
 # [R2] OpenClaw install.sh is BUNDLED into the installer (resources\openclaw-install.sh).
 # No network call to openclaw.ai/install.sh during install — that URL tracks "latest" and
 # changed twice in 24 hours on 2026-05-09/10. Hash is computed at install time and written
@@ -2629,11 +2629,17 @@ function Step-ConfigureOpenClaw {
     # (pre-gateway-start, no #47133 risk) is the load-bearing fix; the env
     # var drop-in stays as a forward-compat hedge for newer OpenClaw versions
     # where the env var IS honored.
-    # Step 9a (v1.0.48): structural tool policy. Deny the `browser` tool at the
-    # gateway config level so it is unavailable regardless of model or prompt --
-    # this makes the orchestrator-prompt "browser denied" claim structural instead
-    # of advisory, and shrinks the tool surface (defense-in-depth for unattended
-    # runs). Deliberately NARROW: `exec` is NOT denied -- the agent needs shell to
+    # Step 9a (v1.0.48): gateway-path tool policy. Deny the `browser` tool at the
+    # gateway config level so it is unavailable regardless of model or prompt.
+    # Be precise about the class: this is a GATEWAY-PATH control, in the same
+    # class as the spend cap and the turn-time SOUL check, not an OS one. The
+    # denial was validated consumer-side (ERROR/ABSENT, not a no-op), so it is
+    # real rather than decorative -- but a full-path runtime invocation that never
+    # crosses the gateway is not subject to it (Door 2). An earlier version of this
+    # comment called it structural; that was an overclaim and is corrected here and
+    # in resources/orchestrator-prompt.md. What bounds network reach structurally,
+    # whatever tool the agent holds, is the nftables egress allowlist.
+    # This also shrinks the tool surface (defense-in-depth for unattended runs). Deliberately NARROW: `exec` is NOT denied -- the agent needs shell to
     # do any file/code work, and SOUL permits it gated by "GO"; denying it would
     # break the product. `net.fetch`/`web_fetch` is left to the nftables egress
     # firewall (the real, already-structural network control). Failure mode of a

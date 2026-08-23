@@ -26,7 +26,6 @@
 #>
 param(
     [string]$CombinedExe = 'C:\cfv\combined-setup.exe',
-    [string]$LicenseKey  = 'CF-TEST-TEST-TEST-TEST',
     [string]$Transcript  = 'C:\cfv\phase1-out-probe.txt'
 )
 
@@ -161,7 +160,7 @@ $sw = [Diagnostics.Stopwatch]::StartNew()
 W "Launching installer (/SILENT, log to C:\cfv\install.log)..."
 Start-Process -FilePath $CombinedExe -ArgumentList `
     '/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/LOG=C:\cfv\install.log', `
-    '/PROVIDER=claude',"/LICENSE=$LicenseKey" -Wait
+    '/PROVIDER=claude' -Wait
 $sw.Stop()
 W "Installer process returned after $([int]$sw.Elapsed.TotalMinutes) min."
 Marker 'PHASE1_INSTALL_RETURNED'

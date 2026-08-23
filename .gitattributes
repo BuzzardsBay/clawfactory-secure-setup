@@ -66,3 +66,9 @@ resources/clawfactory-fetchctl.js text eol=lf
 # than picking up stray CRs in the digest field and failing to match a version it
 # has genuinely already shipped.
 released-versions.tsv text eol=lf
+
+# The licence text is digest-checkable against the canonical Apache-2.0 file
+# (sha256 cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30).
+# A CRLF checkout would break that match, so pin both files to LF.
+LICENSE text eol=lf
+NOTICE  text eol=lf

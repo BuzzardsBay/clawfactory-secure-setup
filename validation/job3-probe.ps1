@@ -40,7 +40,6 @@
 [CmdletBinding()]
 param(
     [string]$CombinedExe   = 'C:\cfv\combined-setup.exe',
-    [string]$LicenseKey    = 'CF-TEST-TEST-TEST-TEST',
     [string]$SeedKeyTarget = 'ClawFactory/AnthropicApiKey'
 )
 $ErrorActionPreference = 'Continue'
@@ -130,7 +129,7 @@ W "`n[baseline] services=$svcBefore firewallRules=$fwBefore (before the combined
 # provider key was pre-seeded into Credential Manager by the wrapper.
 W "`n===== 1. INSTALL COMBINED v1.1.0 (core first, Studio last) ====="
 if (-not (Test-Path $CombinedExe)) { W "FATAL: combined installer missing at $CombinedExe"; Marker 'FEASIBILITY_FAIL'; Finish 2 }
-Start-Process -FilePath $CombinedExe -ArgumentList '/SILENT','/SUPPRESSMSGBOXES','/NORESTART',"/LOG=C:\cfv\combined-install.log",'/PROVIDER=claude',"/LICENSE=$LicenseKey" -Wait
+Start-Process -FilePath $CombinedExe -ArgumentList '/SILENT','/SUPPRESSMSGBOXES','/NORESTART',"/LOG=C:\cfv\combined-install.log",'/PROVIDER=claude' -Wait
 # Honest verdict = setup.ps1's install-result.txt (setup.exe exit is not authoritative
 # -- Inno swallows it, and a Studio ssPostInstall RaiseException would surface here).
 $verdict = 'UNKNOWN'

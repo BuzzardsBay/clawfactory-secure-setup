@@ -148,11 +148,6 @@ function Invoke-Rc {
     } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue }
 }
 
-# Task H: the license machine_id, captured while the VM is alive (H.1) and used to
-# free the slot after teardown (H.2). Declared before `try` so `finally` always sees
-# it, even if provisioning throws before capture (then it stays '' -> no deactivate).
-$script:MachineId = ''
-
 try {
     # ---- 0. Preflight -----------------------------------------------------
     Say "Preflight: subscription must be live (verify via az rest -- the cached profile has lied before)."
@@ -266,17 +261,6 @@ try {
     if ($pstate -eq 'Failed') {
         throw "INFRA: VM $VmName provisioningState=Failed (OSProvisioningTimedOut lottery). run-command will not work -- retry with a fresh VM name. NOT a product or harness fault."
     }
-
-    # Task H.1 -- capture the EXACT machine_id the installer will activate against the
-    # license API, so teardown (H.2) can deactivate the SAME id and free the slot. The
-    # installer's GetStableMachineId reads HKLM\SOFTWARE\Microsoft\Cryptography\
-    # MachineGuid (a raw UUID). MachineGuid is set at OS install and stable across
-    # reboots, so reading it now (VM alive, before install) == what the install uses.
-    # A mismatched id would leave the real slot occupied -- which is the leak that
-    # capped CF-TEST-TEST-TEST-TEST and blocked the last run.
-    $script:MachineId = (Invoke-Rc "(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography' MachineGuid).MachineGuid" 'machine-id').Trim()
-    if ($script:MachineId -match '^[0-9a-fA-F-]{32,40}$') { Say "  license machine_id (MachineGuid) captured for deactivate-on-teardown: $($script:MachineId)" DarkGray }
-    else { Say "  WARNING: MachineGuid read looks malformed ('$($script:MachineId)') -- deactivate may miss the slot." Yellow }
 
     # ---- 2. Stage the installer ------------------------------------------
     Say "Staging $Blob onto the VM (SAS, 1h) and verifying sha256 on the box..."
@@ -440,7 +424,7 @@ if(-not [CF.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
     $cmdLines = @(
         '@echo off'
     ) + $preLines + @(
-        '"C:\cfv\setup.exe" /SILENT /SUPPRESSMSGBOXES /NORESTART /LOG="C:\cfv\install.log" /PROVIDER=claude /LICENSE=CF-TEST-TEST-TEST-TEST'
+        '"C:\cfv\setup.exe" /SILENT /SUPPRESSMSGBOXES /NORESTART /LOG="C:\cfv\install.log" /PROVIDER=claude'
         'echo INSTALLER_EXIT=%ERRORLEVEL% > C:\cfv\INSTALLER_DONE.txt'
         'rem INSTALLER_EXIT above is setup.EXE''s code -- NOT authoritative. Inno does'
         'rem not propagate the [Run] child (setup.ps1) exit code, so it is ~always 0'
@@ -654,29 +638,6 @@ finally {
         foreach ($n in $nsgNames)  { Say "  deleting nsg $n" DarkGray;  az network nsg delete -g $ResourceGroup -n $n --output none 2>$null }
         foreach ($n in $diskNames) { Say "  deleting disk $n" DarkGray; az disk delete -g $ResourceGroup -n $n --yes --output none 2>$null }
 
-        # Task H.2 -- free the license slot. An external /activate in the install path
-        # leaks server-side state (a machine slot) that the VM's deletion does NOT
-        # reclaim -- that leak capped CF-TEST-TEST-TEST-TEST at 10 and blocked the last
-        # run. Deactivate the SAME machine_id the install activated (H.1). A failed
-        # deactivate is a WARNING, never a teardown failure, but it MUST be logged so a
-        # future leak is visible.
-        $deactLine = ''
-        if ($script:MachineId) {
-            $dbody = (@{ key = 'CF-TEST-TEST-TEST-TEST'; machine_id = $script:MachineId; product = 'clawfactory' } | ConvertTo-Json -Compress)
-            try {
-                $dresp = Invoke-RestMethod -Uri 'https://api.clawfactory.app/deactivate' -Method Post -Body $dbody -ContentType 'application/json' -TimeoutSec 20
-                $ok = ($dresp.success -eq $true)
-                $deactLine = "license slot deactivate ($($script:MachineId)): success=$($dresp.success) msg=$($dresp.message)"
-                if ($ok) { Say "  $deactLine" Green } else { Say "  !! $deactLine -- SLOT MAY STILL BE OCCUPIED (leak); free it manually" Red }
-            } catch {
-                $deactLine = "license deactivate FAILED for $($script:MachineId): $($_.Exception.Message) -- SLOT MAY LEAK; free it manually"
-                Say "  !! $deactLine (Not a teardown failure.)" Red
-            }
-        } else {
-            $deactLine = "(no machine_id captured -- install never activated a slot; nothing to deactivate)"
-            Say "  $deactLine" DarkGray
-        }
-
         # ARM deletes are eventually-consistent: a disk can still be listed for a
         # while after `az disk delete` returns, especially when its VM was being
         # deleted concurrently. Polling to settle before judging -- otherwise the
@@ -714,7 +675,7 @@ finally {
                 Say "  de-registered '$VmName' from the sweep list ($($keep.Count) still registered)" DarkGray
             }
         }
-        Save 'teardown-proof.txt' ("=== resources remaining in $ResourceGroup (UNFILTERED) ===`n$left`n=== VMs in subscription, all RGs (UNFILTERED, must be empty) ===`n$vms`n=== verdict ===`n$verdict`n=== license slot (Task H.2) ===`n$deactLine")
+        Save 'teardown-proof.txt' ("=== resources remaining in $ResourceGroup (UNFILTERED) ===`n$left`n=== VMs in subscription, all RGs (UNFILTERED, must be empty) ===`n$vms`n=== verdict ===`n$verdict")
         Write-Host "`n===== TEARDOWN PROOF (unfiltered) =====" -ForegroundColor Yellow
         Write-Host $left; Write-Host $vms
         if ($survivors.Count -eq 0) { Say $verdict Green } else { Say $verdict Red }

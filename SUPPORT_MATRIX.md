@@ -78,8 +78,8 @@ WHAT HAPPENS: OpenClaw skills are markdown files at `~/.openclaw/skills/<slug>/S
 ANSWER: Yes. `mkdir -p ~/.openclaw/skills/my-thing && nano ~/.openclaw/skills/my-thing/SKILL.md`, write the markdown instructions, then `openclaw skills check` to verify it loads. Look at `/usr/lib/node_modules/openclaw/skills/github/SKILL.md` as a reference — it's a working bundled skill. Caveat: agents won't autoload your skill until you add the slug to `~/.openclaw/agents/<agent>/meta.json` skill list.
 
 Q5: Can I cite this in a paper or use it on a coursework project?
-WHAT HAPPENS: The installer is licensed under PolyForm Perimeter 1.0.0 (see `LICENSE` in the install dir), copyright Frontier Automation Systems LLC, 2026.
-ANSWER: Yes — PolyForm Perimeter permits any use except providing a competing product, which covers citing, forking, modifying, and sharing for coursework or a paper. For a paper, the canonical reference is the GitHub repo URL plus a commit hash from when you used it (the `setup.ps1` SHA-256 install pin gives you a reproducibility anchor for the OpenClaw side). Mention OpenClaw's own license (Apache-2.0 or whatever it ships with) in your acknowledgements.
+WHAT HAPPENS: The installer is free and open source under the Apache License 2.0 (see `LICENSE` and `NOTICE` in the install dir), copyright 2026 Frontier Automation Systems LLC.
+ANSWER: Yes. Apache-2.0 permits citing, forking, modifying and redistributing, commercially or not, provided you keep the attribution and the licence notice. For a paper, the canonical reference is the GitHub repo URL plus a commit hash from when you used it (the `setup.ps1` SHA-256 install pin gives you a reproducibility anchor for the OpenClaw side). Mention OpenClaw's own license (Apache-2.0 or whatever it ships with) in your acknowledgements.
 
 BIGGEST DROP-OFF RISK: They expect a "click and chat" experience and instead land on a dashboard they can't use, then spend an hour learning the CLI before they get anywhere.
 

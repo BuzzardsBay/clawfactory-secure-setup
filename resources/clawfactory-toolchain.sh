@@ -258,6 +258,6 @@ NIPS="$(wc -l < "$IPS_FILE" | tr -d ' ')"
 if [ "$ENABLED" = "1" ]; then
     note "backend=$BACKEND toolchain=ON addresses=$NIPS (skill installation, GitHub and npm are reachable)"
 else
-    note "backend=$BACKEND toolchain=OFF addresses=$NIPS (skill installation, GitHub and npm are denied; the provider route is untouched)"
+    note "backend=$BACKEND toolchain=OFF addresses=$NIPS (GitHub and npm are denied; skill installation is NOT, because the hub shares an address with openclaw.ai; the provider route is untouched)"
 fi
 exit 0

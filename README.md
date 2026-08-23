@@ -1,34 +1,52 @@
 # ClawFactory Secure Setup
 
-[![v1.0.45](https://img.shields.io/badge/release-v1.0.45-green)](../../releases/tag/v1.0.45) [![License: PolyForm Perimeter 1.0.0](https://img.shields.io/badge/License-PolyForm%20Perimeter%201.0.0-blue.svg)](LICENSE) [![Windows 11](https://img.shields.io/badge/Windows-10%202004%2B%20%2F%2011-0078D6?logo=windows)](#system-requirements)
+[![v1.4.0](https://img.shields.io/badge/release-v1.4.0-green)](../../releases) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Windows 11](https://img.shields.io/badge/Windows-10%202004%2B%20%2F%2011-0078D6?logo=windows)](#system-requirements)
 
-> The public site (clawfactory.app) is published from [BuzzardsBay/clawfactory-site](https://github.com/BuzzardsBay/clawfactory-site) — `docs/` in this repo is no longer the published source.
+> The public site (clawfactory.app) is published from [BuzzardsBay/clawfactory-site](https://github.com/BuzzardsBay/clawfactory-site). `docs/` in this repo is no longer the published source.
 
-A Windows installer that drops a hardened OpenClaw runtime onto a fresh Windows machine in 10–20 minutes, with every default flipped to the secure side. WSL2 with Windows automount disabled, a non-sudo `clawuser`, an nftables egress firewall scoped to that user's UID, the OpenClaw gateway bound only to `127.0.0.1`, a Windows Firewall inbound-deny on port 8787, the API key stored in DPAPI Credential Manager, and a `SOUL.md` safety policy hash-pinned at file mode 444. One installer, fifteen steps, no telemetry, fully auditable PowerShell.
+A Windows installer that drops a hardened OpenClaw runtime onto a fresh Windows machine in 10–20 minutes, with every default flipped to the secure side. WSL2 with Windows automount disabled, a non-sudo `clawuser`, an nftables egress firewall scoped to that user's UID, the OpenClaw gateway bound only to `127.0.0.1`, a Windows Firewall inbound-deny on port 8787, the API key stored in DPAPI Credential Manager, and a `SOUL.md` safety policy hash-pinned at file mode 444. One installer, no telemetry, no licence server, no account, fully auditable PowerShell.
+
+ClawFactory is free. There is nothing to buy, no key to enter, and the installer makes no call to any ClawFactory server at any point.
+
+## The three things it promises
+
+These sentences are the product. They are worded to be exactly as strong as the mechanism behind them and no stronger, and each is traceable to a passing test. See [SECURITY_FINDINGS.md](SECURITY_FINDINGS.md) for the evidence and the residuals.
+
+**Web access is denied by default.** Your agent can reach the AI provider, the software sources ClawFactory needs, and the network addresses of the sites you have allowed. Nothing else.
+
+**Your agent can write an email. It cannot send one.** Every message waits for you, and approving it sends exactly that message, once.
+
+**When your agent deletes a file in a folder you granted it, the file is held for 30 days and you can put it back.** This covers deletion by name, which is how deletion is ordinarily expressed; it does not cover every possible way a program can destroy a file.
+
+And the boundary that travels with all of them: **this covers email. It is not a claim that no data can leave your machine.** Your agent talks to a hosted AI model, and anything it can read it can send there.
 
 ## What's inside
 
-- **WSL2 + Ubuntu** — bundled rootfs imported offline via `wsl --import` (no Microsoft Store dependency).
-- **`clawuser`** — non-root, no sudo group membership, locked password.
-- **Egress firewall (nftables)** — drops everything from `clawuser`'s UID except DNS, loopback, and the IPv4 addresses of your chosen LLM provider host plus a small base allowlist (GitHub, npm/Node, OpenClaw, ClawHub, Ubuntu apt). Periodic refresh timer for IP rotation.
-- **OpenClaw 2026.4.27** — version-pinned, fetched from a SHA-256-pinned `install.sh`, configured `gateway.bind=loopback gateway.port=8787 gateway.mode=local`.
-- **Provider key in DPAPI** — read from Windows Credential Manager, written via `wsl.exe` stdin to `~/.openclaw/auth-profiles.json` mode 600. Never on a command line, never in `.env`.
-- **`SOUL.md`** — safety policy at mode 444 with SHA-256 substituted into the orchestrator prompt; the agent's first turn fails closed if the live hash doesn't match.
-- **Windows Firewall inbound-deny on TCP/8787** — belt-and-suspenders against any future misconfiguration that flips the gateway bind to `0.0.0.0`.
-- **Kill Switch** — Start Menu shortcut that stops the gateway and the agent processes.
-- **Four pre-staged agents** — orchestrator, skill-scout, skill-builder, publisher. Each gets a role-specific `agent.md` with its own auth-profile fan-out.
+- **WSL2 + Ubuntu**: bundled rootfs imported offline via `wsl --import` (no Microsoft Store dependency), pinned to a published Canonical digest.
+- **`clawuser`**: non-root, no sudo group membership, locked password.
+- **Egress firewall (nftables)**: drops everything from `clawuser`'s UID except DNS to the WSL resolver, loopback, and the resolved IPv4 addresses of a small host set: your chosen provider, ClawFactory's own site, the Node and Ubuntu package sources, and, behind a switch you control, GitHub, npm and the skill hub. Matching is by address, not by name. Periodic refresh for IP rotation.
+- **OpenClaw 2026.4.27**: version-pinned, fetched from a SHA-256-pinned `install.sh`, configured `gateway.bind=loopback gateway.port=8787 gateway.mode=local`.
+- **Provider key in DPAPI**: read from Windows Credential Manager, written via `wsl.exe` stdin to `~/.openclaw/auth-profiles.json` mode 600. Never on a command line, never in `.env`.
+- **`SOUL.md`**: safety policy at mode 444, root-owned and `chattr +i`, with its SHA-256 re-checked in code before every gated turn.
+- **Windows Firewall inbound-deny on TCP/8787**: belt-and-suspenders against any future misconfiguration that flips the gateway bind to `0.0.0.0`.
+- **Kill Switch**: Start Menu shortcut that stops the gateway and the agent processes.
+- **Guard 1, quarantine delete**: the `rm` on the agent's PATH moves files under `/workspaces` into a root-owned hold for 30 days; restore from Studio.
+- **Guard 2, approval-gated send**: the agent queues a message with a root-owned broker; nothing leaves until you approve that exact message.
+- **Guard 3, the web access switch**: deny-by-default read-fetch allowlist, plus an opt-out for the software sources, both driven from Studio.
+- **ClawFactory Studio**: a local control panel for grants, web access, approvals and recently-deleted, installed alongside the sandbox.
+- **Four pre-staged agent workspaces**: orchestrator, skill-scout, skill-builder, publisher. Each gets a role-specific `agent.md` and its own auth-profile. Only the orchestrator carries a real working prompt; the other three are scaffolding for the factory model, not finished agents.
 
 ## System requirements
 
 - Windows 10 (version 2004+) or Windows 11
 - Administrator privileges for install
 - 16 GB RAM recommended (8 GB minimum)
-- 50 GB free disk (Ubuntu rootfs + Docker images + OpenClaw runtime)
+- 50 GB free disk (Ubuntu rootfs + OpenClaw runtime + Studio)
 - Hardware virtualization enabled in BIOS (VT-x / AMD-V) for WSL2; falls back to WSL1 automatically if unavailable
 
 ## Installation
 
-1. Download `ClawFactory-Secure-Setup.exe` from the [Releases](../../releases) page (~325 MB — carries the bundled Ubuntu rootfs).
+1. Download `ClawFactory-Secure-Setup.exe` from the [Releases](../../releases) page (~440 MB, which carries the bundled Ubuntu rootfs and Studio).
 2. Right-click → **Run as administrator**.
 3. Walk the wizard: provider → API key → security acknowledgement → Install.
 4. Wait 10–20 minutes. The installer reboots once if WSL2 features need DISM enable, then auto-resumes.
@@ -36,20 +54,22 @@ A Windows installer that drops a hardened OpenClaw runtime onto a fresh Windows 
 
 ## Security
 
-Defense in depth — multiple independent layers, each scoped to a different attack surface:
+Defense in depth: multiple independent layers, each scoped to a different attack surface:
 
-| Attack | Control |
-|---|---|
-| API key theft via `.env` grep / process enumeration | Key in DPAPI, piped via stdin to `auth-profiles.json` mode 600. Never on disk in WSL. |
-| Agent exfiltration to arbitrary endpoints | nftables egress firewall on `clawuser`'s UID. Provider host + small base allowlist only. |
-| Prompt injection → lateral movement | WSL `automount=false`, no `/mnt/c/` access. Non-root, no sudo. `SOUL.md` hash-pinned. |
-| LAN-side gateway hijack | `gateway.bind=loopback` + Windows Firewall inbound-deny on TCP/8787. |
-| Supply chain on `install.sh` | SHA-256 pin in `setup.ps1`; install aborts on mismatch. |
+| Attack | Control | Class |
+|---|---|---|
+| API key theft via `.env` grep / process enumeration | Key in DPAPI, piped via stdin to `auth-profiles.json` mode 600. Never on a command line or in `.env`. | Structural |
+| Agent exfiltration to arbitrary endpoints | nftables egress firewall on `clawuser`'s UID. Provider, ClawFactory's own site, package sources, and the addresses you allow. | Structural, address-scoped |
+| Agent sending mail | Root-owned broker; no send path runs at the agent's UID; SMTP blocked for that UID at the firewall. | Structural |
+| Prompt injection to lateral movement | WSL `automount=false`; Windows folders reachable only through grants. Non-root, no sudo. `SOUL.md` root-owned, mode 444, immutable. | Structural |
+| Accidental or hostile deletion in a granted folder | `rm` on the agent's PATH hands deletes to a root-owned 30-day quarantine. | Structural for deletion by name |
+| LAN-side gateway hijack | `gateway.bind=loopback` + Windows Firewall inbound-deny on TCP/8787. | Structural |
+| Supply chain on `install.sh` and the rootfs | SHA-256 pins in `setup.ps1`; install aborts on mismatch. | Structural |
+| Runaway spend, tampered safety rules at turn time | Turn gate reads the spend meter and re-checks the SOUL digest before each turn. | **Gateway path, not structural** |
 
-Full threat model in [SECURITY.md](SECURITY.md). Which controls hold against a
-hostile agent (structural) versus only on the gateway path (advisory), plus the
-one accepted residual and its v2 closure, are stated plainly in
-[SECURITY_FINDINGS.md](SECURITY_FINDINGS.md).
+The last row is a different kind of promise from the ones above it, and that difference is the whole reason [SECURITY_FINDINGS.md](SECURITY_FINDINGS.md) exists. Read it before you rely on any of this. It states which controls the operating system enforces, which depend on the agent's own uid boundary, and every residual we know about, including the ones that make the table above narrower than it looks.
+
+Full threat model in [SECURITY.md](SECURITY.md).
 
 ## Smoke test
 
@@ -67,7 +87,7 @@ The script runs 19 checks and exits 0 only if all pass:
 4. Gateway returns HTTP 200 on `http://127.0.0.1:8787/status`
 5. Windows Firewall inbound-deny rule active on TCP/8787
 6. Orchestrator's `agent.md` has the live SOUL.md SHA-256 substituted (no `{{SOUL_SHA256}}` placeholder)
-7. Per-agent `auth-profiles.json` (mode 600) present for all 5 agents
+7. Per-agent `auth-profiles.json` (mode 600) present for all 5 agent identities: the four named agents plus `main`, which has a profile but no `agent.md`
 8. `.wslconfig` has `vmIdleTimeout=-1` (keeps the WSL VM alive while Windows is up)
 9. `ClawFactory WSL Host` scheduled task registered and enabled (gateway keep-alive)
 10. Egress firewall `clawfactory` chain present in the nftables ruleset
@@ -81,27 +101,18 @@ The script runs 19 checks and exits 0 only if all pass:
 18. Spend governor meter returns a numeric spend with a state that is not `unknown`
 19. Spend governor turn-gate blocks a turn when the cap is set to 0
 
-> Checks 12–19 are the v1.1 Grants + spend-governor substrate. Like the other
+> Checks 12–19 are the Grants + spend-governor substrate. Like the other
 > WSL-dependent checks they SKIP (not FAIL) when the smoke test runs as
 > `NT AUTHORITY\SYSTEM`.
+
+Note what the smoke test is and is not: it confirms the controls are installed and wired. It is not the evidence that they hold against a hostile agent. That evidence is consumer-side, asking the agent itself to cross each boundary on a clean machine, and it lives in `docs/session_reports/`.
 
 ## Known limitations
 
 - **SmartScreen "Unknown publisher" warning on unsigned builds.** Releases built via `scripts\build_release.ps1` are Authenticode-signed (Azure Artifact Signing, individual identity, Bret Mckinney) and timestamped. A local dev build compiled directly with `ISCC.exe` is unsigned and cannot be signed; click "More info -> Run anyway" for those.
-- **WSL1 fallback on hardware without nested virtualization.** If `HCS_E_HYPERV_NOT_INSTALLED` fires (common in nested VMs and some older laptops), the installer falls back to WSL1 automatically. Some features (systemd, networking) behave differently — egress firewall uses iptables-legacy instead of nftables.
+- **WSL1 fallback on hardware without nested virtualization.** If `HCS_E_HYPERV_NOT_INSTALLED` fires (common in nested VMs and some older laptops), the installer falls back to WSL1 automatically. Some features (systemd, networking) behave differently, and the egress firewall uses iptables-legacy instead of nftables.
 - **Provider model IDs are forward-looking** (`grok-4-1-fast`, `gpt-5`, `claude-sonnet-4-6`, `gemini-2.5-pro`). If your provider's catalog uses a different name when you install, change it via `Switch AI Provider` from the Start Menu.
-
-## Pricing
-
-One-time purchase, free updates forever. No subscription, no telemetry.
-
-| Product | Price | What it is |
-|---|---|---|
-| **ClawFactory** | **$149** | The full hardened OpenClaw Skills Factory installer (this repo). |
-| **ClawAgent** | **$49** | The lighter single-agent variant. |
-| **ClawChat** | bundled | Desktop chat app, included with both. |
-
-Buy at [clawfactory.app](https://clawfactory.app).
+- **The egress allowlist matches on address, not hostname.** Anything served from an address ClawFactory already allows is reachable. This is permanent for v1 and is stated in full in [SECURITY_FINDINGS.md](SECURITY_FINDINGS.md).
 
 ## Building from source
 
@@ -137,7 +148,7 @@ signs the `.exe` via `scripts\sign_installer.ps1`.
 Requires `AZURE_SIGNING_*` values in a repo-root `.env` (see `signing\metadata.json.template`
 for the fields) and the service principal to hold the **Artifact Signing Certificate
 Profile Signer** role on the `clawfactory-signing` account. Signing fails loudly
-(non-zero exit) on any error — never proceed with an unsigned `.exe`.
+(non-zero exit) on any error. Never proceed with an unsigned `.exe`.
 
 `sign_installer.ps1` refuses to sign a binary carrying no build stamp, or one whose
 bytes do not match the stamp beside it. To re-sign an existing binary in an emergency,
@@ -148,7 +159,9 @@ taken under time pressure, not against an attacker who already has local executi
 
 ## License
 
-[PolyForm Perimeter 1.0.0](LICENSE) — source-available; any use is permitted except providing a competing product. Copyright © 2026 Frontier Automation Systems LLC.
+[Apache License 2.0](LICENSE). Copyright 2026 Frontier Automation Systems LLC. See [NOTICE](NOTICE).
+
+Apache-2.0 was chosen deliberately over a source-available licence: attribution is the mechanism by which a free release builds a reputation, Apache-2.0 requires it, and its patent grant makes organisations comfortable evaluating the code.
 
 ## Security disclosure
 

@@ -27,13 +27,13 @@ Check "probe line contains the probe script path"             ($probe -match [re
 Check "probe line passes the SINGLE combined installer (-CombinedExe)" ($probe -match '-CombinedExe\s+C:\\cfv\\combined-setup\.exe')
 Check "probe line has NO separate -StudioExe (combined flow)"  (-not ($probe -match '-StudioExe'))
 Check "probe line has NO separate -SecureExe (combined flow)"  (-not ($probe -match '-SecureExe'))
-Check "probe line contains -LicenseKey on the SAME line"      ($probe -match '-LicenseKey')
+Check "probe line contains -SeedKeyTarget on the SAME line"   ($probe -match '-SeedKeyTarget')
 Check "probe line contains the redirect on the SAME line"     ($probe -match [regex]::Escape('> C:\cfv\job3-out.txt 2>&1'))
-Check "on that line, -LicenseKey precedes the redirect (one command)" (
-    ($probe.IndexOf('-LicenseKey') -ge 0) -and
-    ($probe.IndexOf('-LicenseKey') -lt $probe.IndexOf('> C:\cfv\job3-out.txt')))
-Check "NO array element is a bare '-LicenseKey...' fragment (the cfv-149 signature)" (
-    -not ($lines | Where-Object { $_ -match '^\s*-LicenseKey' }))
+Check "on that line, -SeedKeyTarget precedes the redirect (one command)" (
+    ($probe.IndexOf('-SeedKeyTarget') -ge 0) -and
+    ($probe.IndexOf('-SeedKeyTarget') -lt $probe.IndexOf('> C:\cfv\job3-out.txt')))
+Check "NO array element is a bare '-SeedKeyTarget...' fragment (the cfv-149 signature)" (
+    -not ($lines | Where-Object { $_ -match '^\s*-SeedKeyTarget' }))
 Check "line 0 is @echo off"          ([string]$lines[0] -eq '@echo off')
 Check "line 3 writes JOB3_DONE"      ([string]$lines[3] -match 'JOB3_DONE')
 

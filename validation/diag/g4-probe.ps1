@@ -56,7 +56,6 @@ param(
     [string]$StorageAcct   = 'clawfactoryvalc467',
     [string]$Container     = 'validation',
     [string]$AdminUser     = 'clawadmin',
-    [string]$LicenseKey    = 'CF-TEST-TEST-TEST-TEST',
     [string]$SeedKeyTarget = 'ClawFactory/AnthropicApiKey',
     [string]$OutDir        = ''
 )
@@ -470,7 +469,7 @@ if(-not [G4W.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
     Say "  $hb"
     if ($hb -match 'HB=NONE') { throw "no runner heartbeat. The interactive session is not running the runner; see Card 2." }
 
-    $job = "& powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\cfv\interim-v120-phase1.ps1 -CombinedExe C:\cfv\combined-setup.exe -LicenseKey $LicenseKey"
+    $job = "& powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\cfv\interim-v120-phase1.ps1 -CombinedExe C:\cfv\combined-setup.exe"
     $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($job))
     Invoke-Rc "[IO.File]::WriteAllBytes('C:\cfv\jobs\01-install.job.ps1', [Convert]::FromBase64String('$b64')); 'queued'" 'queue-install' | Out-Null
     Say "Install queued. This takes 15 to 25 minutes." Yellow

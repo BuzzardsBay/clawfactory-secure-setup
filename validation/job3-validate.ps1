@@ -35,7 +35,7 @@
   L-tags. The big ones: L2/L7 (script via @file, one line, base64 for multi-line,
   paren-free --query, read BOTH streams), L4/L5/L6 (never 2>&1/*>&1 an az call;
   check $LASTEXITCODE; ask the VM on non-zero create), L3 (teardown by explicit
-  name), L10 (free the license slot with the same machine_id), L16 (fresh
+  name), L16 (fresh
   retrieval SAS; verify the blob landed), L17/L19 (warm the agent; grant probe
   reads /workspaces/<grant-id> -- enforced in the probe), L20/L21 (single-joined
   wrapper command line + Count guard; CR-strip bash into WSL).
@@ -68,7 +68,6 @@ param(
     [string]$AdversarialSuite = (Join-Path (Split-Path -Parent $PSScriptRoot) 'adversarial-suite.ps1'),
     [string]$ProbeScript     = (Join-Path $PSScriptRoot 'job3-probe.ps1'),
     [string]$AdminUser       = 'clawadmin',
-    [string]$LicenseKey      = 'CF-TEST-TEST-TEST-TEST',
     # Provider key: read from THIS box's Credential Manager, base64'd, seeded to the
     # VM's Credential Manager (UTF-16LE) where the installer's CredRead reads it.
     # The value is never printed here or on the VM.
@@ -102,11 +101,11 @@ function Say($m, $c = 'Cyan') { Write-Host "[$([DateTime]::Now.ToString('HH:mm:s
 function Save($name, $content) { $content | Out-File (Join-Path $dir $name) -Encoding utf8 }
 
 # --- resumable state --------------------------------------------------------
-$script:State = [ordered]@{ vmName = $VmName; resourceGroup = $ResourceGroup; machineId = ''; phase = 'init'; child = @{}; run = $run }
+$script:State = [ordered]@{ vmName = $VmName; resourceGroup = $ResourceGroup; phase = 'init'; child = @{}; run = $run }
 if ($Resume -and (Test-Path $stateFile)) {
     try { $prev = Get-Content $stateFile -Raw | ConvertFrom-Json
-          $script:State.machineId = $prev.machineId; $script:State.phase = $prev.phase
-          Say "Resuming $VmName from phase '$($prev.phase)' (machine_id: $($prev.machineId))" Yellow } catch { }
+          $script:State.phase = $prev.phase
+          Say "Resuming $VmName from phase '$($prev.phase)'" Yellow } catch { }
 }
 function Set-Phase([string]$p) {
     $script:State.phase = $p
@@ -170,7 +169,6 @@ public static string ReadB64(string target) {
     return [CFR.Cred]::ReadB64($Target)
 }
 
-$script:MachineId = $script:State.machineId
 
 try {
     # ---- 0. Preflight -----------------------------------------------------
@@ -238,12 +236,7 @@ try {
         if (-not $agentOk) { throw "VM agent never Ready after ~6 min -- HARNESS/INFRA failure (bad deploy), NOT a product verdict. Redeploy a fresh VM name." }
         if ((az vm show -g $ResourceGroup -n $VmName --query "provisioningState" -o tsv 2>$null) -eq 'Failed') { throw "INFRA: provisioningState=Failed. run-command will not work -- retry a fresh VM name." }
 
-        # L10.1 -- capture the license machine_id (MachineGuid) while the VM lives.
-        $script:MachineId = (Invoke-Rc "(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography' MachineGuid).MachineGuid" 'machine-id').Trim()
-        $script:State.machineId = $script:MachineId
         Set-Phase 'provisioned'
-        if ($script:MachineId -match '^[0-9a-fA-F-]{32,40}$') { Say "  license machine_id captured for deactivate-on-teardown: $script:MachineId" DarkGray }
-        else { Say "  WARNING: MachineGuid read looks malformed ('$script:MachineId') -- deactivate may miss the slot." Yellow }
     } else { Say "Resume: provision already done (VM $VmName)." Yellow }
 
     # ---- 2. Stage combined installer + probe + suite ----------------------
@@ -306,7 +299,7 @@ if(-not [CFW.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
         # wrapper.cmd runs in the clawadmin session on next boot: seed, then the probe.
         # Built via the shared, render-tested builder -- the probe command is ONE
         # joined line WITH its redirect (cfv-149 split them and lost all evidence).
-        $cmdLines = Build-Job3CmdLines -SeedEnc $seedEnc -LicenseKey $LicenseKey -SeedKeyTarget $SeedKeyTarget
+        $cmdLines = Build-Job3CmdLines -SeedEnc $seedEnc -SeedKeyTarget $SeedKeyTarget
         # Loud guard: exactly 4 cmd lines. A reintroduced multi-line concat re-splits
         # the probe command from its redirect and changes this count -- fail BEFORE
         # arming a broken wrapper rather than after losing a whole run.
@@ -384,7 +377,7 @@ catch {
         Say "FAIL path (-PreserveOnFail): DEALLOCATING (stop compute cost) and PRESERVING $VmName for diagnosis." Red
         az vm deallocate -g $ResourceGroup -n $VmName --output none 2>$null
         Say "  $VmName deallocated. Still incurring DISK cost. Diagnose, then: .\job3-teardown.ps1 -VmName $VmName" Red
-        Save 'FAIL-preserved.txt' "Preserved (deallocated) for diagnosis at $(Get-Date -Format s). machine_id=$script:MachineId. Tear down by hand with job3-teardown.ps1 -VmName $VmName."
+        Save 'FAIL-preserved.txt' "Preserved (deallocated) for diagnosis at $(Get-Date -Format s). Tear down by hand with job3-teardown.ps1 -VmName $VmName."
         $script:Preserved = $true
     }
     throw
@@ -396,7 +389,7 @@ finally {
     } elseif ($script:Preserved) {
         Say "FAIL-preserved: leaving $VmName deallocated for diagnosis (see FAIL-preserved.txt). Not deleting." Yellow
     } else {
-        & (Join-Path $PSScriptRoot 'job3-teardown.ps1') -VmName $VmName -ResourceGroup $ResourceGroup -MachineId $script:MachineId -OutDir $OutDir -LicenseKey $LicenseKey
+        & (Join-Path $PSScriptRoot 'job3-teardown.ps1') -VmName $VmName -ResourceGroup $ResourceGroup -OutDir $OutDir
         Copy-Item (Join-Path $OutDir "$VmName.teardown-proof.txt") $dir -ErrorAction SilentlyContinue
     }
     Say "Evidence in $dir" Green

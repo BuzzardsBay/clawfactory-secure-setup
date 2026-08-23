@@ -52,7 +52,6 @@ $ProgramDataDir   = Join-Path $env:ProgramData 'ClawFactory'
 $WslConfigPath    = Join-Path $env:USERPROFILE '.wslconfig'
 $WslConfigState   = $null
 $DistroPreExisted = $null
-$LicenseKey       = $null
 
 try {
     $sf = Join-Path $ProgramDataDir 'wslconfig-state.txt'
@@ -71,12 +70,6 @@ try {
         Write-Log INFO "Cached distroExistedPreInstall = $DistroPreExisted"
     }
 } catch { Write-Log WARN "wsl-state.txt read failed: $($_.Exception.Message)" }
-
-# License key for best-effort deactivation. HKLM read - silent failure if absent.
-try {
-    $LicenseKey = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\ClawFactory' -Name 'LicenseKey' -ErrorAction Stop).LicenseKey
-    if ($LicenseKey) { Write-Log INFO "Cached license key for deactivation call." }
-} catch { Write-Log INFO "No license key in HKLM\SOFTWARE\ClawFactory (already gone or never set)." }
 
 #--- Decide RemoveAll --------------------------------------------------------
 if ($KeepLinuxEnvironment) {
@@ -439,29 +432,8 @@ echo OK
     } catch { Write-Log WARN "In-distro teardown failed: $($_.Exception.Message)" }
 }
 
-#--- 7. Best-effort license deactivation ------------------------------------
-Write-Log INFO 'Step 7: Best-effort license deactivation.'
-if ($LicenseKey) {
-    try {
-        $machineId = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name 'MachineGuid' -ErrorAction Stop).MachineGuid
-        $body = @{ key = $LicenseKey; machine_id = $machineId } | ConvertTo-Json -Compress
-        # 5-second timeout, fail-closed. Uninstall must not block on network.
-        $resp = Invoke-WebRequest `
-            -Uri 'https://api.clawfactory.app/deactivate' `
-            -Method POST `
-            -Body $body `
-            -ContentType 'application/json' `
-            -UseBasicParsing `
-            -TimeoutSec 5 `
-            -ErrorAction Stop
-        Write-Log INFO "License deactivation responded HTTP $($resp.StatusCode)."
-    } catch { Write-Log WARN "License deactivation failed (non-fatal): $($_.Exception.Message)" }
-} else {
-    Write-Log INFO 'No license key cached; skipping deactivation call.'
-}
-
-#--- 8. HKLM\SOFTWARE\ClawFactory --------------------------------------------
-Write-Log INFO 'Step 8: Removing HKLM\SOFTWARE\ClawFactory.'
+#--- 7. HKLM\SOFTWARE\ClawFactory --------------------------------------------
+Write-Log INFO 'Step 7: Removing HKLM\SOFTWARE\ClawFactory.'
 try {
     if (Test-Path 'HKLM:\SOFTWARE\ClawFactory') {
         Remove-Item -Path 'HKLM:\SOFTWARE\ClawFactory' -Recurse -Force -ErrorAction Stop
@@ -469,8 +441,8 @@ try {
     }
 } catch { Write-Log WARN "HKLM cleanup failed: $($_.Exception.Message)" }
 
-#--- 9. ProgramData -- delete last so we can read state files above ---------
-Write-Log INFO 'Step 9: Removing C:\ProgramData\ClawFactory.'
+#--- 8. ProgramData -- delete last so we can read state files above ---------
+Write-Log INFO 'Step 8: Removing C:\ProgramData\ClawFactory.'
 try {
     if (Test-Path -LiteralPath $ProgramDataDir) {
         Remove-Item -LiteralPath $ProgramDataDir -Recurse -Force -ErrorAction Stop

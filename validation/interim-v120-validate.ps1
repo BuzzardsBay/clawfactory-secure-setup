@@ -37,7 +37,6 @@ param(
     [string]$StorageAcct   = 'clawfactoryvalc467',
     [string]$Container     = 'validation',
     [string]$AdminUser     = 'clawadmin',
-    [string]$LicenseKey    = 'CF-TEST-TEST-TEST-TEST',
     [string]$SeedKeyTarget = 'ClawFactory/AnthropicApiKey',
     [string]$SeedKeyB64    = '',
     [string]$OutDir        = '',
@@ -416,8 +415,7 @@ if(-not [CFW.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
         $probeArgs = @(
             '-NoProfile','-ExecutionPolicy','Bypass',
             '-File','C:\cfv\interim-v120-phase1.ps1',
-            '-CombinedExe','C:\cfv\combined-setup.exe',
-            '-LicenseKey',$LicenseKey
+            '-CombinedExe','C:\cfv\combined-setup.exe'
         ) -join ' '
         $cmdLines = @(
             '@echo off',
