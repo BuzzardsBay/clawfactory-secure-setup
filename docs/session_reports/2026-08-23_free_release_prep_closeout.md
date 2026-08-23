@@ -198,8 +198,10 @@ Also swapped, everywhere the old licence was asserted as current fact:
 Historical close-outs that record "PolyForm" as a past fact were left alone; they are
 records, not claims.
 
-**The Inno Setup licence position, reported not acted on, and it corrects a standing
-belief.** The licence text installed on this machine
+**The Inno Setup licence position, reported not acted on.** Two facts, both
+established by execution, and they are in tension.
+
+The licence text installed on this machine
 (`C:\Program Files (x86)\Inno Setup 6\license.txt`) reads:
 
 > "Permission is granted to anyone to use this software for any purpose, including
@@ -207,12 +209,26 @@ belief.** The licence text installed on this machine
 > following conditions are met..."
 
 followed by four attribution and non-misrepresentation conditions, all of which a
-normal Inno-built installer satisfies. **There is no "non-commercial use only" term in
-the licence file.** A note in my standing memory said Inno 6.7.1 asserts one; that is
-not supported by the file on disk and the note has been corrected. If jrsoftware
-*requests* a commercial licence somewhere else (the download page, for example), that
-is a request and not a term. This is the operator's call and it is not a release
-blocker either way.
+normal Inno-built installer satisfies. **There is no non-commercial term in the
+licence file.**
+
+But the binaries do carry one. `ISCC.exe` and `Compil32.exe` both contain the UTF-16
+string **"Non-commercial use only"**, sitting beside "Update entitlement ended" and
+"Update entitlement ended but updated anyway". So Inno 6.7.x has paid entitlement
+tiers and this machine runs the free one, which the product labels non-commercial.
+Scan calibrated in both directions before it was trusted: a string the banner
+certainly prints matched, and a planted sentinel that must be absent did not. An
+ASCII-only scan initially found nothing, which is why the calibration mattered.
+
+This corrects my own first reading of it in this session, not the standing note,
+which had it right: the *banner* asserts non-commercial while the *licence text*
+permits commercial use.
+
+**Why it matters less now, not more.** The tension existed because ClawFactory was
+sold. A free, Apache-2.0 release plausibly sits inside the non-commercial tier the
+installed build is labelled for, so the free-release decision narrows this rather
+than widening it. It gates nothing, it is the operator's call, and it is not a
+release blocker.
 
 ---
 
