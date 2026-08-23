@@ -213,8 +213,35 @@ function LC-StopPktmon([string]$etl, [string]$txt) {
 }
 
 function LC-CountIps([string]$text, [string[]]$ips) {
+    <# COUNTS PACKETS, NOT MENTIONS. The first version of this counted every
+       occurrence of the address anywhere in the formatted capture, and on
+       cfv-170 that turned a clean install into a FAIL.
+
+       pktmon's own output declares its filters near the top of the dump:
+
+         [Microsoft-Windows-PktMon] Packet Filter 1, Name cf694646108, MAC-1 ...
+         EtherType 0, VlanId 0, IP-1 69.46.46.108, IP-2 0.0.0.0, Protocol 0, ...
+
+       so a capture that recorded ZERO packets still contains the address once,
+       and a naive count reports 1. Window A over the whole install counted
+       exactly 1 for the subject AND exactly 1 for the control, which is the
+       signature of two filter echoes and no traffic at all.
+
+       A real packet line carries the address followed by a PORT:
+
+         ... length 66: 10.0.0.10.64129 > 69.46.46.108.443: Flags [S], ...
+
+       so the address is followed by '.' and digits. The filter echo has a comma
+       after it. Matching on address-plus-port is therefore positive rather than
+       subtractive, and the 'Packet Filter' exclusion below is a second guard in
+       case a future pktmon format changes the echo's shape. #>
     $n = 0
-    foreach ($ip in $ips) { $n += ([regex]::Matches($text, [regex]::Escape($ip))).Count }
+    foreach ($line in ($text -split "`r?`n")) {
+        if ($line -match 'Packet Filter \d') { continue }
+        foreach ($ip in $ips) {
+            $n += ([regex]::Matches($line, [regex]::Escape($ip) + '\.\d+')).Count
+        }
+    }
     return $n
 }
 
@@ -340,24 +367,46 @@ if ($LicenceCapture -and $lcArmed) {
         -Fired $instrumentProven `
         -Evidence "window B: $calStatus; dns=$b_dnsSubject pkt=$b_pktSubject" | Out-Null
 
-    # Secondary: was the capture actually live while the installer ran? A control
-    # host seen in window A proves it was, and separates "nothing happened" from
-    # "nothing was watching". Recorded rather than gating, because the control
-    # host is reached from inside WSL and Windows-side visibility of that traffic
-    # is not guaranteed on every build.
-    Record 'P1.LC.LIVE' "Capture was live during the install (control host $($LC.ControlHost) seen)" 'INFO' `
-        "dns=$a_dnsControl pkt=$a_pktControl -- window B is what proves the instrument, this row only says whether the install-time traffic was visible too"
+    # EACH CHANNEL MUST PROVE IT WAS AWAKE IN WINDOW A BEFORE ITS SILENCE COUNTS.
+    #
+    # Window B proves the instrument CAN see the call. It does not prove either
+    # channel was actually watching during the install, and those are different
+    # claims. On cfv-170 pktmon recorded 322 events in window A and not one of
+    # them touched the subject OR the control: the install's own traffic leaves
+    # from inside WSL2 on a virtual adapter the capture did not cover. A channel
+    # that saw nothing at all, including its control, is blind for that window,
+    # and a blind channel must not be allowed to contribute either a PASS or a
+    # FAIL.
+    #
+    # So each channel is gated on its own in-window control, and the subject
+    # verdict is taken only over the channels that were demonstrably live.
+    $dnsLiveA = [bool]$a_dnsControl
+    $pktLiveA = ($a_pktControl -gt 0)
+    Record 'P1.LC.LIVE' "Which channels were awake during the install" 'INFO' `
+        ("DNS: control host $($LC.ControlHost) seen=$a_dnsControl -> live=$dnsLiveA. " +
+         "pktmon: control packets=$a_pktControl -> live=$pktLiveA. " +
+         "A channel that did not see its own control in window A is blind for that window and is excluded from the verdict below, " +
+         "in either direction. Window B proves what the instrument CAN see; this row says what it DID watch.")
 
-    if ($instrumentProven) {
-        $silent = (-not $a_dnsSubject) -and ($a_pktSubject -le 0)
-        Record 'P1.LC' "The installer makes NO outbound licence call to $($LC.SubjectHost)" `
-            $(if ($silent) { 'PASS' } else { 'FAIL' }) `
-            ("window A over the whole install: dns hit=$a_dnsSubject, packets=$a_pktSubject. " +
-             "Window B, same instrument same host, produced dns hit=$b_dnsSubject packets=$b_pktSubject ($calStatus), " +
-             "so this silence is evidence rather than an unproven instrument.")
-    } else {
+    $liveChannels = @()
+    $subjectSeen  = $false
+    if ($dnsLiveA) { $liveChannels += 'DNS'; if ($a_dnsSubject)      { $subjectSeen = $true } }
+    if ($pktLiveA) { $liveChannels += 'pktmon'; if ($a_pktSubject -gt 0) { $subjectSeen = $true } }
+
+    if (-not $instrumentProven) {
         Record 'P1.LC' "The installer makes NO outbound licence call to $($LC.SubjectHost)" 'VOID' `
             "window B produced no signal ($calStatus), so the instrument was never shown to work and window A's silence proves nothing"
+    } elseif ($liveChannels.Count -eq 0) {
+        Record 'P1.LC' "The installer makes NO outbound licence call to $($LC.SubjectHost)" 'VOID' `
+            ("no channel saw its own control during the install (dns control=$a_dnsControl, pktmon control packets=$a_pktControl), " +
+             "so nothing was demonstrably watching and the silence is unmeasured rather than clean")
+    } else {
+        Record 'P1.LC' "The installer makes NO outbound licence call to $($LC.SubjectHost)" `
+            $(if (-not $subjectSeen) { 'PASS' } else { 'FAIL' }) `
+            ("live channels in window A: $($liveChannels -join ' + '). " +
+             "Subject over the whole install: dns hit=$a_dnsSubject, packet count=$a_pktSubject. " +
+             "Window B, same instrument same host, produced dns hit=$b_dnsSubject packets=$b_pktSubject ($calStatus). " +
+             "Packet counts exclude pktmon's own filter-declaration lines, which name the filtered address once even when nothing was captured.")
     }
     if ($lcPktReason)  { Record 'P1.LC.PKT'  'pktmon capture, window A' 'INFO' $lcPktReason }
     if ($lcPktReasonB) { Record 'P1.LC.PKTB' 'pktmon capture, window B' 'INFO' $lcPktReasonB }
