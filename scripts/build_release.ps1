@@ -170,23 +170,30 @@ Write-Host ("Bundle check OK: all {0} preflight resources are in [Files]." -f $r
 #               real absence rather than an unreadable payload
 # See docs/session_reports/2026-08-15_guard3_followups_closeout.md.
 #
-# STALE AS OF 2026-08-23, DELIBERATELY NOT REPINNED HERE. The free-release copy
-# audit changed Studio SOURCE in three places that this artifact predates:
-#   - the footer, PolyForm Perimeter 1.0.0 -> Apache-2.0
-#   - the footer's "runs entirely on your machine", which read as a data claim
-#   - the Web access panel's "stops skill installation", which cfv-169 measured
-#     to be false (SK.3, control firing in the same run)
-# The pinned 1.3.0 .exe still carries the OLD strings, so this digest and the
-# phase6 assertions in validation/interim-v120-phase6.ps1 are correct ABOUT THIS
-# ARTIFACT and must not be edited to describe copy no artifact produces.
-# When Studio is rebuilt, the repin is a THREE-part change made together:
-#   1. this $studioPinned digest and $studioName,
-#   2. move 'stops skill installation' and 'PolyForm Perimeter 1.0.0' from the
-#      phase6 PRESENT list to its stale/ABSENT list,
-#   3. add 'does not stop skill installation' and 'Apache-2.0' to PRESENT.
-# Doing 1 without 2 and 3 turns a green phase6 into a test of the wrong copy.
-$studioName   = 'ClawFactory-Studio-Setup-1.3.0.exe'
-$studioPinned = '46288d06aaf1e786e30310e4bc316e40af04513b013a97f51d24dafb6759fa79'
+# Repinned 2026-08-23 for Studio 1.3.1, the free release. This was the THREE-part
+# change the previous note described, and all three landed together:
+#   1. $studioName and $studioPinned below, and the .iss #define,
+#   2. 'stops skill installation' and 'PolyForm Perimeter 1.0.0' moved OUT of the
+#      phase6 PRESENT list and INTO its stale/ABSENT list, joined by
+#      'runs entirely on your machine',
+#   3. 'does not stop skill installation' and the full footer string
+#      'Frontier Automation Systems LLC (middot) Apache-2.0' added to PRESENT.
+# Doing 1 without 2 and 3 would have turned a green phase6 into a test of copy no
+# artifact produces.
+#
+# A bare 'Apache-2.0' was REJECTED as the PRESENT marker: dozens of node_modules
+# licence banners carry it, so the assertion could never fail. The footer string
+# is ours alone. And 'does not stop skill installation' does not contain the
+# substring 'stops skill installation', so the PRESENT and ABSENT assertions
+# genuinely oppose each other rather than both matching the same bytes.
+#
+# Verified before pinning, against the packaged app.asar rather than the source:
+# 20 of 20 PRESENT, 9 of 9 ABSENT, POSCONTROL_OK.
+# Version bumped 1.3.0 -> 1.3.1 deliberately. artifactName carries ${version}, so
+# rebuilding at 1.3.0 would have produced a same-named, different-digest artifact,
+# which is exactly the drift this pin exists to catch.
+$studioName   = 'ClawFactory-Studio-Setup-1.3.1.exe'
+$studioPinned = 'e56139f80245e02d2ce1d00b794ed03b2f64b256d152bfbf45527a711a220a43'
 $studioFile   = Join-Path $RepoRoot "resources\$studioName"
 if (-not (Test-Path $studioFile)) {
     Fail ("resources\$studioName not found. It is gitignored; copy it in from the Studio repo's " +

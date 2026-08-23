@@ -13,7 +13,7 @@
 ; signed per-user NSIS installer is embedded and run de-elevated after the core
 ; sandbox install (see [Files] + the InstallStudioComponent procedure in [Code]).
 ; DRY: this filename is referenced by both the [Files] entry and the [Code] launch.
-#define StudioInstaller "ClawFactory-Studio-Setup-1.3.0.exe"
+#define StudioInstaller "ClawFactory-Studio-Setup-1.3.1.exe"
 
 [Setup]
 ; [R1] Fixed AppId for stable upgrade/uninstall identity. Do not regenerate.

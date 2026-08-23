@@ -490,20 +490,39 @@ if (-not $p) {
 if (-not $p -or -not (Test-Path $p)) { 'ASAR_NOT_FOUND'; exit }
 "ASAR=$p"
 $t = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($p))
-foreach ($m in @('web:list','web:allow','web:revoke','Web access','clawfactory-fetchctl','send:dismiss','send:markViewed','Expired while you were away','show full hash','PolyForm Perimeter 1.0.0','app:version','send:approve','quarantine:restore',
+foreach ($m in @('web:list','web:allow','web:revoke','Web access','clawfactory-fetchctl','send:dismiss','send:markViewed','Expired while you were away','show full hash','app:version','send:approve','quarantine:restore',
                  # 1.3.0: the toolchain switch, its load-bearing breakage text, the
                  # ratified footnote, and the replacement home route.
-                 'web:toolchain','setToolchain','Software sources ClawFactory needs','stops skill installation',
+                 'web:toolchain','setToolchain','Software sources ClawFactory needs',
                  'unless you switch them off above','Matching is by network address rather than by name',
-                 'Running outside the ClawFactory Studio app')) {
+                 'Running outside the ClawFactory Studio app',
+                 # 1.3.1, the free release. Both of these are chosen to DISCRIMINATE.
+                 # A bare 'Apache-2.0' would not: dozens of node_modules licence
+                 # banners carry it, so the assertion could never fail and would be
+                 # decoration rather than a control. The footer string is ours alone.
+                 # 'does not stop skill installation' does not contain the substring
+                 # 'stops skill installation' (stop against stops), so this PRESENT
+                 # assertion and the ABSENT one below genuinely oppose each other.
+                 'does not stop skill installation',
+                 'Frontier Automation Systems LLC · Apache-2.0')) {
   if ($t.Contains($m)) { "PRESENT  $m" } else { "MISSING  $m" }
 }
-# Stale strings. The three 1.3.0 additions are the ones this session removed, and
-# each is a sentence that was FALSE in the shipped product: the home route claimed
-# a retired backend was unreachable, and the old footnote omitted that a site can
-# share an address with one the USER allowed, not only with the provider.
+# Stale strings. Each is a sentence that was FALSE in the shipped product at the
+# time it was removed: the home route claimed a retired backend was unreachable,
+# and the old footnote omitted that a site can share an address with one the USER
+# allowed, not only with the provider.
+#
+# The two 1.3.1 additions moved here from the PRESENT list above, together with
+# the digest repin and the new PRESENT strings. All three edits or none: repinning
+# alone would leave this phase asserting copy that no artifact produces.
+#   'stops skill installation'  was measured FALSE on cfv-169 (SK.3, control
+#     firing in the same run). A real openclaw skills install completes with the
+#     toggle off, because clawhub.ai shares an address with openclaw.ai.
+#   'PolyForm Perimeter 1.0.0'  the product is Apache-2.0 from the free release on.
 foreach ($m in @('v0.1.0','MIT licensed','ClawFactoryNegativeSentinelZZ9',
-                 'Studio backend unreachable','Two things are always reachable regardless','Running on http://127.0.0.1:8080')) {
+                 'Studio backend unreachable','Two things are always reachable regardless','Running on http://127.0.0.1:8080',
+                 'stops skill installation','PolyForm Perimeter 1.0.0',
+                 'runs entirely on your machine')) {
   if ($t.Contains($m)) { "STILLTHERE  $m" } else { "ABSENT      $m" }
 }
 if ($t.Contains('Workspace')) { 'POSCONTROL_OK' } else { 'POSCONTROL_BLIND' }
@@ -526,7 +545,7 @@ Assert-Searchable -Id 'G3.8.SEARCH' -Name 'panel markers in the installed app.as
 
 Record "G3.8" 'The new panels are present in the app.asar that was actually installed' `
     $(if ($asarBlind) { 'VOID' } elseif ($asarMissing -eq 0 -and -not $asarStale) { 'PASS' } else { 'FAIL' }) `
-    "missing markers=$asarMissing; stale markers (v0.1.0 / MIT licensed) present=$asarStale; positive control blind=$asarBlind"
+    "missing markers=$asarMissing; stale markers present=$asarStale; positive control blind=$asarBlind"
 
 $outJson6 = if ($PostReboot) { 'C:\cfv\phase6-results-postreboot.json' } else { 'C:\cfv\phase6-results.json' }
 Complete-Phase -ResultsJson $outJson6 -MarkerPrefix "PHASE6_$tag"
