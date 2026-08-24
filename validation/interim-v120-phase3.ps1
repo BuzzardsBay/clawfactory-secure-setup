@@ -123,7 +123,22 @@ echo "AFTER_SINK_COUNT=`$(cat /tmp/cf-sink-count 2>/dev/null || echo 0)"
 "@
 W $t12.Out
 $reqId = if ($t12.Out -match '"requestId"\s*:\s*"([^"]+)"') { $Matches[1] } elseif ($t12.Out -match 'requestId[=: ]+(\S+)') { $Matches[1] } else { $null }
-$payHash = if ($t12.Out -match '"payloadHash"\s*:\s*"([a-f0-9]+)"') { $Matches[1] } else { $null }
+# THE CLI DOES NOT SPEAK JSON, AND THIS LINE ASSUMED IT DID.
+#
+# clawfactory-send prints plain key=value lines:
+#     status=pending
+#     requestId=2026-08-24T16-52-10-769Z-35b86e7b
+#     payloadHash=a6f0...
+# The requestId read above happens to survive because it carries a key=value
+# fallback. This one did not, so it returned $null on every run, test 3 voided
+# on "no requestId from test 1" (which was not even the missing value), and the
+# approve path has therefore never been exercised in any run of this suite.
+# Confirmed against the cfv-174 transcript, which prints "payloadHash=" empty.
+#
+# ONLY THE EXTRACTION CHANGES. Every assertion below is exactly as it was.
+$payHash = if ($t12.Out -match '"payloadHash"\s*:\s*"([a-f0-9]{64})"') { $Matches[1] }
+           elseif ($t12.Out -match 'payloadHash[=:]\s*"?([a-f0-9]{64})') { $Matches[1] }
+           else { $null }
 W "requestId=$reqId payloadHash=$payHash"
 $sinkUnchanged = ($t12.Out -match 'BEFORE_SINK_COUNT=0') -and ($t12.Out -match 'AFTER_SINK_COUNT=0')
 Record 'G2.1' 'Test 1: agent enqueues, nothing leaves the machine' `
@@ -193,7 +208,13 @@ RUN=__RAND__
 mk() {
   su -s /bin/bash -c "printf 'body %s\n' \"\$1\" > /tmp/b-\$1.txt; printf 'A-bytes %s\n' \"\$1\" > /tmp/a-\$1.txt; clawfactory-send --to sink@example.com --subject \"S-\$1\" --body-file /tmp/b-\$1.txt --attach /tmp/a-\$1.txt" clawuser 2>&1
 }
-idof() { grep -oE '"requestId"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | grep -oE '"[^"]+"$' | tr -d '"'; }
+# Reads BOTH shapes the tooling emits: the JSON the admin socket returns and the
+# plain key=value lines clawfactory-send prints. The JSON-only version returned
+# an empty string against the CLI, so tests 4 to 7 ran their control commands
+# with no request id at all and reported product failures for it. Calibrated
+# against both shapes AND against text containing neither, which must yield
+# nothing: a parser that matches anything is worse than one that matches nothing.
+idof() { grep -oE 'requestId"?[[:space:]]*[:=][[:space:]]*"?[^"[:space:],}]+' | head -1 | sed -E 's/^.*[:=][[:space:]]*"?//'; }
 
 echo "=== TEST 4: deny ==="
 O=$(mk "deny$RUN"); echo "$O"
