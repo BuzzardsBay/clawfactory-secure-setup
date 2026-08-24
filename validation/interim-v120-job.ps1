@@ -160,10 +160,18 @@ $transcript = Retrieve-VmFile "C:\cfv\$probeName-out-probe.txt" "$JobName-probe-
 # Stale evidence presented as current is worse than missing evidence, because
 # nothing about it looks wrong. Ask for the post-reboot name FIRST when the args
 # say post-reboot, and fall back only if it is genuinely absent.
+# THREE naming patterns are in use across the phases, not two, and the third was
+# found by reading interim-v130-toolchain.ps1 rather than by losing a run to it:
+#   phase4/phase6      '<probe>-results-postreboot.json'  (lowercase suffix)
+#   toolchain          '<probe>-results-POSTREBOOT.json'  (uppercase $tag)
+#   everything else    '<probe>-results.json'
+# Unifying the phases would be the better fix, but they are the instruments this
+# release is being judged by and renaming their outputs mid-run is the wrong
+# order. The dispatcher absorbs the variation and says which file it used.
 $resCandidates = if ($ScriptArgs -match '-PostReboot') {
-    @("$probeName-results-postreboot.json", "$probeName-results.json")
+    @("$probeName-results-postreboot.json", "$probeName-results-POSTREBOOT.json", "$probeName-results.json")
 } else {
-    @("$probeName-results.json")
+    @("$probeName-results.json", "$probeName-results-PRE.json")
 }
 $resJson = $null
 foreach ($rc in $resCandidates) {
