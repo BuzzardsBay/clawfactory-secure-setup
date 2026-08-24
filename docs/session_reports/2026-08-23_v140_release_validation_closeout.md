@@ -3,9 +3,13 @@
 Session 2026-08-23. Phase 0 housekeeping, the v1.4.0 build, the packet-capture proof, and
 the release matrix. No tag, no publish, no GitHub release: those are the next job.
 
-**Status of this document: IN PROGRESS at the time of writing.** Sections marked PENDING are
-work that had not finished when this draft was written. If the session ends before they are
-filled in, the PENDING marker is the honest state and must not be read as a pass.
+**STATUS: INCOMPLETE. The session ended on the operator's time, not at a finish line.**
+
+Matrix rows 10 and 11 were NOT RUN, and part of row 14 was not run. They are named as NOT RUN
+throughout rather than left blank. **This artifact is NOT fit to publish**, and section 8 says
+exactly what stands in the way.
+
+The whole validation VM estate is torn down. Nothing is billing.
 
 ---
 
@@ -164,11 +168,11 @@ behaviour change measured on one machine rather than argued from source.
 | 7 | CONTROL for 6: toggle ON, reachable | **PASS** | cfv-170, SP.6a |
 | 8 | `TC.3` real agent turn with the toggle OFF | **PASS** | cfv-170, both runs |
 | 9 | `TC.1,2,4,5,6,7,8` regression | **PASS**, 30/30 on the re-run | cfv-170 |
-| 10 | Reboot pass | **PENDING** | needs the operator |
-| 11 | The MANUAL panel checks by hand | **PENDING** | needs the operator |
+| 10 | Reboot pass | **NOT RUN** | needs an operator after the reboot; auto-logon is one-shot |
+| 11 | The seven MANUAL panel checks by hand | **NOT RUN.** Checks 6 and 7 observed from a screenshot, 1 to 5 not reached | needs a person at the panel |
 | 12 | Harness self-test 15/15, build machine and box | **PASS** on both | |
-| 13 | Zero malformed verdict rows | **PASS** so far | every phase counted N of N |
-| 14 | Step 7, full assembled-build validation | **IN PROGRESS** | see section 6 |
+| 13 | Zero malformed verdict rows | **PASS** | every phase counted N of N rows, across nine phases |
+| 14 | Step 7, full assembled-build validation | **PARTIAL.** Guard 1 and structural run; Guard 2 mechanism and Studio IPC NOT RUN | see section 6 |
 
 ---
 
@@ -277,21 +281,77 @@ re-provisioning a box that was already installed and half validated.
 
 ---
 
-## 6. PENDING
+## 6. What was NOT run, and why
 
-- Matrix rows 10 and 11, which need the operator.
-- The remaining step 7 guard phases.
-- `G1.7`, under investigation at the time of writing.
-- Guard 2 rows gated on the SMTP credential.
-- Final fit-to-publish statement.
+| Not run | Why | What it costs |
+| --- | --- | --- |
+| Matrix row 10, the reboot pass | needs an operator at the console after the reboot, because auto-logon is one-shot | the post-reboot re-run of `TC.2/3/4/8` and tests 5 and 6 is unproven on this build |
+| Matrix row 11, the seven MANUAL panel checks | needs a person looking at the panel | checks 1 to 5 unproven on this build. Checks 6 and 7 WERE observed, see below |
+| Phase 5, the Studio IPC bridge | VOID at its own precondition, `processes=0`, Studio was not running | test 8's sixth channel is unmeasured on this build |
+| Phase 3, the Guard 2 mechanism suite | not reached | approve to broker-send to receipt is unproven on this build |
+| Phase 3b and card #198, external delivery | needs a real credential | #198 was PROVEN in the v1.2.0 validation and is not re-proven here |
+| `S.4`, `S.5` | precondition, no SMTP credential configured | see section 5 |
+| `S.4leak` | VOID by design: the probe refuses a synthetic secret | unmeasured, correctly |
+
+**Two of the seven manual checks WERE observed**, from a screenshot the operator sent while
+in the Studio session, and they are recorded as observed rather than as run:
+
+- **Check 6**, version and header: the header reads `v1.3.1`, correctly separated from
+  `Templates`. That is the rebuilt Studio, not the old 1.3.0.
+- **Check 7**, the footer, both halves: `Frontier Automation Systems LLC . Apache-2.0` on the
+  left, and on the right "the sandbox runs on your machine; your agent talks to a hosted AI
+  model". That is the corrected licence AND the hosted-model sentence that replaced "runs
+  entirely on your machine".
+
+Checks 1 to 5 were not reached.
+
+**A step I put on the operator's list and should not have.** I asked for the SMTP credential
+without first checking what it bought. When the operator questioned it, the answer was that
+only `S.4leak` and phase 3b need a REAL credential; `S.4`, `S.5` and the phase 3 mechanism
+tests would be satisfied by a credential pointing at the local sink, which I can write myself
+from root. I did not get to do it before the session ended, so those rows remain blocked, but
+the blocking reason is now correctly attributed to me rather than to the operator.
 
 ---
 
-## 7. Resource ledger
+## 7. Fitness to publish
+
+**NO. This artifact is not fit to publish today.** Nothing found so far argues against the
+build. What is missing is coverage, not a defect.
+
+**What is proven and would survive an audit:**
+
+- The build itself: seven gates, signed, ledger recorded.
+- **No outbound licence call**, from two independent directions: a calibrated capture on a
+  fresh install with its control firing, and an install completing under a block that
+  demonstrably kills the old licence-carrying build.
+- Rows 1 to 9, 12 and 13 of the matrix.
+- The shipped copy, verified in the INSTALLED `app.asar`: 20 of 20 present, 9 of 9 absent,
+  with a negative sentinel proving the search discriminates.
+- Guard 1's headline claim, executed rather than inferred, with the 30-day retention visible
+  in the record.
+- Guard 2's structural invariant, no route to SMTP for uid 1000, with both controls firing.
+
+**What stands in the way, in the order it should be cleared:**
+
+1. **Matrix row 11.** Five of the seven panel checks. A renderer that silently failed to draw
+   a control would pass every structural check in this document.
+2. **Matrix row 10.** The reboot pass. Egress persistence across a reboot has been a real
+   defect class in this project before.
+3. **Phase 3 and phase 5.** The Guard 2 mechanism and the Studio IPC bridge. Both are
+   unmeasured on this build, and phase 5 refused to report rather than guessing.
+4. **`S.4` and `S.5`**, which a sink credential clears without the operator.
+
+None of these needs a rebuild. They need one fresh box, roughly thirty minutes of install, and
+one operator session of about ten minutes.
+
+---
+
+## 8. Resource ledger
 
 | Resource | State |
 | --- | --- |
-| cfv-170 | **ALIVE, deliberately.** Holds the installed product for the panel checks and the reboot pass |
+| cfv-170 | **TORN DOWN** at session end, on the operator's instruction. vm, nic, pip, nsg, disk, each by explicit name, every call exit 0 |
 | cfv-171 | torn down: vm, nic, pip, nsg, disk, each by explicit name, every call exit 0 |
 | cfv-172 | torn down the same way. Its install was spent and row 2 needed a clean box |
 | cfv-173 | torn down the same way, after its evidence was retrieved |
@@ -301,5 +361,17 @@ re-provisioning a box that was already installed and half validated.
 Teardown was proven by an UNFILTERED resource list, polled until ARM's eventual consistency
 settled rather than trusting the first read, which still showed `cfv-173-osdisk`.
 
-Residual after teardown: the storage account, the vnet, the two baseline images, and cfv-170
-with its children. Nothing else.
+**FINAL STATE, unfiltered, after settling:**
+
+```
+clawfactoryvalc467              Microsoft.Storage/storageAccounts
+bake-vmVNET                     Microsoft.Network/virtualNetworks
+clawfactory-win11-baseline      Microsoft.Compute/images
+clawfactory-win11-baseline-v2   Microsoft.Compute/images
+```
+
+VMs across the ENTIRE subscription: none. **Nothing is billing.**
+
+All evidence is on the build machine, 177 MB across 15 run directories, and none of it
+depended on a VM surviving. A future session re-provisions and re-runs; it loses no
+measurement.
