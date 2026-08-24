@@ -192,8 +192,35 @@ Write-Host ("Bundle check OK: all {0} preflight resources are in [Files]." -f $r
 # Version bumped 1.3.0 -> 1.3.1 deliberately. artifactName carries ${version}, so
 # rebuilding at 1.3.0 would have produced a same-named, different-digest artifact,
 # which is exactly the drift this pin exists to catch.
-$studioName   = 'ClawFactory-Studio-Setup-1.3.1.exe'
-$studioPinned = 'e56139f80245e02d2ce1d00b794ed03b2f64b256d152bfbf45527a711a220a43'
+#
+# Repinned 2026-08-24 for Studio 1.3.2, carrying cards #273, #274 and #275: the
+# toggle notices corrected, nine dead routes given an honest empty state, and the
+# header made a link home. Same three-part change, all three parts landed:
+#   1. $studioName and $studioPinned below, and the .iss #define,
+#   2. phase6's PRESENT list gained 'which this switch does not cover',
+#      'Your agent can reach the skill hub, GitHub and npm again',
+#      'is not part of this release' and 'ClawFactory Studio home'; its ABSENT
+#      list gained the two retired notice strings,
+#   3. $PIN.studioAsar in validation/interim-v120-phase1.ps1.
+#
+# Verified against the packaged app.asar before pinning, and the scan
+# discriminates in BOTH directions in the same run: Workspace PRESENT (not
+# blind) and ClawFactoryNegativeSentinelZZ9 absent (not matching everything).
+#   present -- which this switch does not cover, Your agent can reach the skill
+#              hub GitHub and npm again, is not part of this release, What you
+#              can use today, ClawFactory Studio home
+#   absent  -- Skill installation is now off, Your agent can install skills and
+#              fetch code from GitHub and npm again, stops skill installation
+#
+# ONE STRING SURVIVES THAT LOOKS LIKE IT SHOULD NOT, and it is recorded here so
+# the next reader does not chase it. 'not wired in the desktop shell scaffold'
+# is still in the bundle: it is a constant in api/client.ts, which is still
+# imported for app.version(). No route renders it any more -- the nine panels
+# that used to are now the honest empty state -- so it is unreachable dead text
+# rather than copy. It is deliberately NOT asserted absent, because asserting an
+# absence that is not true is how a check starts lying.
+$studioName   = 'ClawFactory-Studio-Setup-1.3.2.exe'
+$studioPinned = 'ac5937516e7edbb5aac00433bfa6e5074449cbc28b132883099391639e1e7dca'
 $studioFile   = Join-Path $RepoRoot "resources\$studioName"
 if (-not (Test-Path $studioFile)) {
     Fail ("resources\$studioName not found. It is gitignored; copy it in from the Studio repo's " +

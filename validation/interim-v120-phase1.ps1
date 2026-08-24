@@ -92,7 +92,7 @@ $PIN = @{
     # in desktop\release\win-unpacked\resources\app.asar. If the VM ever reports
     # a mismatch here on an otherwise-clean install, that is a HARNESS finding to
     # diagnose, not a product failure to report.
-    studioAsar    = '5c4ffbf420814939579f00f0b8e69e949ba34af20d239ddcdc6cf4da383e2d85'
+    studioAsar    = 'a64a118f7ae748059b482589d2c124d082cc42dbf9d3239ba615079982d2a49e'
 
     version       = '1.4.0'
 }

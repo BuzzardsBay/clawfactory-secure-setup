@@ -517,7 +517,26 @@ foreach ($m in @('web:list','web:allow','web:revoke','Web access','clawfactory-f
                  # A bare 'Apache-2.0' is still refused as a marker: node_modules licence
                  # banners carry it, so it could never fail.
                  'the sandbox runs on your machine',
-                 'your agent talks to a hosted AI model')) {
+                 'your agent talks to a hosted AI model',
+                 # 1.3.2, cards #273 / #274 / #275. All four chosen to discriminate
+                 # and all four ASCII-only, which is load-bearing here: the OFF
+                 # notice itself contains a curly apostrophe in "ClawFactory's own
+                 # site", and a marker carrying U+2019 is the middot bug again.
+                 #   #274, the corrected OFF notice. 'does not stop skill
+                 #     installation' above is carried by the PARAGRAPH and would
+                 #     still pass with the notice uncorrected, which is exactly
+                 #     how the notice survived the v1.4.0 audit. This clause is
+                 #     the notice's own and nothing else in the bundle has it.
+                 'which this switch does not cover',
+                 #   #274, the corrected ON notice.
+                 'Your agent can reach the skill hub, GitHub and npm again',
+                 #   #275, the honest empty state that replaced nine panels that
+                 #     each rendered a failed request to a retired API.
+                 'is not part of this release',
+                 #   #273, the header's accessible name. The lobster is now a
+                 #     Link home; before, it was a bare span and there was no
+                 #     click path back to the home route at all.
+                 'ClawFactory Studio home')) {
   if ($t.Contains($m)) { "PRESENT  $m" } else { "MISSING  $m" }
 }
 # Stale strings. Each is a sentence that was FALSE in the shipped product at the
@@ -532,10 +551,25 @@ foreach ($m in @('web:list','web:allow','web:revoke','Web access','clawfactory-f
 #     firing in the same run). A real openclaw skills install completes with the
 #     toggle off, because clawhub.ai shares an address with openclaw.ai.
 #   'PolyForm Perimeter 1.0.0'  the product is Apache-2.0 from the free release on.
+#   1.3.2, card #274. The two transient toggle notices. These are the strings the
+#     v1.4.0 audit did NOT find, because it searched for the shape of the old
+#     sentence and these are worded differently from it. The OFF one said the
+#     switch turns skill installation off while the paragraph three lines above
+#     said it does not; the ON one said the agent could install skills "again",
+#     which implies the same thing. Both were on screen at once.
+#
+# WHAT IS DELIBERATELY NOT ASSERTED ABSENT HERE. 'not wired in the desktop shell
+# scaffold' is STILL in the 1.3.2 bundle -- it is a constant in api/client.ts,
+# which is still imported for app.version(). No route renders it any more, so it
+# is unreachable dead text rather than copy. Asserting an absence that is not
+# true would make this check start lying, which is the failure it exists to
+# catch. If client.ts is ever cleaned out, add it here then.
 foreach ($m in @('v0.1.0','MIT licensed','ClawFactoryNegativeSentinelZZ9',
                  'Studio backend unreachable','Two things are always reachable regardless','Running on http://127.0.0.1:8080',
                  'stops skill installation','PolyForm Perimeter 1.0.0',
-                 'runs entirely on your machine')) {
+                 'runs entirely on your machine',
+                 'Skill installation is now off',
+                 'Your agent can install skills and fetch code from GitHub and npm again')) {
   if ($t.Contains($m)) { "STILLTHERE  $m" } else { "ABSENT      $m" }
 }
 if ($t.Contains('Workspace')) { 'POSCONTROL_OK' } else { 'POSCONTROL_BLIND' }
