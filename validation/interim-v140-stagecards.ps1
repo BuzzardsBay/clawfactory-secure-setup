@@ -100,8 +100,52 @@ Record 'SC.2' 'A live pending card exists, and the hash the panel will show equa
     $(if (-not $srcSha -or -not $cardSha) { 'VOID' } elseif ($srcSha -eq $cardSha) { 'PASS' } else { 'FAIL' }) `
     "sourceSha=$srcSha cardSha=$cardSha equal=$($srcSha -eq $cardSha) minutesLeft=$minsLeft"
 
+Section '3. Independent confirmation that the SHIPPED Studio is the rebuilt 1.3.1'
+# Check 6f asks the operator to read a version string off a page. That is worth
+# having, because it is what a customer sees, but it is the weakest possible
+# evidence about which payload actually landed: a stale bundle can render any
+# string its author typed. The asar digest is the real identity, and it is
+# compared here against the value the build pinned.
+#
+# NOTE ON THE PATH. The first version of this globbed for 'clawfactory-studio'
+# and matched nothing, silently. Studio is a PER-USER NSIS app and installs to
+# %LOCALAPPDATA%\Programs\ClawFactory Studio, WITH A SPACE, per
+# resources/uninstall.ps1 step 4.5. A glob that matches nothing returns an empty
+# string, which reads exactly like a missing file rather than a wrong path.
+$asar = Invoke-WslFile -Tag 'sc-asar' -User 'root' -Body @'
+FOUND=0
+for p in /mnt/c/Users/*/AppData/Local/Programs/"ClawFactory Studio"/resources/app.asar; do
+  if [ -f "$p" ]; then
+    FOUND=1
+    echo "ASAR_PATH=$p"
+    echo "ASAR_SHA=$(sha256sum "$p" | cut -d' ' -f1)"
+    echo "ASAR_BYTES=$(stat -c %s "$p")"
+  fi
+done
+echo "ASAR_FOUND=$FOUND"
+echo '--- CONTROL: the same glob against a name that cannot exist must find nothing ---'
+CN=0
+for p in /mnt/c/Users/*/AppData/Local/Programs/"ClawFactory Studio NOT REAL"/resources/app.asar; do
+  [ -f "$p" ] && CN=1
+done
+echo "CONTROL_FALSE_PATH_FOUND=$CN"
+'@
+W $asar.Out
+$asarSha = if ($asar.Out -match 'ASAR_SHA=([a-f0-9]{64})') { $Matches[1] } else { '' }
+$pinned  = '5c4ffbf420814939579f00f0b8e69e949ba34af20d239ddcdc6cf4da383e2d85'
+$globSane = $asar.Out -match 'CONTROL_FALSE_PATH_FOUND=0'
+# VERDICT TRIAGE. A glob that matches a path it must not match means the search
+# is not discriminating, so a hit proves nothing: VOID. No asar at all means
+# Studio is not installed where the product says it installs, which is a real
+# finding and a FAIL. A digest that differs from the pin means the shipped
+# payload is not the rebuilt 1.3.1, which is the exact drift the pin exists for.
+Record 'SC.3' 'The installed Studio app.asar equals the digest this build pinned' `
+    $(if (-not $globSane) { 'VOID' } elseif ($asarSha -eq $pinned) { 'PASS' } elseif (-not $asarSha) { 'FAIL' } else { 'FAIL' }) `
+    "installedAsarSha=$(if ($asarSha) { $asarSha } else { 'NOT FOUND' }) pinnedAsarSha=$pinned equal=$($asarSha -eq $pinned) globDiscriminates=$globSane"
+
 W ''
 W '================ VALUES FOR THE HANDOVER CARD ================'
+W "HANDOVER_STUDIO_ASAR=$asarSha"
 W "HANDOVER_ATTACH_SHA256=$cardSha"
 W "HANDOVER_MINUTES_LEFT=$minsLeft"
 W "HANDOVER_STAGED_AT_UTC=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))"
