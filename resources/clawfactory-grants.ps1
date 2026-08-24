@@ -1136,10 +1136,16 @@ function Remove-ReadFetchHost {
 # They now have their own nft set, flushed and rebuilt on every run, so this
 # switch actually closes the route rather than appearing to.
 #
-# It DEFAULTS ON. Off would break skill installation and the agent's code
-# fetching on a fresh box, which is a functional regression rather than a safety
-# win, and the product's claim sentence already names the software sources. The
-# switch only ever NARROWS what is reachable.
+# It DEFAULTS ON. Off would break the agent's code fetching from GitHub and npm
+# on a fresh box, which is a functional regression rather than a safety win, and
+# the product's claim sentence already names the software sources. The switch
+# only ever NARROWS what is reachable.
+#
+# OFF DOES NOT STOP SKILL INSTALLATION, and this comment used to say it did.
+# Measured on cfv-169 by completing a real `openclaw skills install` with the
+# switch off: clawhub.ai shares an address with openclaw.ai, a permanent base
+# host no toggle can revoke. Same claim, same wording, in four places; keep them
+# in step.
 #
 # IT NEVER TOUCHES THE PROVIDER ROUTE, which lives in a different set. An agent
 # that cannot reach its model is a bricked product, and there is deliberately no

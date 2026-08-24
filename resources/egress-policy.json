@@ -28,12 +28,18 @@
     "covers are the skill hub, GitHub and npm; the list itself is a root-owned constant in",
     "that script, not a value anyone edits here.",
     "",
-    "WHY ON RATHER THAN OFF. Off would ship a product where skill installation, npm and",
-    "GitHub fail on a fresh box, which is a functional regression rather than a safety win.",
-    "It buys no honesty either: the product's claim sentence names the software sources",
-    "explicitly. The switch only ever NARROWS what is reachable, so the claim holds in both",
-    "positions. An ABSENT toolchain key means a policy file written before this feature and",
-    "is read as ON; an unreadable file denies, because a fault is not a preference.",
+    "WHY ON RATHER THAN OFF. Off would ship a product where npm and GitHub fail on a fresh",
+    "box, which is a functional regression rather than a safety win. It buys no honesty",
+    "either: the product's claim sentence names the software sources explicitly. The switch",
+    "only ever NARROWS what is reachable, so the claim holds in both positions. An ABSENT",
+    "toolchain key means a policy file written before this feature and is read as ON; an",
+    "unreadable file denies, because a fault is not a preference.",
+    "",
+    "WHAT OFF DOES NOT DO. It does NOT stop skill installation, and this paragraph used to",
+    "say that it did. Measured on cfv-169: a real `openclaw skills install` completed with",
+    "the switch off, because clawhub.ai resolves to an address it shares with openclaw.ai,",
+    "a permanent base host no toggle can revoke. That is the address-scoping residual above,",
+    "applied to this switch, and it must be stated wherever the switch is described.",
     "",
     "THE PROVIDER ROUTE IS NOT AFFECTED BY THIS SWITCH and must never be. It lives in",
     "@allowed_ipv4, and an agent that cannot reach its model is a bricked product.",
@@ -60,7 +66,7 @@
     "allow": []
   },
   "toolchain": {
-    "_note": "Enforced by clawfactory-toolchain.sh through the nft set toolchain_ipv4. true means the agent can reach the skill hub, GitHub and npm. false closes that route and STOPS SKILL INSTALLATION. Never affects the AI provider. Managed from Studio; the agent has no write path.",
+    "_note": "Enforced by clawfactory-toolchain.sh through the nft set toolchain_ipv4. true means the agent can reach the skill hub, GitHub and npm. false closes that route and stops the agent fetching code from GitHub and npm. It does NOT stop skill installation: the skill hub shares a network address with ClawFactory's own site, which this switch does not cover, and a real skills install was measured completing with the switch off. Never affects the AI provider. Managed from Studio; the agent has no write path.",
     "enabled": true
   },
   "send_actions": []
