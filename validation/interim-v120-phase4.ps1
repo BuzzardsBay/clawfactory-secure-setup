@@ -162,8 +162,13 @@ $ASSERT 2>&1; echo "reverted_rc=$?"
 # --------------------------------------------- 4. credential confidentiality
 Section "4. Credential unreadable by the agent uid, and absent from every surface"
 $cred = Invoke-WslFile -Tag "s4-$tag" -User 'root' -Body @'
-echo "--- mode ---"
-stat -c '%n %a %U:%G' /etc/clawfactory/send-credential.json 2>&1
+echo "--- mode, MEASURED, in a form the verdict can quote ---"
+if [ -e /etc/clawfactory/send-credential.json ]; then
+  stat -c 'CREDSTAT %n mode=%a owner=%U:%G' /etc/clawfactory/send-credential.json 2>&1
+else
+  echo 'CREDSTAT ABSENT no credential file exists'
+fi
+echo "CREDHOST=$(node -e 'try{const j=require("/etc/clawfactory/send-credential.json");process.stdout.write(String(j.host||""))}catch(e){process.stdout.write("")}' 2>/dev/null)"
 echo '--- SUBJECT: as the agent uid ---'
 su -s /bin/bash -c 'cat /etc/clawfactory/send-credential.json' clawuser 2>&1 | head -2
 echo '--- CONTROL: a file the agent CAN read ---'
@@ -202,9 +207,36 @@ grep -qF -- "$SECRET" /etc/clawfactory/send-credential.json && echo CONTROL_SCAN
 '@
 W $cred.Out
 $unreadable = $cred.Out -match 'Permission denied'
+# THE EVIDENCE FIELD MUST REPORT WHAT WAS MEASURED, NOT WHAT WAS WANTED.
+#
+# This row used to print the literal string '0600 root:root' as its evidence no
+# matter what the box said. It was not a measurement, it was the desired answer,
+# printed unconditionally beside a verdict derived from a different signal
+# entirely. A precondition artifact then read back as the state you would want.
+# The stat line is now emitted in a parseable form and quoted here verbatim.
+$credStat = (($cred.Out -split "`n") | Where-Object { $_ -match '^CREDSTAT ' } | Select-Object -First 1)
+if (-not $credStat) { $credStat = 'CREDSTAT line not emitted' }
+$credAbsent = $cred.Out -match 'CREDSTAT ABSENT'
+# VERDICT TRIAGE. No credential file at all means the agent's read failed with
+# ENOENT rather than EACCES, so the permission boundary was never exercised.
+# That is a missing precondition, not a product verdict.
 Record "S.4.$tag" 'Credential unreadable by the agent uid' `
-    $(if ($unreadable) { 'PASS' } else { 'FAIL' }) '0600 root:root'
-if ($cred.Out -match 'NO_SECRET_CONFIGURED') {
+    $(if ($credAbsent) { 'VOID' } elseif ($unreadable) { 'PASS' } else { 'FAIL' }) `
+    ($credStat.Trim())
+# A LOOPBACK CREDENTIAL IS A SINK CREDENTIAL, AND A SINK CREDENTIAL CANNOT
+# ANSWER THIS QUESTION.
+#
+# Configuring a synthetic credential clears the rows whose blocker was the
+# absence of the file. It does not clear this one. Searching the box for a
+# password invented moments earlier and finding no copies of it proves nothing
+# about whether the product leaks a real secret, and reporting that search as a
+# PASS would be exactly the synthetic-test-wearing-a-real-verdict shape this
+# suite keeps removing. The reason is named rather than implied.
+$synthetic = $cred.Out -match 'CREDHOST=127\.0\.0\.1'
+if ($synthetic) {
+    Record "S.4leak.$tag" 'Credential value absent from logs, receipts, errors, process listing' 'VOID' `
+        'the configured credential points at the loopback sink, so it is synthetic; a zero-hit scan against a password this harness invented measures nothing about a real secret'
+} elseif ($cred.Out -match 'NO_SECRET_CONFIGURED') {
     # VERDICT TRIAGE. Missing precondition, never a product verdict.
     Record "S.4leak.$tag" 'Credential value absent from logs, receipts, errors, process listing' 'VOID' `
         'no real credential configured at run time; a synthetic secret would make this a synthetic test'

@@ -462,8 +462,17 @@ node /usr/local/sbin/clawfactory-sendctl.js list 2>&1
         'queue state and receipt captured above. This row makes NO claim: ARRIVAL is confirmed by Bret in the destination mailbox, which is the only place it can be confirmed. Tracked as a manual check, not as a pass.'
 } else {
     # VERDICT TRIAGE. A missing precondition is never a product verdict.
+    # The old message read "no real SMTP credential configured (credentialPresent=
+    # True)", which is self-contradictory the moment a SINK credential exists, and
+    # a contradictory VOID reason is worse than a terse one: it invites the reader
+    # to decide which half to believe. Name which of the two cases actually holds.
+    $whyVoid = if ($credPresent) {
+        'a credential IS configured but it points at the local sink, and a sink proves transmission, which is already proven, not delivery to a third-party mailbox'
+    } else {
+        'no SMTP credential is configured at all, so there was nothing to deliver with'
+    }
     Record 'G2.198' 'Card #198: external delivery, real credential, third-party mailbox' 'VOID' `
-        "no real SMTP credential configured at run time (credentialPresent=$credPresent). NOT substituted with a local sink: a sink proves transmission, which is already proven, not delivery."
+        "credentialPresent=$credPresent expectRealCredential=$($ExpectRealCredential.IsPresent); $whyVoid"
 }
 
 # -------------------------------------------- test 10 and 13, LAST, real secret
@@ -487,6 +496,7 @@ Record 'G2.10c' 'CONTROL: a world-readable config IS readable by the agent' `
 # read root-side, hashed, and only the hash is compared. A leak is detected by
 # searching each surface for the literal value in a root-only context.
 $t13 = Invoke-WslFile -Tag 'g2t13' -User 'root' -Body @'
+echo "CREDHOST=$(node -e 'try{const j=require("/etc/clawfactory/send-credential.json");process.stdout.write(String(j.host||""))}catch(e){process.stdout.write("")}' 2>/dev/null)"
 SECRET=$(node -e '
 try{const j=require("/etc/clawfactory/send-credential.json");
 process.stdout.write(j.pass||j.password||j.secret||j.appPassword||"");}catch(e){process.stdout.write("");}
@@ -511,7 +521,14 @@ echo '--- CONTROL: the scanner MUST find the secret where it legitimately lives 
 grep -lF -- "$SECRET" /etc/clawfactory/send-credential.json >/dev/null 2>&1 && echo "CONTROL_FOUND_IN_CREDENTIAL_FILE" || echo "CONTROL_FAILED_SCANNER_IS_BLIND"
 '@
 W $t13.Out
-if ($t13.Out -match 'NO_SECRET_CONFIGURED') {
+if ($t13.Out -match 'CREDHOST=127\.0\.0\.1') {
+    # A LOOPBACK CREDENTIAL IS A SINK CREDENTIAL. See the matching note in
+    # interim-v120-phase4.ps1. A sink clears the rows blocked on the file's
+    # absence; it cannot clear a leak scan, because the value being scanned for
+    # was invented by this harness minutes ago.
+    Record 'G2.13' 'Test 13: credential value appears in no log, receipt, error path or process listing' 'VOID' `
+        'the configured credential points at the loopback sink, so it is synthetic; scanning for a password this harness invented measures nothing about a real secret'
+} elseif ($t13.Out -match 'NO_SECRET_CONFIGURED') {
     # VERDICT TRIAGE. Missing precondition, never a product verdict.
     Record 'G2.13' 'Test 13: credential value appears in no log, receipt, error path or process listing' 'VOID' `
         'no real credential configured; a synthetic secret would make this a synthetic test'
