@@ -1,27 +1,39 @@
 # By-hand Studio checks (Studio panel render verification)
 
-Seven checks, all in ClawFactory Studio on the VM over RDP. This is matrix row 11.
+Ten checks, all in ClawFactory Studio on the VM over RDP. This is matrix row 11.
 
-**Updated 2026-08-24 for the v1.4.0 completion run.** Three things changed and each one
-is a defect in the previous version of this file, not a preference:
+**Updated 2026-08-24 (second pass) for the v1.4.1 build.** Everything quoted below was
+verified against the app.asar this build actually ships (sha256 `a64a118f...2d2a49e`),
+not against the source and not against intention: 25 of 25 expected strings PRESENT,
+11 of 11 retired strings ABSENT, with a positive control confirming the bundle was
+readable and a negative sentinel confirming the search was not matching everything.
 
-1. **The SMTP step is gone.** It asked the operator to type a credential that root can
-   write, and it blocked four rows on a person for no reason. The sink credential is now
-   configured from the root tooling before the box is handed over. Nothing about SMTP is
-   asked of you.
-2. **Every check now says where to click and quotes the expected text literally**, so the
-   job is comparing strings rather than judging whether copy is good.
-3. **The two remaining absence-only assertions were paired with positive controls.** Check
-   1 was converted last session. Check 6's "does not say Studio backend unreachable" is the
-   other one, and it now names what the page must positively show. See the audit note at
-   the bottom.
+Five things changed since the v1.4.0 run, and each one is a defect in the previous
+version of this file rather than a preference:
+
+1. **The address count is no longer a fixed number.** Check 1c used to tell you to expect
+   `On. 28 network addresses reachable` and your panel read `On. 25 network addresses
+   reachable.` The count is re-resolved from DNS and drifts between refreshes, so it was
+   never a value to quote. It now asserts a NONZERO count and the exact unit wording.
+2. **The Studio version moved to 1.3.2**, so checks 6 and 7 quote that.
+3. **Check 8 is new**: the corrected OFF notice from card #274, as a presence check with
+   its text quoted word for word.
+4. **Checks 9 and 10 are new**: the honest empty states from card #275, and the way back
+   to the home route from card #273.
+5. **Check 6 no longer tells you not to click the lobster.** It is a link now. The check
+   asks you to click it.
+
+Earlier passes: the SMTP step was removed (it asked for a credential root can write, and
+blocked four rows on a person for no reason), every check says where to click and quotes
+the expected text literally, and the two absence-only assertions were paired with
+positive controls. See the audit note at the bottom.
 
 **Why by hand.** Every other test in this run reads the underlying artefact through the
 root channel. These seven are about what a person actually SEES, and a renderer that
 silently failed to draw a control would pass every structural check while shipping a panel
 nobody can use. Studio is never asked whether it worked; you are.
 
-**Time: about six minutes.** Nothing in checks 1 to 7 has a timer.
+**Time: about nine minutes.** Nothing in checks 1 to 10 has a timer.
 
 ---
 
@@ -32,9 +44,14 @@ and what you should therefore expect to see, is in the handover card.
 
 Open **ClawFactory Studio** from the Start menu.
 
-**Do not switch the software-source toggle off as part of this.** The automated suite
-toggles it in both directions and leaves it on deliberately, and a manual flip in between
-would make those results hard to read. Checks 1 to 7 never require you to move it.
+**CHECK 8 ASKS YOU TO SWITCH THE SOFTWARE-SOURCE TOGGLE OFF AND BACK ON, and that is the
+only place in this file that touches it.** Earlier versions said never to move it, because
+the automated suite toggles it in both directions and a manual flip in between made those
+results hard to read. Card #274 is about the message that appears at the moment you move
+it, and there is no other way for a person to see that message. So: do checks 1 to 7
+first, then check 8, and leave the switch ON when you are done. If you are running this
+alongside the automated toolchain suite, say when you did check 8 so the two can be read
+in order.
 
 **When you are done, LEAVE STUDIO RUNNING.** Phase 5 measures the Studio IPC bridge and it
 VOIDed on the previous box with `processes=0`, refusing to report five vacuously-true
@@ -50,12 +67,17 @@ exact wording you saw.
 
 ```
 1  PASS / FAIL   (if FAIL, the exact paragraph you see)
+1c the exact line you see under the paragraph, copied out, e.g. On. 25 network addresses reachable.
 2  PASS / FAIL   (if FAIL, the exact footnote you see)
 3  PASS / FAIL   (if FAIL, what appeared instead)
 4  PASS / FAIL   (if FAIL, which of the three inputs, and what happened)
 5  PASS / FAIL   (if FAIL, what the list shows afterwards)
 6  PASS / FAIL   (if FAIL, which bullet, and the exact text)
 7  PASS / FAIL   (if FAIL, the exact footer text, both sides)
+8  PASS / FAIL   (copy out BOTH messages you saw, off and on, exactly)
+9  PASS / FAIL   (if FAIL, which panel, and the exact text)
+10 PASS / FAIL   (if FAIL, what happened when you clicked)
+Toggle left ON: YES / NO
 Studio left running: YES / NO
 ```
 
@@ -68,8 +90,29 @@ Studio left running: YES / NO
 
 - [ ] 1a. The card is there.
 - [ ] 1b. It carries a button reading **Switch off** (so the switch currently reads ON).
-- [ ] 1c. Under the paragraph there is a line reading **On.** followed by a count of
-      network addresses. The handover card tells you the number to expect.
+- [ ] 1c. Under the paragraph there is a line of the form
+      **`On. N network addresses reachable.`** — where **N is any number greater than
+      zero**. Copy the line out exactly into the results block; do not judge the number.
+
+**DO NOT EXPECT A PARTICULAR NUMBER, AND THIS IS A CORRECTION TO THIS FILE RATHER THAN
+GUIDANCE.** On cfv-174 the handover card told the operator to expect
+`On. 28 network addresses reachable` and his panel read `On. 25 network addresses
+reachable.` That was a defect in the card, not in the product: the count comes from DNS
+re-resolved on a five-hourly cycle and against hosts that answer from rotating pools, so
+it legitimately differs between two readings minutes apart. Quoting a fixed number invites
+a false FAIL on a healthy box, and worse, invites the next person to explain away a real
+one.
+
+**What DOES fail here:**
+
+- The count is **zero** — `On. 0 network addresses reachable.` The switch reads on with
+  nothing behind it. The panel should be showing its own amber warning in that case;
+  quote both.
+- The line reads **`Off. GitHub and npm are not reachable.`** — the switch is off when it
+  should be on. Stop and say so; checks 3 to 5 are still fine but check 8 assumes it
+  starts on.
+- The unit wording differs from `network address` / `network addresses`, or the word
+  `reachable` is missing. That is a copy change nobody recorded.
 
 **Now compare the paragraph beside it against this, word for word:**
 
@@ -175,25 +218,24 @@ entry from the card has vanished too.
 
 ## 6. The home route and the header
 
-**Where:** the home route is the screen Studio opens on. **Do this check FIRST, before you
-navigate anywhere**, or restart Studio to get back to it.
+**Where:** the home route is the screen Studio opens on. If you have navigated away,
+**click the lobster or the title in the top-left to get back** — see check 10, which is the
+same click made into an assertion.
 
-**DO NOT try to click the lobster or the title to go home. They are not links.** In
-`frontend/src/App.tsx` the lobster is a bare `<span>` and the title a plain `<h1>`, and the
-nav carries no Home entry, so once you leave the home route there is no way back to it by
-clicking. This was reported by the operator and recorded in the v1.3.5 close-out on
-2026-08-22 (section 6, item 5) with the remedy "the check doc should say to use the nav or
-a restart instead". The remedy was never applied, because the finding was written into a
-close-out and never carded, and the operator then hit it again by hand on cfv-174 while
-following this very file. The product defect is now carded; this paragraph is the check
-doc's half of it.
+**This instruction is the opposite of what this file said last time, and deliberately.**
+Until v1.4.1 the lobster was a bare `<span>` and the title a plain `<h1>`, and the nav
+carried no Home entry, so once you left the home route there was no way back by clicking.
+The operator reported it, it went into the v1.3.5 close-out (section 6, item 5) and was
+never carded, and he hit it again by hand on cfv-174 while following this very file. It is
+carded now (#273) and fixed in this build. If clicking the title does NOT take you home,
+that is check 10 failing and it means the shipped Studio is not this build.
 
 **First, what the page MUST show.** This is the positive control, and it is here because
 the bullet after it is an absence check: a page that failed to render at all, or rendered
 blank, would satisfy "does not say Studio backend unreachable" perfectly.
 
 - [ ] 6a. The heading **ClawFactory Studio**.
-- [ ] 6b. A green status pill reading **`ClawFactory Studio v1.3.1`** with
+- [ ] 6b. A green status pill reading **`ClawFactory Studio v1.3.2`** with
       **`Running as a desktop app`** beside or beneath it.
 - [ ] 6c. The paragraph beginning **"This is where you decide what your agent is allowed
       to do."**
@@ -208,11 +250,12 @@ blank, would satisfy "does not say Studio backend unreachable" perfectly.
 
 **And the header:**
 
-- [ ] 6f. The version reads **1.3.1**. This is Studio's own version and it is deliberately
-      NOT the same as the ClawFactory installer's version, which is 1.4.0. **If it says
-      1.3.0, the shipped payload is the OLD Studio and that is a FAIL.**
+- [ ] 6f. The version reads **1.3.2**. This is Studio's own version and it is deliberately
+      NOT the same as the ClawFactory installer's version, which is 1.4.1. **If it says
+      1.3.1 or 1.3.0, the shipped payload is an OLD Studio and that is a FAIL** — and it
+      means checks 8, 9 and 10 are testing the wrong artifact, so record it and stop.
 - [ ] 6g. In the top bar, the version and the word **Templates** are visibly
-      **separated**, not run together as `v1.3.1Templates`. Narrow the window if you want
+      **separated**, not run together as `v1.3.2Templates`. Narrow the window if you want
       to check it holds at smaller widths.
 
 ## 7. The footer, which carries two corrected claims
@@ -233,23 +276,149 @@ is false: every turn goes to the hosted model you chose, carrying whatever the a
 **If the hosted-model half is missing, that is a FAIL** even if everything else on the line
 is right.
 
+## 8. The message you get at the moment you move the switch
+
+**Where:** back on the **Web access** panel, the **Software sources ClawFactory needs**
+card. This is the only check in this file that moves the toggle. Do checks 1 to 7 first.
+
+**Why this exists.** The paragraph on this card (check 1) and the message that appears
+when you *move* the switch are two different pieces of copy, and until v1.4.1 they said
+opposite things — on the same screen, three lines apart. The paragraph said the switch does
+not stop skill installation; the message said it does. cfv-169 measured the message false
+by completing a real `openclaw skills install` with the switch off. Check 1 could never
+have caught it, because check 1 only ever reads the paragraph.
+
+- [ ] 8a. Click **Switch off**. Wait for the button to stop saying **Applying…**.
+- [ ] 8b. A green message appears. Compare it against this, word for word:
+
+> Your agent can no longer fetch code from GitHub or npm. This does not stop skill
+> installation: the skill hub shares a network address with ClawFactory's own site, which
+> this switch does not cover. Its AI provider is unaffected.
+
+- [ ] 8c. The line under the paragraph now reads **`Off. GitHub and npm are not
+      reachable.`**
+- [ ] 8d. Click **Switch on**. A green message appears reading, word for word:
+
+> Your agent can reach the skill hub, GitHub and npm again. Its AI provider is unaffected.
+
+- [ ] 8e. The line under the paragraph is back to **`On. N network addresses reachable.`**
+      with N greater than zero. **N will probably NOT be the number you saw at check 1c.
+      That is expected** — the set is flushed and re-resolved when you switch it on.
+- [ ] 8f. **Leave the switch ON.**
+
+Punctuation note, same as check 1: the apostrophe in "ClawFactory's" renders as a curly
+quote. Not a fail.
+
+**THIS IS A PRESENCE CHECK. Copy both messages out in full**, pass or fail, so the wording
+is on record. Three ways it FAILS:
+
+- The OFF message says **`Skill installation is now off`**. That is the old, false copy and
+  its presence means the shipped Studio is not this build.
+- The ON message says the agent **can install skills ... again**. Also old copy, and wrong
+  in the other direction: it implies the switch had stopped skill installation.
+- No message appears at all, or it appears and the panel's own paragraph and status line do
+  not change with it. A notice that fires without the state changing is worse than no
+  notice.
+
+## 9. The panels that are not in this release say so
+
+**Where:** the top nav. Click each of these in turn: **Templates**, **Files**, **Activity**,
+**Chat**, **Agents**, **Skills**, **Settings**.
+
+**Why this exists.** Studio's HTTP backend was retired when it became a desktop app. Four
+panels were rewired and work; the rest still called the retired transport and each rendered
+its own failure banner naming an internal scaffold and a dead endpoint — e.g. *"Couldn't
+load settings. This panel is not wired in the desktop shell scaffold yet ... (GET
+/api/settings)"*. Templates is the FIRST nav item, so that could be a new customer's first
+impression. Nothing had failed; the feature is not here.
+
+For **each** of the seven:
+
+- [ ] 9a. The page shows a heading naming the panel, then a line reading exactly
+      **`<Panel> is not part of this release.`** (e.g. `Settings is not part of this
+      release.`)
+- [ ] 9b. A short sentence saying what the panel will do.
+- [ ] 9c. A line containing **`Nothing here failed and nothing is misconfigured`**.
+- [ ] 9d. A second card headed **`What you can use today`** listing **Workspace**,
+      **Recently deleted**, **Approvals** and **Web access** as links.
+- [ ] 9e. Click one of those links and confirm it goes to a working panel.
+
+**FAIL looks like:** any of the seven still shows a red error; any of them mentions
+**`scaffold`**, **`/api/`**, **`backend`** or **`unreachable`**; a blank page; or a page
+that says only "Page not found."
+
+**9e is the positive control and it is not optional.** 9a to 9d are satisfied by a page
+that renders the empty state and nothing else in the app working at all. 9e proves the
+shell still navigates.
+
+## 10. The way back to the home route
+
+**Where:** anywhere that is not the home route. Use **Settings** from check 9.
+
+- [ ] 10a. From the Settings panel, click the **lobster** in the top-left.
+- [ ] 10b. You land on the home route: the heading **ClawFactory Studio** and the paragraph
+      beginning **"This is where you decide what your agent is allowed to do."**
+- [ ] 10c. Go to **Web access**, then click the **words "ClawFactory Studio"** in the
+      top-left (not the lobster). You land on the home route again.
+
+**Why both halves.** The whole title block is one link, so either click should work, and
+the operator's instinct on two separate boxes was to click the lobster. Testing only one of
+them would leave the other unmeasured.
+
+**FAIL looks like:** either click does nothing; the cursor does not change to a hand over
+the title block; or you land somewhere that is not the home route. Before this build there
+was no click path home at all — the operator had to restart Studio.
+
 ---
 
-## Audit note: which of these were absence-only, and what was done
+## Audit note: the shape of every assertion in this file
 
-Checked all seven, one assertion at a time, on 2026-08-24.
+Audited one assertion at a time on 2026-08-24 (second pass, all ten checks). The rule
+applied: **an absence-only assertion is not permitted to stand alone.** A page that failed
+to render, rendered blank, or never loaded satisfies every "does not say X" perfectly, and
+a renderer that silently drew nothing is the exact failure this by-hand exercise exists to
+catch. Where an absence matters, it is kept — after a positive assertion, and stated as
+meaning nothing until that passes.
 
-| Check | Shape | Action |
+| Check | Shape now | What changed this pass |
 | --- | --- | --- |
-| 1 | was absence-only; converted last session | verified against the shipped source, unchanged |
-| 2 | presence, word for word | unchanged |
-| 3 | presence | expected strings quoted literally; named as the control for 4 and 5 |
-| 4 | presence of a refusal | its positive control (check 3) now stated rather than implied |
-| 5 | mixed | expected strings quoted; the surviving seeded entry is now an assertion |
-| 6 | **bullet 6e was absence-only** | 6a to 6d added as the positive control, stated as such |
-| 7 | presence, both sides, plus a named wrong version | unchanged |
+| 1a–1b | presence of a card and a button | unchanged |
+| **1c** | **was a presence check against a WRONG CONSTANT** | now asserts nonzero + the exact unit string, never a number. See below. |
+| 1d | presence, word for word | unchanged; re-verified against the shipped `app.asar`, not the source |
+| 2 | presence, word for word, with one clause named as decisive | unchanged |
+| 3 | presence of two exact strings | unchanged; still named as the positive control for 4 and 5 |
+| 4 | presence of a refusal, ×3 inputs | unchanged; its control (check 3) stated rather than implied |
+| 5 | presence + a survival assertion on the seeded entry | unchanged |
+| 6a–6d | presence, four assertions | unchanged; 6b's version string updated to 1.3.2 |
+| 6e | absence, **behind 6a–6d** | unchanged shape; still states it means nothing until 6a–6d pass |
+| 6f–6g | presence, plus a named wrong version | 1.3.1 → 1.3.2; the named wrong versions are now 1.3.1 and 1.3.0 |
+| 7 | presence both sides, plus a named wrong licence | unchanged |
+| **8** | **NEW.** presence, word for word, ×2 messages, plus a state assertion | new for card #274 |
+| **9** | **NEW.** presence ×4 per panel, ×7 panels, + a navigation control (9e) | new for card #275 |
+| **10** | **NEW.** two positive click assertions | new for card #273 |
 
-**Two were absence-only, not one.** Check 1 was found and fixed last session. Check 6's
-"does not say Studio backend unreachable" is the second, and it was the more dangerous of
-the two, because the failure it cannot see is a page that did not render, which is the
-exact failure the whole by-hand exercise exists to catch.
+**Three defects in this file were found and fixed this pass.**
+
+1. **Check 1c asserted a constant that was never constant.** It told the operator to expect
+   `On. 28 network addresses reachable`; his panel read `On. 25 network addresses
+   reachable.` and he correctly reported the mismatch. The count is re-resolved from DNS
+   against hosts behind rotating pools, so two readings minutes apart legitimately differ.
+   A check that fails on a healthy box teaches the next person to explain away the day it
+   fails on a sick one. Now: nonzero, plus the exact unit wording, plus the number copied
+   out as evidence rather than judged.
+2. **Check 6 told the operator not to click the lobster**, because it was not a link. He
+   had already reported that; it was recorded in a close-out, never carded, and this file
+   was rewritten in the same session that recorded it without the instruction being fixed.
+   He then hit it again by hand. The product side is fixed (#273) and check 10 now asserts
+   the click works.
+3. **Check 6b and 6f quoted version 1.3.1**, which this build no longer ships. Both now
+   quote 1.3.2, verified against the built bundle rather than against intention — the
+   failure mode being avoided is a check that asserts copy no artifact produces, which
+   turns a green run into a test of nothing.
+
+**A note on checks 8 and 9, which are the reason this file grew.** Both cover ground no
+automated probe can. Check 8's subject is a TRANSIENT message that exists only in the
+instant a person moves a control; nothing in the automated suite moves it and watches. And
+check 9's subject is what a new customer sees on their first click, which is a judgement
+about honesty rather than a string comparison — the string comparison is there so the
+judgement has something to stand on.
