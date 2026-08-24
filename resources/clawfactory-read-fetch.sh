@@ -34,7 +34,27 @@ set -uo pipefail
 POLICY=/etc/clawfactory/egress-policy.json
 IPS_FILE=/etc/clawfactory/read-fetch-ips.txt
 HOSTS_FILE=/etc/clawfactory/read-fetch-hosts.txt
+MAP_FILE=/etc/clawfactory/read-fetch-ips.map
 MAX_IPS=512
+
+# How many times to resolve each host before building the set.
+#
+# THIS USED TO BE ONE, AND ONE IS WRONG FOR THE SAME REASON IT IS WRONG IN
+# clawfactory-toolchain.sh. A rotating pool answers with a different address on
+# roughly every other lookup, so a set built from a single lookup misses the
+# address the next connection actually uses and the host is intermittently
+# unreachable while the panel still lists it. The toolchain resolver has carried
+# a three-pass union since it was written; this one did not, and the difference
+# was never deliberate. A site the USER allowed failing intermittently is worse
+# than a software source doing it, because the user chose that site by hand.
+#
+# Kept identical to RESOLVE_PASSES in clawfactory-toolchain.sh on purpose. If
+# one moves, move both.
+RESOLVE_PASSES=3
+
+# See the retention block in section 3, and the matching constant in
+# clawfactory-toolchain.sh.
+RETAIN_MAX_AGE=86400
 
 note() { echo "[read-fetch] $*"; }
 loud() { echo "[read-fetch] $*" >&2; }
@@ -103,9 +123,67 @@ if [ "$POLICY_OK" = "1" ]; then
 fi
 
 # --- 3. Resolve, with a cap that is announced rather than silent -------------
+#
+# RETENTION, AND WHY IT IS PER-HOST. Until v1.4.1 a run that resolved nothing
+# wrote an EMPTY file. At boot that is destructive rather than merely cautious:
+# fw-apply.sh replays the persisted addresses BEFORE DNS is necessarily up, and
+# a resolver run in that window emptied the set it had just replayed. A site the
+# USER allowed then stopped working while the panel still listed it -- Guard 3's
+# headline feature failing quietly on the user's own choice.
+#
+# THE REVOCATION GUARANTEE, WHICH MATTERS MORE HERE THAN IN THE TOOLCHAIN
+# RESOLVER, BECAUSE THIS LIST IS THE USER'S. Retention is keyed by HOST and the
+# map is rebuilt from $HOSTS, which is the list just parsed out of the policy
+# file. A host the user REMOVED in Studio is not in $HOSTS, so it is never
+# looked up, nothing is carried forward for it, and its old lines are dropped
+# when the map is rewritten below. There is no path by which a removed site
+# returns at boot. An unreadable or malformed policy leaves $HOSTS empty, so the
+# same rewrite empties both files: a fault denies everything.
+#
+# $MAP_FILE input shapes are decided exactly as in clawfactory-toolchain.sh:
+# absent or empty means no retention; a malformed line is DROPPED and counted
+# rather than guessed at; the address is re-validated against a strict IPv4
+# pattern before it can reach the firewall; a future timestamp is a fault and
+# expires immediately. Every one of those failures narrows the set.
+NOW="$(date +%s)"
+NEWMAP="${MAP_FILE}.tmp"
+: > "$NEWMAP"
+chmod 644 "$NEWMAP" 2>/dev/null || true
+
+MAP_BAD=0
+if [ -f "$MAP_FILE" ]; then
+    MAP_BAD="$(awk -F'\t' '
+        NF != 3 { bad++; next }
+        $3 !~ /^[0-9]+$/ { bad++; next }
+        $2 !~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { bad++; next }
+        END { print bad + 0 }
+    ' "$MAP_FILE" 2>/dev/null || echo 0)"
+fi
+[ -n "$MAP_BAD" ] || MAP_BAD=0
+if [ "$MAP_BAD" -gt 0 ]; then
+    loud "$MAP_FILE holds $MAP_BAD malformed line(s); each is DROPPED rather than guessed at, so those addresses are not carried forward"
+fi
+
+retain_for() {
+    [ -f "$MAP_FILE" ] || return 0
+    awk -F'\t' -v h="$1" -v now="$NOW" -v maxage="$RETAIN_MAX_AGE" '
+        NF != 3 { next }
+        $1 != h { next }
+        $3 !~ /^[0-9]+$/ { next }
+        $2 !~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { next }
+        (now - $3) < 0 { next }
+        (now - $3) > maxage { next }
+        { print $2 "\t" $3 }
+    ' "$MAP_FILE"
+}
+
 RESOLVED=""
 COUNT=0
 TRUNCATED=0
+HOSTS_TOTAL=0
+HOSTS_OK=0
+HOSTS_FAILED=0
+RETAINED=0
 for h in $HOSTS; do
     # Belt and braces: the node filter already refused anything but a hostname
     # or an IPv4 literal, and this refuses it again before the value reaches a
@@ -114,10 +192,31 @@ for h in $HOSTS; do
     case "$h" in
         *[!a-z0-9.-]*|-*|.*|"") loud "skipping unexpected destination: $h"; continue ;;
     esac
-    GOT="$(getent ahostsv4 "$h" 2>/dev/null | awk '{print $1}' | sort -u)"
-    if [ -z "$GOT" ]; then
-        loud "cannot resolve $h; it stays denied"
-        continue
+    HOSTS_TOTAL=$((HOSTS_TOTAL + 1))
+    # Several passes, unioned. See RESOLVE_PASSES above.
+    GOT=""
+    p=0
+    while [ "$p" -lt "$RESOLVE_PASSES" ]; do
+        GOT="$GOT $(getent ahostsv4 "$h" 2>/dev/null | awk '{print $1}')"
+        p=$((p + 1))
+    done
+    GOT="$(printf '%s\n' $GOT | sed '/^$/d' | sort -u)"
+    if [ -n "$GOT" ]; then
+        HOSTS_OK=$((HOSTS_OK + 1))
+        for ip in $GOT; do printf '%s\t%s\t%s\n' "$h" "$ip" "$NOW" >> "$NEWMAP"; done
+    else
+        HOSTS_FAILED=$((HOSTS_FAILED + 1))
+        KEPT="$(retain_for "$h")"
+        if [ -n "$KEPT" ]; then
+            NKEPT="$(printf '%s\n' "$KEPT" | sed '/^$/d' | wc -l | tr -d ' ')"
+            RETAINED=$((RETAINED + NKEPT))
+            loud "cannot resolve $h right now; KEEPING the $NKEPT address(es) last resolved for it rather than emptying the set. You allowed this site, so a lookup failure denies it rather than the site being dropped, and the addresses expire after $RETAIN_MAX_AGE seconds without a successful lookup."
+            GOT="$(printf '%s\n' "$KEPT" | awk -F'\t' 'NF==2 {print $1}')"
+            printf '%s\n' "$KEPT" | awk -F'\t' -v h="$h" 'NF==2 {printf "%s\t%s\t%s\n", h, $1, $2}' >> "$NEWMAP"
+        else
+            loud "cannot resolve $h and nothing recent is recorded for it; it stays denied"
+            continue
+        fi
     fi
     for ip in $GOT; do
         if [ "$COUNT" -ge "$MAX_IPS" ]; then TRUNCATED=1; break; fi
@@ -130,9 +229,15 @@ if [ "$TRUNCATED" = "1" ]; then
 fi
 
 # --- 4. Persist, so the boot path rebuilds the same set ----------------------
+# The map is rewritten from the CURRENT host list on every run, including the
+# empty one. That is what makes a removal take effect: a host the user deleted
+# contributes no lines here, so nothing about it survives into the next boot.
 printf '%s\n' $RESOLVED | sed '/^$/d' | sort -u > "$IPS_FILE"
 chown root:root "$IPS_FILE" 2>/dev/null || true
 chmod 644 "$IPS_FILE" 2>/dev/null || true
+mv -f "$NEWMAP" "$MAP_FILE" 2>/dev/null || { loud "could not update $MAP_FILE; retention will use the previous copy"; rm -f "$NEWMAP" 2>/dev/null || true; }
+chown root:root "$MAP_FILE" 2>/dev/null || true
+chmod 644 "$MAP_FILE" 2>/dev/null || true
 
 # --- 5. Apply to the live firewall ------------------------------------------
 if [ "$BACKEND" = "nftables" ]; then
@@ -155,5 +260,8 @@ fi
 
 NHOSTS="$(printf '%s\n' $HOSTS | sed '/^$/d' | wc -l | tr -d ' ')"
 NIPS="$(wc -l < "$IPS_FILE" | tr -d ' ')"
+# Machine-readable, for clawfactory-egress-refresh.sh to decide whether DNS was
+# up. See the matching TOOLCHAIN_STATUS line in clawfactory-toolchain.sh.
+note "READFETCH_STATUS hosts=$HOSTS_TOTAL resolved=$HOSTS_OK failed=$HOSTS_FAILED retained=$RETAINED addresses=$NIPS backend=$BACKEND"
 note "backend=$BACKEND hosts=$NHOSTS addresses=$NIPS (0 hosts means every read-fetch destination is denied)"
 exit 0
