@@ -146,7 +146,30 @@ $outFile   = Retrieve-VmFile "C:\cfv\jobs\$JobName.out" "$JobName-out-$VmName.tx
 # having one channel; the second one is not decoration.
 $probeName = ($leaf -replace '\.ps1$', '') -replace '^interim-v\d+-', ''
 $transcript = Retrieve-VmFile "C:\cfv\$probeName-out-probe.txt" "$JobName-probe-$VmName.txt" (Join-Path $dir "$JobName-probe.txt")
-$resJson    = Retrieve-VmFile "C:\cfv\$probeName-results.json"  "$JobName-results-$VmName.json" (Join-Path $dir "$JobName-results.json")
+# THE RESULTS FILE MOVES WHEN THE PHASE IS RUN POST-REBOOT, AND PULLING THE
+# WRONG ONE RESTATES A PREVIOUS RUN'S VERDICT AS THIS ONE'S.
+#
+# interim-v120-phase4.ps1 and interim-v120-phase6.ps1 both write
+# '<probe>-results-postreboot.json' under -PostReboot and '<probe>-results.json'
+# otherwise. This line only ever asked for the second, so a post-reboot job
+# retrieved the file the PRE pass had left on the box: same name, older content,
+# no error anywhere. On cfv-174 that produced a verdict table tagged .PRE for a
+# run whose own transcript said pass=POSTREBOOT, and tests that -PostReboot
+# deliberately skips appeared in the results as though they had run.
+#
+# Stale evidence presented as current is worse than missing evidence, because
+# nothing about it looks wrong. Ask for the post-reboot name FIRST when the args
+# say post-reboot, and fall back only if it is genuinely absent.
+$resCandidates = if ($ScriptArgs -match '-PostReboot') {
+    @("$probeName-results-postreboot.json", "$probeName-results.json")
+} else {
+    @("$probeName-results.json")
+}
+$resJson = $null
+foreach ($rc in $resCandidates) {
+    $resJson = Retrieve-VmFile "C:\cfv\$rc" "$JobName-results-$VmName.json" (Join-Path $dir "$JobName-results.json")
+    if ($resJson) { Say "  results file: $rc" DarkGray; break }
+}
 
 $haveEvidence = $false
 foreach ($f in @($outFile, $transcript)) {
