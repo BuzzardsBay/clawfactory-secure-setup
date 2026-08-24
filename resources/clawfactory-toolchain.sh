@@ -16,13 +16,21 @@
 # TOOLCHAIN hosts below move into their own set, which this script flushes and
 # rebuilds on every run, so the user's switch actually takes effect.
 #
-# WHY NOT DEFAULT OFF. Defaulting off ships a product where skill installation,
-# npm and GitHub fail on a fresh box, which is a functional regression in the
-# agent's core workflows. It also buys no honesty: the claim sentence the product
-# makes already names the software sources explicitly, so nothing is being
-# concealed by leaving them reachable. What the toggle buys is CONTROL. A user
-# who wants a narrower box can have one, and accepts that skill install stops
-# working. The toggle only ever NARROWS, so the claim sentence holds either way.
+# WHY NOT DEFAULT OFF. Defaulting off ships a product where npm and GitHub fail
+# on a fresh box, which is a functional regression in the agent's core workflows.
+# It also buys no honesty: the claim sentence the product makes already names the
+# software sources explicitly, so nothing is being concealed by leaving them
+# reachable. What the toggle buys is CONTROL. A user who wants a narrower box can
+# have one, and accepts that fetching code from GitHub and npm stops working. The
+# toggle only ever NARROWS, so the claim sentence holds either way.
+#
+# THIS COMMENT USED TO SAY THE TOGGLE STOPS SKILL INSTALLATION. IT DOES NOT, and
+# that was measured on cfv-169 by completing a real `openclaw skills install`
+# with the switch off: clawhub.ai resolves to an address it shares with
+# openclaw.ai, which is a permanent base host no toggle can revoke. The OFF
+# message at the end of this file has said so since v1.3.x; this block and three
+# other places had not been corrected, which is how the product came to state
+# both readings at once. If you change one of them, change all of them.
 #
 # WHY A THIRD SET RATHER THAN REUSING @allowed_ipv4. Exactly the reason Guard 3
 # needed a second one, applied again. @allowed_ipv4 is refreshed ADDITIVELY by
@@ -50,7 +58,19 @@ set -uo pipefail
 
 POLICY=/etc/clawfactory/egress-policy.json
 IPS_FILE=/etc/clawfactory/toolchain-ips.txt
+MAP_FILE=/etc/clawfactory/toolchain-ips.map
 MAX_IPS=512
+
+# How long a previously-resolved address may be carried forward for a host that
+# will not resolve RIGHT NOW. See the retention block in section 3.
+#
+# Twenty-four hours, and the bound is the point. Without one, a host that stops
+# resolving forever would keep its addresses forever and the set would drift
+# into being a permanent record of every address the host ever had. With one,
+# the failure direction is denial: after a day of failed lookups the route
+# closes on its own, which is the same direction every other failure path in
+# this file takes.
+RETAIN_MAX_AGE=86400
 
 # THE TOOLCHAIN HOST LIST, and it lives HERE on purpose.
 #
@@ -190,9 +210,78 @@ else
 fi
 
 # --- 3. Resolve, only if enabled --------------------------------------------
+#
+# RETENTION, AND WHY IT IS PER-HOST. Until v1.4.1 a run that resolved nothing
+# wrote an EMPTY file, and that was fatal in one specific window: at boot,
+# fw-apply.sh replays the persisted addresses BEFORE DNS is necessarily up, and
+# a resolver run in that window destroyed the set it had just replayed. The
+# route then stayed dead for up to five hours while the panel reported a live
+# address count. So a host that will not resolve now keeps the addresses that
+# were recorded for IT, from $MAP_FILE, bounded by $RETAIN_MAX_AGE.
+#
+# PER-HOST, NOT WHOLE-FILE, AND THAT IS THE REVOCATION GUARANTEE. The map is
+# rebuilt from the CURRENT host list on every run, so an address is only ever
+# carried forward for a host that is still on the list. Nothing that left the
+# list can come back through this path. For the toolchain the list is a
+# root-owned constant, so the only revocation vector is the toggle -- and this
+# whole block is inside `if [ "$ENABLED" = "1" ]`, so with the switch OFF
+# nothing is resolved, nothing is retained, and section 4 truncates BOTH files.
+# A user-closed route cannot be reopened at boot.
+#
+# $MAP_FILE INPUT SHAPES, all decided here rather than left to awk's defaults:
+#   absent / empty  -> no retention. A fresh install, or a box upgraded from a
+#                      build that predates this file. Behaves exactly as before.
+#   well-formed     -> used, if the recorded epoch is within RETAIN_MAX_AGE.
+#   wrong field count, non-numeric epoch, non-IPv4 address, epoch in the future
+#                   -> the LINE is dropped and counted. A fault denies, and here
+#                      denying means less retention, which is the narrow
+#                      direction. Reported so it is not silent.
+#   hostile         -> the file is root:root 0644 and only root-owned code
+#                      writes it, but the address is re-validated against a
+#                      strict IPv4 pattern before it can reach `nft add`, so a
+#                      tampered line cannot inject a command or a wider element.
+NOW="$(date +%s)"
+NEWMAP="${MAP_FILE}.tmp"
+: > "$NEWMAP"
+chmod 644 "$NEWMAP" 2>/dev/null || true
+
+MAP_BAD=0
+if [ -f "$MAP_FILE" ]; then
+    MAP_BAD="$(awk -F'\t' '
+        NF != 3 { bad++; next }
+        $3 !~ /^[0-9]+$/ { bad++; next }
+        $2 !~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { bad++; next }
+        END { print bad + 0 }
+    ' "$MAP_FILE" 2>/dev/null || echo 0)"
+fi
+[ -n "$MAP_BAD" ] || MAP_BAD=0
+if [ "$MAP_BAD" -gt 0 ]; then
+    loud "$MAP_FILE holds $MAP_BAD malformed line(s); each is DROPPED rather than guessed at, so those addresses are not carried forward"
+fi
+
+# Every valid, unexpired map entry for one host, as "ip<TAB>epoch". The ORIGINAL
+# epoch is preserved on the way out, so retention cannot renew itself: an
+# address carried forward keeps ageing and expires on schedule.
+retain_for() {
+    [ -f "$MAP_FILE" ] || return 0
+    awk -F'\t' -v h="$1" -v now="$NOW" -v maxage="$RETAIN_MAX_AGE" '
+        NF != 3 { next }
+        $1 != h { next }
+        $3 !~ /^[0-9]+$/ { next }
+        $2 !~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { next }
+        (now - $3) < 0 { next }
+        (now - $3) > maxage { next }
+        { print $2 "\t" $3 }
+    ' "$MAP_FILE"
+}
+
 RESOLVED=""
 COUNT=0
 TRUNCATED=0
+HOSTS_TOTAL=0
+HOSTS_OK=0
+HOSTS_FAILED=0
+RETAINED=0
 if [ "$ENABLED" = "1" ]; then
     for h in $TOOLCHAIN_HOSTS; do
         # Belt and braces. The list is a root-owned constant in this file rather
@@ -202,6 +291,7 @@ if [ "$ENABLED" = "1" ]; then
         case "$h" in
             *[!a-z0-9.-]*|-*|.*|"") loud "skipping unexpected toolchain host: $h"; continue ;;
         esac
+        HOSTS_TOTAL=$((HOSTS_TOTAL + 1))
         # Several passes, unioned. See RESOLVE_PASSES above: a single lookup misses
         # half of a rotating pool, and the host is then intermittently unreachable
         # while the switch reads ON.
@@ -212,9 +302,22 @@ if [ "$ENABLED" = "1" ]; then
             p=$((p + 1))
         done
         GOT="$(printf '%s\n' $GOT | sed '/^$/d' | sort -u)"
-        if [ -z "$GOT" ]; then
-            loud "cannot resolve $h; it stays denied"
-            continue
+        if [ -n "$GOT" ]; then
+            HOSTS_OK=$((HOSTS_OK + 1))
+            for ip in $GOT; do printf '%s\t%s\t%s\n' "$h" "$ip" "$NOW" >> "$NEWMAP"; done
+        else
+            HOSTS_FAILED=$((HOSTS_FAILED + 1))
+            KEPT="$(retain_for "$h")"
+            if [ -n "$KEPT" ]; then
+                NKEPT="$(printf '%s\n' "$KEPT" | sed '/^$/d' | wc -l | tr -d ' ')"
+                RETAINED=$((RETAINED + NKEPT))
+                loud "cannot resolve $h right now; KEEPING the $NKEPT address(es) last resolved for it rather than emptying the set. This is the same or a narrower set, never a wider one, and it expires after $RETAIN_MAX_AGE seconds without a successful lookup."
+                GOT="$(printf '%s\n' "$KEPT" | awk -F'\t' 'NF==2 {print $1}')"
+                printf '%s\n' "$KEPT" | awk -F'\t' -v h="$h" 'NF==2 {printf "%s\t%s\t%s\n", h, $1, $2}' >> "$NEWMAP"
+            else
+                loud "cannot resolve $h and nothing recent is recorded for it; it stays denied"
+                continue
+            fi
         fi
         for ip in $GOT; do
             if [ "$COUNT" -ge "$MAX_IPS" ]; then TRUNCATED=1; break; fi
@@ -228,12 +331,16 @@ if [ "$ENABLED" = "1" ]; then
 fi
 
 # --- 4. Persist, so the boot path rebuilds the same set ----------------------
-# Written unconditionally. When the toggle is OFF this TRUNCATES the file to
-# empty, which is the point: fw-apply.sh reads it at boot, and a stale file would
-# re-open at the next restart a route the user closed.
+# Written unconditionally. When the toggle is OFF this TRUNCATES both files to
+# empty, which is the point: fw-apply.sh reads the address file at boot, and a
+# stale file would re-open at the next restart a route the user closed. The map
+# is truncated with it so a closed route leaves no retention fuel behind either.
 printf '%s\n' $RESOLVED | sed '/^$/d' | sort -u > "$IPS_FILE"
 chown root:root "$IPS_FILE" 2>/dev/null || true
 chmod 644 "$IPS_FILE" 2>/dev/null || true
+mv -f "$NEWMAP" "$MAP_FILE" 2>/dev/null || { loud "could not update $MAP_FILE; retention will use the previous copy"; rm -f "$NEWMAP" 2>/dev/null || true; }
+chown root:root "$MAP_FILE" 2>/dev/null || true
+chmod 644 "$MAP_FILE" 2>/dev/null || true
 
 # --- 5. Apply to the live firewall ------------------------------------------
 if [ "$BACKEND" = "nftables" ]; then
@@ -255,6 +362,13 @@ elif [ "$BACKEND" = "iptables-legacy" ]; then
 fi
 
 NIPS="$(wc -l < "$IPS_FILE" | tr -d ' ')"
+# A MACHINE-READABLE LINE, for the boot refresh to decide whether to try again.
+# `failed` is the field that matters: it counts hosts this run could not resolve
+# AT ALL, which at boot means DNS was not up yet. clawfactory-egress-refresh.sh
+# waits on this value rather than on a fixed sleep. `retained` is printed beside
+# it so a run that looks healthy because of retention cannot be mistaken for one
+# that actually resolved.
+note "TOOLCHAIN_STATUS enabled=$ENABLED hosts=$HOSTS_TOTAL resolved=$HOSTS_OK failed=$HOSTS_FAILED retained=$RETAINED addresses=$NIPS backend=$BACKEND"
 if [ "$ENABLED" = "1" ]; then
     note "backend=$BACKEND toolchain=ON addresses=$NIPS (skill installation, GitHub and npm are reachable)"
 else

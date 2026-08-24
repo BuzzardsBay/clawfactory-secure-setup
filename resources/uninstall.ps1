@@ -382,8 +382,20 @@ sudo -u clawuser XDG_RUNTIME_DIR=/run/user/1000 systemctl --user daemon-reload 2
 # /usr/bin/openclaw below drops the shim; the real .mjs is removed too.
 rm -f /usr/local/sbin/clawfactory-turn-gate.sh /usr/local/sbin/clawfactory-spend-check.js /usr/local/sbin/clawfactory-dns-resolvers.sh /usr/local/sbin/clawfactory-fw-apply.sh 2>/dev/null
 # Guard 3: the read-fetch resolver and its root-only control tool. The allowlist
-# itself lives in /etc/clawfactory, which is removed wholesale further down.
-rm -f /usr/local/sbin/clawfactory-read-fetch.sh /usr/local/sbin/clawfactory-fetchctl.js /usr/local/sbin/clawfactory-fetchctl 2>/dev/null
+# itself lives in /etc/clawfactory, which is removed wholesale further down --
+# and that includes the two *-ips.map retention files added in v1.4.1.
+# clawfactory-toolchain.sh was missing from this list -- a pre-existing leftover,
+# noticed while adding the boot unit below. Not a security gap (the file is inert
+# without the firewall and the policy it reads), but a file the uninstaller
+# claims to clean and did not.
+rm -f /usr/local/sbin/clawfactory-read-fetch.sh /usr/local/sbin/clawfactory-toolchain.sh /usr/local/sbin/clawfactory-fetchctl.js /usr/local/sbin/clawfactory-fetchctl 2>/dev/null
+# Guard 3, v1.4.1: the boot-time refresh unit. Disabled BEFORE its script is
+# removed, so systemd is not left with an enabled unit pointing at nothing --
+# which on the next boot would be a failed unit in the journal of a machine that
+# no longer has ClawFactory on it.
+systemctl disable --now clawfactory-egress-refresh.service 2>/dev/null
+rm -f /etc/systemd/system/clawfactory-egress-refresh.service /usr/local/sbin/clawfactory-egress-refresh.sh 2>/dev/null
+systemctl daemon-reload 2>/dev/null
 # Guard 1: delete quarantine. Say how many held files go with it -- these are the
 # user's own files, and removing them silently during an uninstall is exactly the
 # surprise this guard exists to prevent.

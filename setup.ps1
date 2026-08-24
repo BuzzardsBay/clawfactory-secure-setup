@@ -2285,8 +2285,31 @@ set -e
 # this very timer.
 AUX_HOSTS="api.anthropic.com console.anthropic.com api.openai.com auth.openai.com api.x.ai"
 BACKEND="$(cat /etc/clawfactory/fw-backend 2>/dev/null || echo nftables)"
+TABLE_PRESENT=1
 if [ "$BACKEND" = "nftables" ]; then
-    nft list table inet clawfactory >/dev/null 2>&1 || exit 0
+    # THIS USED TO BE `... || exit 0`, AND THAT EXIT SKIPPED THE TWO GUARD 3
+    # RESOLVER CALLS AT THE BOTTOM OF THIS FILE.
+    #
+    # The timer that runs this script carries OnBootSec=30s and has NO ordering
+    # against clawfactory-fw.service, which waits on network-online.target. So
+    # at thirty seconds after a distro boot the table can legitimately not exist
+    # yet -- and the script then exited 0, ninety lines above the resolvers,
+    # while systemd recorded a successful run. The user-visible result was
+    # measured on cfv-174: after a reboot the Web access panel reported "On. 28
+    # network addresses reachable" while GitHub and npm were unreachable,
+    # because the boot path had replayed a stale set and nothing re-resolved it
+    # for up to five hours.
+    #
+    # The provider block below genuinely cannot run without the table, so it is
+    # now SKIPPED rather than the whole script being abandoned. Guard 3's
+    # resolvers do their own backend detection and their own set checks, and
+    # they must always get their turn.
+    if ! nft list table inet clawfactory >/dev/null 2>&1; then
+        TABLE_PRESENT=0
+        echo "[clawfactory-fw] nft table inet clawfactory is not present yet; skipping the provider re-add. The Guard 3 resolvers below still run." >&2
+    fi
+fi
+if [ "$BACKEND" = "nftables" ] && [ "$TABLE_PRESENT" = "1" ]; then
     # PERSIST, matching the iptables branch below and the install-time copy.
     # Same defect, same reason: without this the refreshed addresses live only in
     # the running set, so a ruleset re-apply between ticks drops the provider
@@ -2310,17 +2333,28 @@ if [ "$BACKEND" = "nftables" ]; then
         done
     done
 elif [ "$BACKEND" = "iptables-legacy" ]; then
+    # SECOND INSTANCE OF THE SAME DEFECT AS THE nftables BRANCH ABOVE, and it was
+    # not found by reading -- it was found by the structural check in
+    # scripts/calibrate-egress-boot.sh, which asserts that no unconditional exit
+    # stands between the top of this script and its resolver calls. It used to
+    # read `[ -n "$IPT" ] || exit 0`, which abandoned the whole run, including
+    # Guard 3's two resolvers sixty lines below, when the iptables binary was
+    # absent. The resolvers do their own backend detection and are not the
+    # provider block's business.
     IPT="$(command -v iptables-legacy || true)"
-    [ -n "$IPT" ] || exit 0
-    touch /etc/clawfactory/allowed-ips.txt
-    for h in $AUX_HOSTS; do
-        for ip in $(getent ahostsv4 "$h" | awk '{print $1}' | sort -u); do
-            if ! "$IPT" -C OUTPUT -m owner --uid-owner clawuser -d "$ip" -p tcp --dport 443 -j ACCEPT 2>/dev/null; then
-                "$IPT" -I OUTPUT 1 -m owner --uid-owner clawuser -d "$ip" -p tcp --dport 443 -j ACCEPT
-            fi
-            grep -qx "$ip" /etc/clawfactory/allowed-ips.txt || echo "$ip" >> /etc/clawfactory/allowed-ips.txt
+    if [ -z "$IPT" ]; then
+        echo "[clawfactory-fw] iptables-legacy backend declared but the binary is absent; skipping the provider re-add. The Guard 3 resolvers below still run." >&2
+    else
+        touch /etc/clawfactory/allowed-ips.txt
+        for h in $AUX_HOSTS; do
+            for ip in $(getent ahostsv4 "$h" | awk '{print $1}' | sort -u); do
+                if ! "$IPT" -C OUTPUT -m owner --uid-owner clawuser -d "$ip" -p tcp --dport 443 -j ACCEPT 2>/dev/null; then
+                    "$IPT" -I OUTPUT 1 -m owner --uid-owner clawuser -d "$ip" -p tcp --dport 443 -j ACCEPT
+                fi
+                grep -qx "$ip" /etc/clawfactory/allowed-ips.txt || echo "$ip" >> /etc/clawfactory/allowed-ips.txt
+            done
         done
-    done
+    fi
 fi
 
 # v1 Guard 3: re-derive the user's read-fetch set from the root-owned policy on

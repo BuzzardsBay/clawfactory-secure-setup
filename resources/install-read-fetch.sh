@@ -225,7 +225,7 @@ if [ "$BACKEND" = "nftables" ]; then
         # resolve nothing, and refusing to install over that would be worse than
         # saying so: the next five-hourly refresh repairs it, and the failure
         # direction is denial rather than exposure.
-        note "WARNING: the toolchain switch is on but resolved 0 addresses. Skill installation, GitHub and npm will be unreachable until the next refresh."
+        note "WARNING: the toolchain switch is on but resolved 0 addresses. GitHub and npm will be unreachable until the next refresh. Skill installation is not affected: the skill hub shares a network address with ClawFactory's own site, which this switch does not cover."
     fi
     note "toolchain set holds $TC_N address(es)"
 else
@@ -238,6 +238,162 @@ if [ -x /usr/local/sbin/clawfactory-fw-assert.sh ]; then
         || fatal "the chain-shape tripwire failed after installing Guard 3"
 fi
 
+# --- f. the boot-time refresh, which is what makes the panel true after a
+#        restart ---------------------------------------------------------------
+#
+# THE DEFECT THIS CLOSES, measured on cfv-174 after a full Windows reboot:
+# TC.1a PASS enabled=true, TC.1b PASS 28 live and 28 persisted, and TC.1c FAIL
+# github and npm reachable=False. The panel read "On. 28 network addresses
+# reachable" while the route was dead, for up to five hours.
+#
+# WHY THE EXISTING BOOT TRIGGER DID NOT DO THIS. clawfactory-allow-providers.timer
+# already carries OnBootSec=30s and its script ends by calling both resolvers, so
+# on paper this was covered. Two things stopped it:
+#
+#   1. That script begins `nft list table inet clawfactory >/dev/null 2>&1 ||
+#      exit 0`. The timer has NO ordering against clawfactory-fw.service, which
+#      waits on network-online.target, so at 30 seconds the table may not exist
+#      yet -- and `exit 0` then skips the two resolver calls ninety lines below
+#      while the unit reports success. Fixed in setup.ps1 in the same release.
+#   2. Thirty seconds after a WSL distro boot is early for DNS. Before v1.4.1 a
+#      resolver run with no DNS wrote an EMPTY set, so the trigger firing at the
+#      wrong moment was worse than it not firing: it destroyed the set
+#      fw-apply.sh had just correctly replayed.
+#
+# WHAT THIS ADDS. A unit ORDERED after the firewall, that runs the existing
+# resolvers and RETRIES until they stop reporting resolution failures. It waits
+# on that state rather than on a fixed sleep, and it needs no probe hostname of
+# its own: the thing it is waiting for is the resolution it was going to do
+# anyway. With an empty allowlist and the toggle off there is nothing to resolve,
+# nothing fails, and it exits on the first attempt having waited for nothing.
+#
+# WHAT IT DELIBERATELY DOES NOT DO. It does not touch fw-apply.sh. The boot
+# replay stays exactly as it is, so the deny is in force from the first moment of
+# boot and is never wider during the window; this only replaces a narrow stale
+# set with a narrow fresh one, afterwards. And it does not re-resolve anything
+# the resolvers themselves would not: clawfactory-toolchain.sh reads the toggle
+# from the root-owned policy BEFORE it resolves, so a user who switched the
+# software sources off does not get them switched back on at every reboot.
+#
+# IF THIS REGISTRATION IS ABSENT -- an older install, or systemd unavailable --
+# the product falls back to exactly its previous behaviour: fw-apply.sh still
+# replays at boot so the deny holds and the set is never wider, and the
+# five-hourly timer eventually corrects it. Fail-safe, not fail-open. That is
+# why the enable below is checked by READ-BACK and is fatal: silently not
+# installing a control the panel's honesty now depends on is the failure mode
+# this whole file is written against.
+cat > /usr/local/sbin/clawfactory-egress-refresh.sh <<'BOOT'
+#!/usr/bin/env bash
+# clawfactory-egress-refresh.sh -- re-derive both Guard 3 firewall sets once the
+# network is actually up. Run by clawfactory-egress-refresh.service at boot.
+#
+# Both resolvers are safe to run repeatedly: each flushes its own set and
+# rebuilds it from the root-owned policy, and each carries forward the addresses
+# it last resolved for a host that will not resolve now, so an attempt made too
+# early costs nothing and destroys nothing.
+set -uo pipefail
+
+MAX_ATTEMPTS=20
+INTERVAL=6          # ceiling: 20 * 6 = 120s, and a healthy boot pays one attempt
+
+say() { echo "[egress-refresh] $*"; }
+
+# The number of hosts a resolver could not resolve AT ALL, from its own
+# machine-readable status line. An ABSENT status line means a resolver from a
+# build older than v1.4.1: there is no signal, so this treats it as "nothing
+# failed" and says so, rather than retrying blind for two minutes at every boot.
+failed_from() {   # $1 = resolver output, $2 = status key
+    local n
+    n="$(printf '%s\n' "$1" | sed -n "s/.*$2 .*failed=\([0-9][0-9]*\).*/\1/p" | tail -1)"
+    if [ -z "$n" ]; then
+        say "WARNING: no $2 line in the resolver output, so this run has no signal to wait on. Treating it as zero failures. The set is still whatever the resolver just built."
+        echo 0
+    else
+        echo "$n"
+    fi
+}
+
+attempt=0
+while [ "$attempt" -lt "$MAX_ATTEMPTS" ]; do
+    attempt=$((attempt + 1))
+
+    rf_out=""; tc_out=""
+    if [ -x /usr/local/sbin/clawfactory-read-fetch.sh ]; then
+        rf_out="$(/usr/local/sbin/clawfactory-read-fetch.sh 2>&1 || true)"
+    else
+        say "clawfactory-read-fetch.sh is missing; the user's allowlist was NOT refreshed"
+    fi
+    if [ -x /usr/local/sbin/clawfactory-toolchain.sh ]; then
+        tc_out="$(/usr/local/sbin/clawfactory-toolchain.sh 2>&1 || true)"
+    else
+        say "clawfactory-toolchain.sh is missing; the software-source route was NOT refreshed"
+    fi
+
+    rf_failed="$(failed_from "$rf_out" READFETCH_STATUS)"
+    tc_failed="$(failed_from "$tc_out" TOOLCHAIN_STATUS)"
+    total=$((rf_failed + tc_failed))
+
+    say "attempt $attempt/$MAX_ATTEMPTS: unresolved hosts read-fetch=$rf_failed toolchain=$tc_failed"
+    if [ "$total" -eq 0 ]; then
+        say "every host that had to be resolved was resolved; both sets are current"
+        printf '%s\n' "$rf_out" "$tc_out"
+        exit 0
+    fi
+    [ "$attempt" -lt "$MAX_ATTEMPTS" ] && sleep "$INTERVAL"
+done
+
+# Out of attempts. This is NOT a firewall failure: every set is whatever the last
+# run built, which is the previously-resolved addresses for any host that would
+# not resolve, or nothing at all for one with no recent record. Narrow either
+# way. The five-hourly refresh keeps trying after this.
+say "gave up after $MAX_ATTEMPTS attempts with $total host(s) still unresolved. This denies rather than exposes: nothing was widened. A host that never resolves will do this at every boot, which is worth chasing."
+printf '%s\n' "$rf_out" "$tc_out"
+exit 0
+BOOT
+chown root:root /usr/local/sbin/clawfactory-egress-refresh.sh
+chmod 755 /usr/local/sbin/clawfactory-egress-refresh.sh
+
+cat > /etc/systemd/system/clawfactory-egress-refresh.service <<'UNIT'
+[Unit]
+Description=ClawFactory: re-resolve the Guard 3 egress sets once the network is up
+# ORDERING IS THE POINT. clawfactory-fw.service replays the persisted addresses
+# and must go first, so the deny is in force before anything here runs and the
+# set is never wider during the window. network-online is Wants rather than
+# Requires: if it never arrives, this still runs, finds nothing resolvable,
+# keeps what was replayed and says so.
+After=clawfactory-fw.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/clawfactory-egress-refresh.sh
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+chown root:root /etc/systemd/system/clawfactory-egress-refresh.service
+chmod 644 /etc/systemd/system/clawfactory-egress-refresh.service
+
+systemctl daemon-reload 2>/dev/null || true
+systemctl enable clawfactory-egress-refresh.service >/dev/null 2>&1 || true
+# READ BACK. `systemctl enable` is routinely written here with `|| true`, which
+# means a unit that failed to install looks identical to one that did. The panel
+# now tells the user their sites are reachable after a restart, so the thing
+# that makes that true has to be verified rather than attempted.
+EGRESS_ENABLED="$(systemctl is-enabled clawfactory-egress-refresh.service 2>&1 || true)"
+if [ "$EGRESS_ENABLED" != "enabled" ]; then
+    fatal "clawfactory-egress-refresh.service did not enable (systemctl is-enabled said '${EGRESS_ENABLED:-<empty>}'). Without it, the Web access panel would report a live address count after a reboot while the addresses it names are stale. The firewall itself is unaffected and still denies, so this is an honesty failure rather than an exposure, but it is not shippable."
+fi
+note "boot refresh installed and enabled: clawfactory-egress-refresh.service, ordered after clawfactory-fw.service"
+
 note "Guard 3 installed. Read-fetch destinations: $(wc -l < /etc/clawfactory/read-fetch-ips.txt | tr -d ' ') address(es) from the policy allowlist."
 note "A fresh install has an empty allowlist, which means the agent can fetch nothing beyond the provider route and the software sources."
-note "Toolchain switch: $(node -e 'const p=require("/etc/clawfactory/egress-policy.json");process.stdout.write(String(!p.toolchain||p.toolchain.enabled!==false))' 2>/dev/null || echo unknown) with $(wc -l < /etc/clawfactory/toolchain-ips.txt 2>/dev/null | tr -d ' ') address(es). Switching it off in Studio stops skill installation, GitHub and npm, and never affects the AI provider."
+# THE SENTENCE BELOW IS A CUSTOMER-VISIBLE CLAIM, because this note lands in the
+# install log the user can read. It used to say "Switching it off in Studio stops
+# skill installation, GitHub and npm", which is false and was measured false on
+# cfv-169: a real `openclaw skills install` completed with the switch off,
+# because clawhub.ai shares an address with the permanently-allowed openclaw.ai.
+# It must agree with the Studio panel paragraph and with the OFF message at the
+# end of clawfactory-toolchain.sh. If one of the three changes, change all three.
+note "Toolchain switch: $(node -e 'const p=require("/etc/clawfactory/egress-policy.json");process.stdout.write(String(!p.toolchain||p.toolchain.enabled!==false))' 2>/dev/null || echo unknown) with $(wc -l < /etc/clawfactory/toolchain-ips.txt 2>/dev/null | tr -d ' ') address(es). Switching it off in Studio stops your agent fetching code from GitHub and npm. It does not stop skill installation: the skill hub shares a network address with ClawFactory's own site, which this switch does not cover. It never affects the AI provider."
