@@ -175,7 +175,18 @@ entry from the card has vanished too.
 
 ## 6. The home route and the header
 
-**Where:** click the lobster icon at the top left, or navigate to the home page.
+**Where:** the home route is the screen Studio opens on. **Do this check FIRST, before you
+navigate anywhere**, or restart Studio to get back to it.
+
+**DO NOT try to click the lobster or the title to go home. They are not links.** In
+`frontend/src/App.tsx` the lobster is a bare `<span>` and the title a plain `<h1>`, and the
+nav carries no Home entry, so once you leave the home route there is no way back to it by
+clicking. This was reported by the operator and recorded in the v1.3.5 close-out on
+2026-08-22 (section 6, item 5) with the remedy "the check doc should say to use the nav or
+a restart instead". The remedy was never applied, because the finding was written into a
+close-out and never carded, and the operator then hit it again by hand on cfv-174 while
+following this very file. The product defect is now carded; this paragraph is the check
+doc's half of it.
 
 **First, what the page MUST show.** This is the positive control, and it is here because
 the bullet after it is an absence check: a page that failed to render at all, or rendered
