@@ -45,7 +45,7 @@ Section '1. One EXPIRED card, forced past its window from the root-owned record'
 $exp = Invoke-WslFile -Tag 'sc-expired' -User 'root' -Body @'
 O=$(su -s /bin/bash -c 'printf "This request was deliberately allowed to lapse, so the expired-card control has a subject.\n" > /tmp/expired-body.txt; clawfactory-send --to lapsed@example.invalid --subject "MANUAL-EXPIRED-CARD" --body-file /tmp/expired-body.txt' clawuser 2>&1)
 echo "$O"
-ID=$(printf '%s' "$O" | grep -oE '"requestId"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | grep -oE '"[^"]+"$' | tr -d '"')
+ID=$(printf '%s' "$O" | grep -oE 'requestId"?[[:space:]]*[:=][[:space:]]*"?[^"[:space:],}]+' | head -1 | sed -E 's/^.*[:=][[:space:]]*"?//')
 echo "expired_id=$ID"
 node -e 'const fs=require("fs");const p="/var/lib/clawfactory/send/pending/"+process.argv[1]+".json";try{const j=JSON.parse(fs.readFileSync(p,"utf8"));j.expiresAt=new Date(Date.now()-900000).toISOString();fs.writeFileSync(p,JSON.stringify(j));console.log("expiry forced to 15 minutes ago");}catch(e){console.log("could not force expiry: "+e.message);}' "$ID"
 echo '--- touch the record through the broker so the state transition is stamped ---'
@@ -112,26 +112,23 @@ Section '3. Independent confirmation that the SHIPPED Studio is the rebuilt 1.3.
 # %LOCALAPPDATA%\Programs\ClawFactory Studio, WITH A SPACE, per
 # resources/uninstall.ps1 step 4.5. A glob that matches nothing returns an empty
 # string, which reads exactly like a missing file rather than a wrong path.
-$asar = Invoke-WslFile -Tag 'sc-asar' -User 'root' -Body @'
-FOUND=0
-for p in /mnt/c/Users/*/AppData/Local/Programs/"ClawFactory Studio"/resources/app.asar; do
-  if [ -f "$p" ]; then
-    FOUND=1
-    echo "ASAR_PATH=$p"
-    echo "ASAR_SHA=$(sha256sum "$p" | cut -d' ' -f1)"
-    echo "ASAR_BYTES=$(stat -c %s "$p")"
-  fi
-done
-echo "ASAR_FOUND=$FOUND"
-echo '--- CONTROL: the same glob against a name that cannot exist must find nothing ---'
-CN=0
-for p in /mnt/c/Users/*/AppData/Local/Programs/"ClawFactory Studio NOT REAL"/resources/app.asar; do
-  [ -f "$p" ] && CN=1
-done
-echo "CONTROL_FALSE_PATH_FOUND=$CN"
-'@
+# ASK WINDOWS, NOT THE DISTRO. The first version of this globbed through
+# /mnt/c and found nothing, which looked exactly like "Studio is not installed"
+# and was in fact "the distro cannot see C:\ at all". Automount is OFF by design
+# on this product, and /mnt/c exists as an EMPTY STUB, so a path test there is
+# not a valid check for Windows visibility. Studio is a Windows program and the
+# question is answered from Windows.
+$asarPath = @(Get-ChildItem 'C:\Users' -Recurse -Filter 'app.asar' -ErrorAction SilentlyContinue -Force |
+              Where-Object { $_.FullName -match 'ClawFactory Studio' } | Select-Object -First 1)
+$asarSha = if ($asarPath.Count -gt 0) { (Get-FileHash $asarPath[0].FullName -Algorithm SHA256).Hash.ToLower() } else { '' }
+foreach ($a in $asarPath) { W "ASAR_PATH=$($a.FullName) bytes=$($a.Length)" }
+W "ASAR_SHA=$asarSha"
+# CONTROL: the same search restricted to a name that cannot exist must find
+# nothing, or a search that matches everything would read as a pass.
+$asarCtl = @(Get-ChildItem 'C:\Users' -Recurse -Filter 'app.asar' -ErrorAction SilentlyContinue -Force |
+             Where-Object { $_.FullName -match 'ClawFactory Studio NOT REAL' })
+$asar = @{ Out = "CONTROL_FALSE_PATH_FOUND=$($asarCtl.Count)" }
 W $asar.Out
-$asarSha = if ($asar.Out -match 'ASAR_SHA=([a-f0-9]{64})') { $Matches[1] } else { '' }
 $pinned  = '5c4ffbf420814939579f00f0b8e69e949ba34af20d239ddcdc6cf4da383e2d85'
 $globSane = $asar.Out -match 'CONTROL_FALSE_PATH_FOUND=0'
 # VERDICT TRIAGE. A glob that matches a path it must not match means the search
