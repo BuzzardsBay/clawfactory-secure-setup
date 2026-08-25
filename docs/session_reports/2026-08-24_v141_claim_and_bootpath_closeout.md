@@ -11,6 +11,65 @@ not a running product. Section 11 says what the next job has to measure.
 
 ---
 
+## Session summary
+
+**The job.** The v1.4.0 release validation finished the previous day with coverage
+complete and a NO on publishing, for two named reasons rather than for missing evidence:
+card `#274`, the product telling the user a safety control does something it does not do,
+and card `#276`, a control reporting a state that is not in force after a reboot. Two
+smaller cards, `#273` and `#275`, rode the same rebuild. This session's job was to fix all
+four, rebuild, and re-sign. No VM, no validation, no tag, no publish.
+
+**What happened, in order.**
+
+The session opened with a gate rather than with code. Two instrument defects found and
+fixed in the previous session — a job dispatcher retrieving a stale results file, and a
+parser that had never once extracted the value it was written to extract — had never had
+their blast radius measured. Fourteen accepted matrix verdicts were traced back to the
+files they were read from. **All fourteen sound, zero suspect**, and the stale artefact
+from the dispatcher defect is preserved on disk and is provably not what any verdict came
+from. Only then did the fixes start.
+
+**Three of the four cards turned out to be materially bigger than the card said, and in
+each case enumeration rather than reading is what found the difference.**
+
+- `#274` named two non-GUI sites carrying the false claim. **Four were live**, plus the
+  two GUI notices — and the ON notice was wrong in the opposite direction, which the card
+  had not noticed at all.
+- `#275` named two panels that dead-end on a retired backend. **Nine routes do.**
+- `#276`'s premise — that nothing re-resolves at boot — was wrong. A boot-time trigger
+  already existed and was **skipping its own resolvers, in two separate places**.
+
+**Two of the audit instruments written this session were themselves defective, and both
+were caught by measurement rather than by reading.** The Secure-Setup claim enumerator
+silently missed one of the four live instances because its vocabulary lacked the words
+"break" and "off". The structural check written to prove the boot-path fix **failed on its
+first run**, which is how the second `|| exit 0` short-circuit was found. Neither would
+have been found by re-reading the code.
+
+**What was built.** Both toggle notices corrected in Studio and the claim corrected in
+four Secure-Setup files; nine routes given an honest empty state that names no scaffold and
+no dead endpoint; the header made a link home; a boot-ordered refresh unit that waits on
+resolution state rather than on a sleep; bounded per-host address retention in both
+resolvers so a run before DNS is up can no longer destroy the set the boot path just
+replayed; the multi-pass resolve loop the read-fetch resolver never had; and the by-hand
+panel checklist taken from seven checks to ten with three of its own defects fixed.
+
+**What was measured, and what was not.** The retention reader and the boot parser were
+calibrated over 39 rigged inputs, extracting the shipped functions rather than copies, with
+a control in every group that must produce a value. The home link and the empty states were
+confirmed from the rendered accessibility tree and DOM, not from source. The shipped copy
+was confirmed against the `app.asar` this build actually produces. **Nothing was measured
+on a running box, because there was no box.** The reboot behaviour — the whole substance of
+`#276` — is argued from source and is unmeasured.
+
+**Outcome.** A signed v1.4.1 installer, seven of seven build gates green, ledger row
+appended, both repositories pushed, three new follow-up cards raised, no tag and no
+release. The four cards are `in_progress`, not `done`, because a fix that is built and
+unvalidated is not done.
+
+---
+
 ## 0. Task accounting
 
 | Task | State |
@@ -913,3 +972,172 @@ Reviewed the shipped diff, 481 insertions and 45 deletions across 8 files.
 - **Known residual, stated rather than left to be discovered:** a host that never resolves
   will make the boot refresh burn its full 120-second ceiling at every boot. It is bounded,
   it is logged with the host count, and the message says it is worth chasing.
+
+---
+
+## 16. Lessons learned
+
+Nine, each tied to something that actually happened in this session rather than to a
+principle that sounded good.
+
+### 16.1 A card understates its own scope, and the cheap fix is enumeration
+
+Three of four cards this session. `#274` said two sites and meant six. `#275` said two
+routes and meant nine. `#276`'s premise was wrong about the mechanism entirely. **Every
+one of those was found by enumerating the class and none by reading around the named
+instance.** The pattern is now explicit: when a card names N instances of a defect, the
+first task is to enumerate the class and report the real count, not to fix the N.
+
+### 16.2 An audit probe is a probe, and mine had the defect it was hunting
+
+The Secure-Setup claim enumerator's first effect vocabulary lacked `break` and `off`, so it
+returned a clean-looking list that silently omitted `clawfactory-grants.ps1:1139` — a live
+instance of the exact false claim it existed to find. **It was caught by running a cruder,
+dumber second pass and comparing**, not by re-reading the regex. The general rule this
+confirms: after a concept-level sweep, run a naive keyword sweep as a cross-check, because
+the two fail differently. And once a real miss is known, it becomes the permanent
+known-defective input the pattern must find.
+
+### 16.3 A structural check can find what reading cannot, and it should be written before it is trusted
+
+The `|| exit 0` in the nftables branch was found by reading. **The identical defect in the
+iptables branch was not** — it was found because the check written to prove the first fix
+FAILED on its first run:
+
+```
+FAIL  emitted refresh reaches the resolvers          expected=[yes] got=[no]
+```
+
+Reading found one instance; a mechanical assertion over the whole file found both. And the
+check was itself probed by reintroducing the shipped defect into a copy and requiring it to
+be DETECTED, so its green is worth something.
+
+### 16.4 A brief's premise is a hypothesis, and checking it costs minutes
+
+The brief said nothing re-resolves at boot. `setup.ps1:2251` says `OnBootSec=30s`. Building
+what the brief described would have added a third trigger beside two that already existed
+and were broken, and the real defect would have shipped. **Reporting the discrepancy before
+executing took one grep and one read**, and it changed the shape of the fix rather than
+merely delaying it. The brief is written by someone who cannot see the repo; the repo is
+truth.
+
+### 16.5 The dangerous direction of a fix is the one that must be measured
+
+Almost everything in `#276` narrows: skipping a block instead of exiting, ordering a unit
+after another, re-resolving. **Exactly one thing added this session can make a firewall set
+WIDER than what the current run resolved** — carrying an address forward for a host that
+will not resolve. That is the one thing that got 28 rigged test cases including
+`DIFFERENT host (revocation)`, an nft-injection string, a future timestamp, and a control
+that must produce a value so a reader that always returned nothing could not pass. The
+effort went where the risk was, not evenly across the diff.
+
+### 16.6 A check that quotes a value which legitimately varies teaches people to ignore it
+
+Check 1c told the operator to expect `On. 28 network addresses reachable`. His panel read
+25, and he was right to report it. The count is re-resolved DNS against rotating pools; it
+was never a constant. **A check that can fail on a healthy box is worse than no check**,
+because the first thing it teaches is that its failures can be explained away — and that
+lesson is still there on the day it fails for a real reason. Assert the invariant (nonzero,
+correct unit string) and capture the varying value as evidence rather than as a verdict.
+
+### 16.7 An absence-only assertion is the same defect in a human checklist as in a probe
+
+Already learned for automated phases; re-learned here for the by-hand file, where it is
+worse because the phase runner cannot catch it. A page that failed to render satisfies
+"does not say X" perfectly. Every absence in the checklist now sits behind positive
+assertions and says in the file that it means nothing until they pass.
+
+### 16.8 A finding recorded only in a close-out will be rediscovered by a human doing it the hard way — and this time it survived a rewrite
+
+The lobster-is-not-a-link finding was reported by the operator, written into the v1.3.5
+close-out, never carded, and then **left in place by the very session that rewrote that
+checklist file**, because the rewrite was scoped to absence-only assertions and never
+checked the file against the known-defects list in the prior close-out. He hit it again by
+hand two days later. The correction is not just "card everything" — it is that **a rewrite
+of a file must be checked against every prior finding about that file**, not only against
+the task that prompted the rewrite.
+
+### 16.9 Two logical changes in one file is not a reason to give up on separate commits
+
+`App.tsx` carried both `#273` and `#275`. Parking the working copy, reverting, re-applying
+one change, committing, then restoring the full version took about two minutes and produced
+two independently revertible commits. Worth doing. Where it genuinely could not be done —
+`clawfactory-toolchain.sh` and `install-read-fetch.sh`, where the two cards' changes sit on
+overlapping lines — the honest move was to name both cards in the message rather than to
+pretend the split existed.
+
+---
+
+## 17. The plan from here
+
+Stated as I understand it from the cards, the prior close-outs and the repo. **Sequencing
+and anything involving money or a public action is the operator's call, not mine.**
+
+### Step 1 — Validate v1.4.1. One VM run. This is the next job.
+
+Scope is section 11. It is a resume of the v1.4.0 matrix against a new artifact, and it is
+materially cheaper than the last one: the box configures itself from root
+(`interim-v140-stagebox.ps1`), and the by-hand checklist is executable.
+
+**Three things the next job must not trip over, all of them stale defaults or stale
+premises rather than defects:**
+
+1. **`validation/interim-v140-relgate-box.ps1` still defaults to the v1.4.0 artifact.**
+   `-Sha256 '257f30ff...'` and `-ExpectBytes 440613512`. For v1.4.1 those are
+   `90c673ddaf0959418eef8b19b959894581003f0c5dbf0d78cfb2f52beb3ef398` and `440602224`.
+   Left unchanged, the preflight fails on a digest mismatch and blames the artifact.
+2. **The artifact has to be uploaded to blob storage first** —
+   `clawfactoryvalc467/validation`. Nothing in this session uploaded anything.
+3. **Seed a rotating-pool host into the read-fetch allowlist before the reboot.** Section 4.
+   Without it the read-fetch half of `#276` ships unmeasured, and `www.iana.org` will
+   report a false pass.
+
+Expected cost: one D2s_v4 for a few hours, plus two interactive RDP logins (one to start
+the install, one after the reboot) because the release-gate driver deliberately arms no
+auto-logon.
+
+### Step 2 — If it is green: tag, release, publish.
+
+This is the v1.4.0 plan carried forward. `v1.4.1` tag at the build commit, GitHub release
+with the signed artifact, and the download link. **Nothing in this session tagged or
+published anything, and nothing should until step 1 is green.**
+
+The public site is already correct for a free release and needs no work: `clawfactory.app`
+serves from `BuzzardsBay/clawfactory-site`, whose working tree is clean at `41365d3`
+("Free release: Apache-2.0, drop the purchase copy, correct four security claims"). **An
+earlier note that those edits were sitting uncommitted is stale** — they were committed and
+pushed. Verified this session.
+
+### Step 3 — The three cards this session raised, in this order.
+
+| Card | Why this order |
+| --- | --- |
+| `#277` invert `SP.8` | do it AFTER the run that decides shipping, never during. It converts a standing failure into a passing test that documents the residual |
+| `#278` `TC.1a/b/c`, `G1.7`, `G1.7c` | `TC.1a` and `TC.1b` passed against a dead route. Until they assert what their names claim, a green pair beside a red `TC.1c` reads as a contradiction rather than as a gap |
+| `#279` the footnote | copy only, four words, but it moves ratified text and touches three files that must move together |
+
+### Step 4 — The standing backlog, unchanged by this session.
+
+- **`#259`**, unattended validation harness: re-arm auto-logon across reboots, store the
+  admin password properly, split the manual panel checks. This is what would remove the two
+  interactive logins from step 1. It is the single biggest cost reduction available and it
+  must be done **between** runs, never during one.
+- **`#261`**, the rotating-pool sampling problem. v1.4.1 narrows it (three passes on
+  read-fetch, bounded retention on both) but does not close it. Options (b) ship GitHub's
+  published ranges and (d) accept-and-document are unadjudicated.
+- **Post-install API-key rotation GUI.** Still the open zero-terminal gap: the installer's
+  key wizard is interactive-only and there is no way to add or change a key after install
+  without a terminal.
+- **v1.1 backlog `#25`**, separate-identity isolation. The v2 closure of Door 2, which is
+  accepted-and-documented for v1.
+
+### Step 5 — Two decisions that are the operator's and have been carried for a while.
+
+- **Inno Setup 6.7.1's binaries carry "Non-commercial use only".** A free release plausibly
+  sits inside that tier, so shipping free narrows the exposure rather than widening it. Not
+  a blocker, unchanged by this session, and still unadjudicated.
+- **`clawagent-setup` is public, three months stale, and ships false security copy** — a
+  "Docker sandbox with network=none" that no longer exists, and "enforced by gateway" over
+  tool names that do not exist. The standing recommendation is ARCHIVE. Nothing has been
+  changed. It is the one place a stranger can still read a false ClawFactory security claim
+  with no gate in front of it, and it will not be caught by any check in this repo.
