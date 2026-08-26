@@ -1,3 +1,33 @@
+# ---------------------------------------------------------------------------
+# REPO-WIDE BASELINE. Everything below this block is a more specific rule and
+# still wins (.gitattributes is last-match-wins); the specific rules are kept
+# because they document WHY each file individually cannot tolerate a CR.
+#
+# Why a baseline exists at all. This product's claim is that a stranger can
+# audit the source that produced the artifact. That claim requires the bytes
+# Inno bundles to BE the bytes in the repo, and until v1.4.3 they were not:
+# `git ls-files --eol` found 118 tracked files whose working-tree form differed
+# from their index form, TEN of them in the .iss [Files] section. `git status`
+# was clean the whole time, because a `text` attribute makes git normalise on
+# COMPARISON -- so a stale CRLF working copy compares equal to an LF index for
+# ever, and git never re-normalises an existing working copy when a rule is
+# added later. That is how six files carrying `text eol=lf` below were still
+# CRLF on disk.
+#
+# Without this baseline the checked-out form of every UNPINNED file is decided
+# by core.autocrlf, which on this build machine is `true` and comes from the
+# SYSTEM git config -- i.e. from the Git for Windows installer, not from
+# anything versioned here. A fresh clone on a differently configured machine
+# produced different artifact bytes, silently. Pinning it in the repo is the
+# only form of the fix that travels with the repo.
+#
+# text=auto (not a bare `text`) so git still auto-detects binaries and leaves
+# ClawChat.exe, the .ico and the .png alone. Verified: no tracked file has a
+# CRLF index form, so this changes no committed blob -- only the checkout.
+#
+# scripts/build_release.ps1 enforces this for the bundled set as a build gate
+# ("Worktree pin"), so a future divergence fails the build instead of shipping.
+* text=auto eol=lf
 # Scripts transported into WSL and executed by bash/node MUST stay LF.
 # A CR in the shebang or `set -e` line breaks them ("bad interpreter: /bin/bash^M").
 # core.autocrlf=true would otherwise give CRLF working copies on Windows.
