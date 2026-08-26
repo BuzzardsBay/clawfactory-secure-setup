@@ -121,6 +121,17 @@ function Invoke-WslSilentScript {
     # quoting/escaping doesn't break across the powershell -> wsl -> bash
     # boundary. Mirrors setup.ps1's Invoke-WslBash strategy.
     param([Parameter(Mandatory)][string]$Script)
+    # v1.4.2. LF-normalise before transport, for the same reason uninstall.ps1
+    # now does: this file is stored LF in git, but a working copy checked out
+    # before `*.ps1 text eol=lf` landed is CRLF, Inno compiles from the working
+    # tree, and a here-string keeps the file's own line endings. Inside WSL a
+    # trailing CR stops bash recognising a reserved word, and the ONE payload
+    # this function is given opens with `if curl ... ; then` -- so on a CRLF
+    # build it died on its first line with a syntax error and started nothing,
+    # invisibly, because both streams are read into $null below.
+    # Every other PowerShell->WSL transport in this product already normalised;
+    # this and uninstall.ps1:441 were the two that did not.
+    $Script = $Script.Replace("`r`n", "`n").Replace("`r", "`n")
     $enc = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Script))
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName               = 'wsl.exe'
