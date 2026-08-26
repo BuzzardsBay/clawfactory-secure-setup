@@ -1,7 +1,8 @@
 <#
 Produces a release-ready, signed ClawFactory installer:
-  1. Runs seven pre-build gates (SOUL, bundle, Studio, version, persona,
-     workspace SOUL, rootfs). Each fails the build on drift; none auto-correct.
+  1. Runs eight pre-build gates (SOUL, bundle, worktree, Studio, version,
+     persona, workspace SOUL, rootfs). Each fails the build on drift; none
+     auto-correct.
   2. Compiles ClawFactory-Secure-Setup.iss with Inno Setup (ISCC.exe)
   3. Enforces the second half of the VERSION gate, which cannot run any earlier:
      the compiled digest must not contradict a version already in
@@ -98,6 +99,111 @@ if ($notBundled.Count -gt 0) {
 }
 Write-Host ("Bundle check OK: all {0} preflight resources are in [Files]." -f $required.Count)
 
+# --- Pre-build gate: the bundled bytes must BE the committed bytes ------------
+# The audit claim this product makes is that a stranger can read the repo that
+# produced the artifact. That claim is false the moment a bundled file's bytes on
+# disk differ from the bytes git holds -- and until v1.4.3 TEN of them did,
+# silently, for months. `git status` cannot see it: a `text` attribute makes git
+# normalise on COMPARISON, so a stale CRLF working copy compares equal to an LF
+# index for ever, and git never re-normalises an existing working copy when an
+# attribute is added later. `git ls-files --eol` was the only reading that showed
+# it, and nothing ran it. .gitattributes now pins the checked-out form; this gate
+# is what makes that pin load-bearing instead of merely well-intentioned.
+#
+# It compares BYTES, not line endings, so it catches ANY divergence -- a hand
+# edit, a half-applied revert, an editor save into the install dir -- rather than
+# only this one class. `git hash-object --no-filters` is the whole trick:
+# --no-filters hashes the file exactly as it sits on disk, skipping the clean
+# filter that hides the difference everywhere else.
+#
+# WHAT THIS GATE CANNOT CATCH, stated here so its output is never read as more
+# coverage than it has. It compares the working tree against HEAD -- routed
+# through the index so the two failure modes (bytes in no git object at all vs
+# bytes staged but uncommitted) can be told apart and reported separately. What
+# it therefore CANNOT see is a file that was committed wrong in the first place:
+# such a file is byte-identical to its committed blob and passes cleanly. This
+# gate proves the ARTIFACT MATCHES THE REPO. It does not prove the repo is
+# correct, it is not a review, and it says nothing about the two gitignored
+# binaries it skips by name (the rootfs and the Studio installer) beyond what
+# their own digest pins already assert.
+$bundled = @()
+foreach ($line in (Get-Content -LiteralPath $issPath)) {
+    if ($line -match '^Source:\s*"([^"]+)"') {
+        $p = $Matches[1]
+        # Expand ISPP #define references (e.g. {#StudioInstaller}) to real paths.
+        foreach ($d in [regex]::Matches($issText, '(?m)^#define\s+(\S+)\s+"(.*)"\s*$')) {
+            $p = $p -replace [regex]::Escape('{#' + $d.Groups[1].Value + '}'), $d.Groups[2].Value
+        }
+        $bundled += ($p -replace '\\', '/')
+    }
+}
+if ($bundled.Count -eq 0) {
+    Fail "could not read any [Files] Source entries from the .iss. The worktree gate would pass vacuously, which is worse than no gate."
+}
+
+Push-Location $RepoRoot
+try {
+    $trackedList = @(& git ls-files)
+    if ($LASTEXITCODE -ne 0) {
+        Fail ("git ls-files failed in $RepoRoot (exit $LASTEXITCODE). This gate needs git to compare the bundled " +
+              "bytes against the committed ones, and a gate that silently skips when its data source is missing " +
+              "is not a gate. Build from a git checkout.")
+    }
+    $trackedSet = @{}
+    foreach ($t in $trackedList) { $trackedSet[$t] = $true }
+    $check   = @($bundled | Where-Object { $trackedSet.ContainsKey($_) })
+    $skipped = @($bundled | Where-Object { -not $trackedSet.ContainsKey($_) })
+
+    # Raw on-disk hash: no clean filter, so line endings are NOT normalised away.
+    $rawHashes = @(& git hash-object --no-filters -- @check)
+    if ($LASTEXITCODE -ne 0 -or $rawHashes.Count -ne $check.Count) {
+        Fail ("git hash-object --no-filters returned $($rawHashes.Count) hashes for $($check.Count) bundled paths. " +
+              "Refusing to compare a list against a differently sized list.")
+    }
+    $idx = @{}
+    foreach ($l in (& git ls-files -s -- @check)) {
+        if ($l -match '^\d+\s+([0-9a-f]{40})\s+\d+\s+(.+)$') { $idx[$Matches[2]] = $Matches[1] }
+    }
+    $head = @{}
+    foreach ($l in (& git ls-tree -r HEAD -- @check)) {
+        if ($l -match '^\d+\s+blob\s+([0-9a-f]{40})\s+(.+)$') { $head[$Matches[2]] = $Matches[1] }
+    }
+
+    # Three-way, so the diagnosis is precise rather than merely negative. The
+    # claim being enforced is that the bundled bytes are the COMMITTED bytes, so
+    # both failure modes below are real: bytes that are in no git object at all,
+    # and bytes that are staged but not yet committed. They are reported
+    # separately because the fix differs.
+    $drifted   = @()   # worktree != index: these bytes exist nowhere in git
+    $unstaged  = @()   # worktree == index != HEAD: staged, not committed
+    for ($i = 0; $i -lt $check.Count; $i++) {
+        $p = $check[$i]
+        if (-not $idx.ContainsKey($p)) {
+            Fail "bundled file $p is listed by git ls-files but has no index entry; refusing to guess what it should contain."
+        }
+        if ($idx[$p] -ne $rawHashes[$i]) { $drifted += $p }
+        elseif ((-not $head.ContainsKey($p)) -or ($head[$p] -ne $idx[$p])) { $unstaged += $p }
+    }
+    if ($drifted.Count -gt 0) {
+        Fail ("WORKTREE DRIFT: these bundled files would be compiled into the installer with bytes that are NOT the " +
+              "bytes git holds, so the shipped artifact would not match the repo a reader can audit -- " +
+              ($drifted -join ', ') + ". Diagnose with 'git ls-files --eol'; 'git diff' reports NOTHING when the " +
+              "cause is line endings, because a text attribute makes git normalise on comparison. If the cause is " +
+              "line endings, fix it by deleting each file and running 'git checkout -- <path>', which re-materialises " +
+              "it from the index under the rules in .gitattributes. If the cause is a real edit, commit it.")
+    }
+    if ($unstaged.Count -gt 0) {
+        Fail ("UNCOMMITTED BUNDLED FILES: these are staged but not committed, so the artifact would ship bytes that " +
+              "no commit names -- " + ($unstaged -join ', ') + ". Commit them and rebuild. This is not pedantry: the " +
+              "whole value of a signed artifact whose source is public is that a reader can fetch the commit it was " +
+              "built from, and a staged-only change has no commit to fetch.")
+    }
+    foreach ($s in $skipped) {
+        Write-Host "  Worktree pin: $s is not tracked by git (sourced at build time, gitignored). Not compared here; its own pin gate covers it."
+    }
+    Write-Host ("Worktree pin OK: all {0} tracked [Files] resources are byte-identical to their committed form." -f $check.Count)
+}
+finally { Pop-Location }
 # --- Pre-build gate: the embedded Studio installer must be the VALIDATED one ---
 # resources\ClawFactory-Studio-Setup-*.exe is gitignored and copied in from the
 # Studio repo's release directory at build time, so git cannot tell you whether
@@ -458,7 +564,7 @@ $stamp = [ordered]@{
     version       = $buildVersion
     unsignedSha256 = $unsignedHash
     unsignedBytes = (Get-Item -LiteralPath $installerPath).Length
-    gatesPassed   = @('soul', 'bundle', 'studio', 'version', 'persona', 'workspace-soul', 'rootfs')
+    gatesPassed   = @('soul', 'bundle', 'worktree', 'studio', 'version', 'persona', 'workspace-soul', 'rootfs')
     stampedUtc    = (Get-Date).ToUniversalTime().ToString('o')
 }
 # BOM-less UTF-8 on purpose; see the same note in sign_installer.ps1. PS 5.1's
