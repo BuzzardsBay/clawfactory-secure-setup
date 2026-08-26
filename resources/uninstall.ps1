@@ -6,9 +6,16 @@ param(
     # nftables chains). Default for /SILENT uninstall is RemoveAll=TRUE
     # unless -KeepLinuxEnvironment is also passed.
     [switch]$RemoveAll,
-    # Explicit opt-out of distro removal. Useful for /REMOVEALL=0 silent
-    # uninstall (e.g. an IT pilot deploy where the Ubuntu image is shared
-    # with other tooling).
+    # Explicit opt-out of DISTRO removal -- and of distro removal only. Useful
+    # for /REMOVEALL=0 silent uninstall (e.g. an IT pilot deploy where the
+    # Ubuntu image is shared with other tooling).
+    #
+    # v1.4.2: this is NOT a data-retention switch and never was. ClawFactory is
+    # removed from inside the distro either way -- clawuser's home, the agent
+    # config, /etc/clawfactory, openclaw, and every ClawFactory unit. The only
+    # difference is whether the Ubuntu registration and its VHDX survive. The
+    # uninstall dialog used to promise otherwise; the promise had nothing behind
+    # it and the copy was corrected rather than the behaviour.
     [switch]$KeepLinuxEnvironment
 )
 
@@ -83,14 +90,25 @@ if ($KeepLinuxEnvironment) {
     # Interactive: ask. Default = Yes (the spec says default checked).
     try {
         Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
-        $msg = "Also remove the Linux sandbox and all agent data?`r`n`r`n" +
-               "Selecting YES will:`r`n" +
-               "  - Unregister the Ubuntu WSL distro that ClawFactory created`r`n" +
-               "  - Delete clawuser's home directory (agents, plugins, config)`r`n" +
-               "  - Delete the OpenClaw install and the bundled VHDX (~6 GB)`r`n`r`n" +
-               "Selecting NO leaves the Ubuntu distro registered. Your conversation`r`n" +
-               "history and agent configs stay on disk. You can re-install ClawFactory`r`n" +
-               "later and reuse the existing distro."
+        # v1.4.2. Two defects fixed here, both customer-visible in the one dialog
+        # where a user decides whether to delete their own data:
+        #
+        #  1. The old text said "Your conversation history and agent configs stay
+        #     on disk" for NO. Nothing in the NO branch preserved agent configs --
+        #     it runs `deluser --remove-home clawuser` unconditionally -- so the
+        #     product was promising something it does not do. The choice really
+        #     on offer is about the DISTRO, not about data, and it now says so.
+        #  2. Hard `r`n breaks used to wrap mid-sentence. Each paragraph is now a
+        #     single logical line and MessageBox does its own wrapping, so the
+        #     defect class is gone rather than re-tuned.
+        #
+        # Yes still means RemoveAll and Button1 is still Yes: the default button
+        # and the silent default must keep selecting the same branch.
+        $msg = "Also remove the Ubuntu Linux distro that ClawFactory created?`r`n`r`n" +
+               "ClawFactory is removed from this machine either way: the agent, its configuration and plugins, clawuser's home directory, the OpenClaw runtime, and every ClawFactory service and firewall rule.`r`n`r`n" +
+               "YES also unregisters the Ubuntu distro and deletes its disk image (about 6 GB). Choose this unless something else on this machine uses that distro.`r`n`r`n" +
+               "NO leaves the now-empty Ubuntu distro registered, so anything else that shares it keeps working. You can install ClawFactory again later and it will reuse the distro.`r`n`r`n" +
+               "Your ClawChat conversation history is stored on Windows, under %APPDATA%\ClawChat, and neither choice deletes it."
         $choice = [System.Windows.Forms.MessageBox]::Show(
             $msg, 'ClawFactory Uninstall',
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
@@ -363,39 +381,52 @@ if ($script:DoRemoveAll) {
         # nftables chains, leave the distro registered. Best-effort.
         $script = @'
 set +e
-# Stop and disable gateway
-sudo -u clawuser bash -c 'systemctl --user stop openclaw-gateway 2>/dev/null; systemctl --user disable openclaw-gateway 2>/dev/null' 2>/dev/null
+# ---------------------------------------------------------------------------
+# 0. Stop the gateway.  v1.4.2, card #287.
+#
+# This used to be `sudo -u clawuser bash -c 'systemctl --user stop ...' 2>/dev/null`
+# with NO XDG_RUNTIME_DIR. Without it systemctl cannot find clawuser's user bus,
+# so it never stops anything; the failure was swallowed by the 2>/dev/null; three
+# processes survived; and `deluser` below then exited 8 with
+#     userdel: user clawuser is currently used by process 222
+# leaving clawuser behind, which made the NEXT install abort at
+#     Failed to create clawuser (exit=1)
+# -- i.e. it falsified the dialog's own "you can install ClawFactory again later".
+#
+# The line ~15 lines down that does `daemon-reload` already had this right. The
+# two are now written the same way, and the stderr is NOT discarded: swallowing it
+# is precisely how a two-line defect survived into a release.
+# ---------------------------------------------------------------------------
+sudo -u clawuser XDG_RUNTIME_DIR=/run/user/1000 systemctl --user stop openclaw-gateway
+sudo -u clawuser XDG_RUNTIME_DIR=/run/user/1000 systemctl --user disable openclaw-gateway
+# ---------------------------------------------------------------------------
+# 1. Disable and stop EVERY unit this product installs, BEFORE deleting anything
+#    those units invoke.  v1.4.2, card #285.
+#
+# The list is derived from the INSTALLER (setup.ps1 + resources/install-*.sh),
+# not from what this file used to happen to name. It used to name five of the
+# eleven, so a complete teardown still left clawfactory-fw, clawfactory-send and
+# the two timers enabled, and no number of re-runs would have disabled them.
+#
+# Order is the point, not tidiness: v1.4.1 added the egress-refresh disable
+# specifically so systemd would not be left with an enabled unit pointing at a
+# deleted script, and then deleted clawfactory-fw.service's script while leaving
+# that unit enabled -- which is a failed unit in the journal at every future boot
+# of a machine that no longer has ClawFactory on it. Disable first, delete second,
+# for all eleven or for none.
+# ---------------------------------------------------------------------------
+CF_UNITS="clawfactory-allow-providers.timer clawfactory-allow-providers.service clawfactory-egress-refresh.service clawfactory-fw.service clawfactory-proxy.service clawfactory-quarantine.service clawfactory-quarantine-gc.timer clawfactory-quarantine-gc.service clawfactory-send.service clawfactory-send-gc.timer clawfactory-send-gc.service"
+systemctl disable --now $CF_UNITS
 # Flush the clawfactory nft chain (uses iptables on WSL1)
 /usr/sbin/nft delete table inet clawfactory 2>/dev/null
 # Clear immutable flags so the frozen safety files can be removed (Defect 2/4:
 # SOUL.md + workspace SOUL are root:root chattr +i; rm/deluser fail otherwise).
 chattr -i /home/clawuser/.openclaw/SOUL.md /home/clawuser/.openclaw/SOUL.md.sha256 /home/clawuser/.openclaw/workspace/SOUL.md 2>/dev/null
-# Stop + remove the chatCompletions gating proxy and put the gateway back on its
-# public port (Blocker 1). Order matters: drop the proxy BEFORE the drop-in, so
-# nothing is left owning 8787.
-systemctl disable --now clawfactory-proxy 2>/dev/null
-rm -f /etc/systemd/system/clawfactory-proxy.service /usr/local/sbin/clawfactory-proxy.js 2>/dev/null
+# Put the gateway back on its public port (Blocker 1). The proxy unit that owned
+# 8787 is already stopped and disabled by step 1, so nothing is left holding the
+# port when the drop-in goes.
 rm -f /home/clawuser/.config/systemd/user/openclaw-gateway.service.d/clawfactory-real-port.conf 2>/dev/null
-systemctl daemon-reload 2>/dev/null
 sudo -u clawuser XDG_RUNTIME_DIR=/run/user/1000 systemctl --user daemon-reload 2>/dev/null
-# Remove the ClawFactory turn-gate shim + helper scripts (Defect 3). Removing
-# /usr/bin/openclaw below drops the shim; the real .mjs is removed too.
-rm -f /usr/local/sbin/clawfactory-turn-gate.sh /usr/local/sbin/clawfactory-spend-check.js /usr/local/sbin/clawfactory-dns-resolvers.sh /usr/local/sbin/clawfactory-fw-apply.sh 2>/dev/null
-# Guard 3: the read-fetch resolver and its root-only control tool. The allowlist
-# itself lives in /etc/clawfactory, which is removed wholesale further down --
-# and that includes the two *-ips.map retention files added in v1.4.1.
-# clawfactory-toolchain.sh was missing from this list -- a pre-existing leftover,
-# noticed while adding the boot unit below. Not a security gap (the file is inert
-# without the firewall and the policy it reads), but a file the uninstaller
-# claims to clean and did not.
-rm -f /usr/local/sbin/clawfactory-read-fetch.sh /usr/local/sbin/clawfactory-toolchain.sh /usr/local/sbin/clawfactory-fetchctl.js /usr/local/sbin/clawfactory-fetchctl 2>/dev/null
-# Guard 3, v1.4.1: the boot-time refresh unit. Disabled BEFORE its script is
-# removed, so systemd is not left with an enabled unit pointing at nothing --
-# which on the next boot would be a failed unit in the journal of a machine that
-# no longer has ClawFactory on it.
-systemctl disable --now clawfactory-egress-refresh.service 2>/dev/null
-rm -f /etc/systemd/system/clawfactory-egress-refresh.service /usr/local/sbin/clawfactory-egress-refresh.sh 2>/dev/null
-systemctl daemon-reload 2>/dev/null
 # Guard 1: delete quarantine. Say how many held files go with it -- these are the
 # user's own files, and removing them silently during an uninstall is exactly the
 # surprise this guard exists to prevent.
@@ -403,9 +434,31 @@ if [ -f /var/lib/clawfactory/quarantine/index.json ]; then
     HELD=$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync("/var/lib/clawfactory/quarantine/index.json")).length)}catch{console.log(0)}' 2>/dev/null || echo 0)
     echo "[uninstall] removing the delete quarantine and the $HELD file(s) still held in it"
 fi
-systemctl disable --now clawfactory-quarantine.service clawfactory-quarantine-gc.timer 2>/dev/null
-rm -f /etc/systemd/system/clawfactory-quarantine.service /etc/systemd/system/clawfactory-quarantine-gc.service /etc/systemd/system/clawfactory-quarantine-gc.timer 2>/dev/null
-rm -f /usr/local/sbin/clawfactory-quarantined.js /usr/local/sbin/clawfactory-quarantinectl.js 2>/dev/null
+# ---------------------------------------------------------------------------
+# 2. Unit FILES, and the drop-in directory install-send.sh creates. Everything
+#    named here was disabled and stopped in step 1, never the other way round.
+# ---------------------------------------------------------------------------
+for u in $CF_UNITS; do
+    rm -f "/etc/systemd/system/$u" 2>/dev/null
+done
+rm -rf /etc/systemd/system/clawfactory-allow-providers.service.d 2>/dev/null
+# Drift backstop. The explicit list stays the audit trail; this stops a unit that
+# a future installer adds and a future edit of CF_UNITS forgets from turning
+# "never named" into "left on disk" a second time. It cannot help with ENABLEMENT,
+# which is why the named list above is the real fix and this is only a sweep.
+rm -f /etc/systemd/system/clawfactory-*.service /etc/systemd/system/clawfactory-*.timer 2>/dev/null
+systemctl daemon-reload
+# ---------------------------------------------------------------------------
+# 3. The helper scripts and binaries those units invoked. INSTALLER-DERIVED:
+#    setup.ps1 plus resources/install-*.sh create seventeen files under
+#    /usr/local/sbin. This file used to name twelve, so five survived every
+#    uninstall -- allow-providers.sh, fw-assert.sh, sendctl, sendctl.js and
+#    sendd.js -- together with /usr/local/bin/clawfactory-send.
+#    Guard 3's allowlist and both *-ips.map retention files live in
+#    /etc/clawfactory, which goes wholesale further down.
+# ---------------------------------------------------------------------------
+rm -f /usr/local/sbin/clawfactory-allow-providers.sh /usr/local/sbin/clawfactory-dns-resolvers.sh /usr/local/sbin/clawfactory-egress-refresh.sh /usr/local/sbin/clawfactory-fetchctl /usr/local/sbin/clawfactory-fetchctl.js /usr/local/sbin/clawfactory-fw-apply.sh /usr/local/sbin/clawfactory-fw-assert.sh /usr/local/sbin/clawfactory-proxy.js /usr/local/sbin/clawfactory-quarantinectl.js /usr/local/sbin/clawfactory-quarantined.js /usr/local/sbin/clawfactory-read-fetch.sh /usr/local/sbin/clawfactory-sendctl /usr/local/sbin/clawfactory-sendctl.js /usr/local/sbin/clawfactory-sendd.js /usr/local/sbin/clawfactory-spend-check.js /usr/local/sbin/clawfactory-toolchain.sh /usr/local/sbin/clawfactory-turn-gate.sh 2>/dev/null
+rm -f /usr/local/sbin/clawfactory-* /usr/local/bin/clawfactory-send 2>/dev/null
 # Undo the /usr/bin/rm divert BEFORE removing anything the wrapper depends on.
 #
 # Guard 1 takes over the name `rm` via dpkg-divert. If an uninstall left that in
@@ -432,16 +485,152 @@ rm -rf /etc/clawfactory 2>/dev/null
 # Remove the openclaw global install
 rm -rf /usr/lib/node_modules/openclaw 2>/dev/null
 rm -f /usr/bin/openclaw /usr/local/bin/openclaw /bin/openclaw 2>/dev/null
-# Remove clawuser home + the user itself
-deluser --remove-home clawuser 2>/dev/null
+# ---------------------------------------------------------------------------
+# 4. clawuser.  v1.4.2, card #287, second half.
+#
+# Stopping the gateway can fail for reasons other than the missing
+# XDG_RUNTIME_DIR fixed at the top of this script, and `deluser` refuses to
+# remove an account that still owns a live process: it exits 8 and says
+# "user clawuser is currently used by process N". The old code sent that to
+# /dev/null and carried on, so a surviving clawuser was indistinguishable from a
+# clean removal -- until the next install aborted at Failed to create clawuser.
+# Verify the processes are gone, escalate once, verify again, and REPORT.
+# ---------------------------------------------------------------------------
+CF_PROCS=$(pgrep -u clawuser 2>/dev/null | wc -l)
+if [ "$CF_PROCS" != "0" ]; then
+    echo "[uninstall] clawuser still owns $CF_PROCS process(es) after the gateway stop; terminating them"
+    pkill -u clawuser 2>/dev/null
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        CF_PROCS=$(pgrep -u clawuser 2>/dev/null | wc -l)
+        if [ "$CF_PROCS" = "0" ]; then break; fi
+        sleep 1
+    done
+    if [ "$CF_PROCS" != "0" ]; then
+        pkill -KILL -u clawuser 2>/dev/null
+        for i in 1 2 3 4 5; do
+            CF_PROCS=$(pgrep -u clawuser 2>/dev/null | wc -l)
+            if [ "$CF_PROCS" = "0" ]; then break; fi
+            sleep 1
+        done
+    fi
+fi
+if [ "$CF_PROCS" != "0" ]; then
+    echo "[uninstall] ERROR: clawuser still owns $CF_PROCS process(es); deluser is expected to fail with exit 8" >&2
+fi
+# NOT 2>/dev/null. That redirect is why a two-line defect survived to a release.
+deluser --remove-home clawuser
 # Drop the WSL default-user line we added
 sed -i '/^\[user\]/,/^$/d' /etc/wsl.conf 2>/dev/null
-echo OK
+# ---------------------------------------------------------------------------
+# 5. Read back what is actually left and print a terminal marker the Windows side
+#    can REQUIRE.  v1.4.2, card #286.
+#
+# The caller used to assign this whole invocation to $null and then log
+# "In-distro ClawFactory artifacts removed" unconditionally, so a teardown that
+# executed half of itself reported success and reached a release. The teardown now
+# states what it left, and the caller checks the marker rather than assuming it.
+#
+# Enablement is counted from the .wants symlinks on disk rather than from
+# `systemctl list-unit-files`, so a systemctl that cannot run reads as an error
+# instead of silently reading as zero.
+# ---------------------------------------------------------------------------
+LEFT=""
+id clawuser >/dev/null 2>&1 && LEFT="$LEFT clawuser"
+[ -d /home/clawuser ] && LEFT="$LEFT /home/clawuser"
+[ -d /etc/clawfactory ] && LEFT="$LEFT /etc/clawfactory"
+[ -e /usr/bin/openclaw ] && LEFT="$LEFT /usr/bin/openclaw"
+[ -d /usr/lib/node_modules/openclaw ] && LEFT="$LEFT /usr/lib/node_modules/openclaw"
+[ -d /var/lib/clawfactory ] && LEFT="$LEFT /var/lib/clawfactory"
+[ -d /usr/local/lib/clawfactory ] && LEFT="$LEFT /usr/local/lib/clawfactory"
+N_UNITS=$(ls -1d /etc/systemd/system/clawfactory-* 2>/dev/null | wc -l)
+N_SBIN=$(ls -1d /usr/local/sbin/clawfactory-* 2>/dev/null | wc -l)
+N_ENABLED=$(ls -1d /etc/systemd/system/*.wants/clawfactory-* 2>/dev/null | wc -l)
+echo "[uninstall] READBACK units=$N_UNITS sbin=$N_SBIN enabled=$N_ENABLED left=[$LEFT ]"
+if [ -z "$LEFT" ] && [ "$N_UNITS" = "0" ] && [ "$N_SBIN" = "0" ] && [ "$N_ENABLED" = "0" ]; then
+    echo CLAWFACTORY_TEARDOWN_OK
+else
+    echo CLAWFACTORY_TEARDOWN_INCOMPLETE
+fi
 '@
-        $enc = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($script))
-        $null = & wsl.exe -d Ubuntu -u root -- bash -lc "echo $enc | base64 -d | bash" 2>&1
-        Write-Log INFO 'In-distro ClawFactory artifacts removed; Ubuntu distro left registered.'
-    } catch { Write-Log WARN "In-distro teardown failed: $($_.Exception.Message)" }
+        # -------------------------------------------------------------------
+        # v1.4.2, card #284: LF-normalise the payload before transporting it.
+        #
+        # THE MECHANISM, stated so anyone can check it: this file is stored LF in
+        # git but `*.ps1 text eol=lf` was added AFTER it was first checked out, and
+        # git never re-normalises an existing working copy. The build machine's
+        # working tree was therefore CRLF, Inno compiles from the working tree, and
+        # PowerShell's here-string preserves the file's own line endings. Every
+        # line of this payload consequently arrived inside WSL ending in a CR.
+        # Running as root, a trailing CR only lands on the last word of each
+        # line -- always `2>/dev/null` -- and root can create /dev/null<CR>, so
+        # every SIMPLE command still ran with the right arguments. The first line
+        # needing a RESERVED word, `if [ -f ... ]; then`, saw `then<CR>` instead of
+        # `then`, and bash abandoned the rest of the script with
+        #     syntax error: unexpected end of file
+        # `set +e` cannot help: a parse error is fatal regardless, and `set +e<CR>`
+        # had itself already failed as an invalid option. That is the exact split
+        # measured on cfv-176 -- the two units named before the first `if` removed,
+        # the nine named after it untouched.
+        #
+        # Reproduced with a control before this fix was written: LF as root ran all
+        # six markers, CRLF as root ran the three before the first `if` and none
+        # after, exit 2, `bash: line 11: syntax error: unexpected end of file`.
+        #
+        # Every other PowerShell->WSL transport in this product already did this --
+        # setup.ps1 Invoke-WslBash, bootstrap.ps1, post-install.ps1,
+        # switch-provider.ps1, clawfactory-grants.ps1 and all six $lfB64 lambdas.
+        # This site and resources/launcher.ps1 were the two that did not.
+        # Normalising here makes the teardown correct regardless of how any future
+        # clone happens to have its line endings configured.
+        # -------------------------------------------------------------------
+        $script = $script.Replace("`r`n", "`n").Replace("`r", "`n")
+        $teardownOut = @()
+        $teardownOk  = $false
+        if ($script.IndexOf([char]13) -ge 0) {
+            # Cannot happen after the two Replace calls above; asserted rather than
+            # assumed, because the whole defect was a silent truncation.
+            Write-Log ERROR 'Teardown payload still contains a CR after normalisation. Refusing to send it: bash would abandon it at the first reserved word and report nothing.'
+        } else {
+            $enc = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($script))
+            # card #286: capture it. This used to be `$null = ... 2>&1`, which threw
+            # away the only evidence that the teardown had stopped half way.
+            $raw = & wsl.exe -d Ubuntu -u root -- bash -lc "echo $enc | base64 -d | bash" 2>&1
+            $rc  = $LASTEXITCODE
+            $teardownOut = @($raw | ForEach-Object { "$_" })
+            foreach ($line in $teardownOut) {
+                if ($line -and $line.Trim()) { Write-Log INFO "  [in-distro] $($line.Trim())" }
+            }
+            Write-Log INFO "In-distro teardown exit code = $rc"
+            $teardownOk = ($rc -eq 0) -and ($teardownOut -contains 'CLAWFACTORY_TEARDOWN_OK')
+        }
+
+        if ($teardownOk) {
+            Write-Log INFO 'In-distro ClawFactory artifacts removed, verified by read-back inside the distro; Ubuntu distro left registered.'
+        } else {
+            # An uninstall that ABORTS leaves the user unable to remove the product,
+            # which is worse than an incomplete removal. So: finish the Windows-side
+            # uninstall, log the failure as a failure, and tell the user what is left
+            # and how to remove it. What must never happen again is the third option,
+            # which is what shipped: report success having removed nothing.
+            $readback = @($teardownOut | Where-Object { $_ -like '*READBACK*' }) -join ' '
+            Write-Log ERROR 'In-distro teardown did NOT complete. ClawFactory files remain inside the Ubuntu distro.'
+            if ($readback) { Write-Log ERROR "Read-back from inside the distro: $readback" }
+            Write-Log ERROR 'The rest of the uninstall will still finish. To clear the Linux side by hand, open a terminal and run:  wsl -d Ubuntu -u root'
+            if (-not $Silent) {
+                try {
+                    Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+                    $warn = "ClawFactory has been removed from Windows, but it could not finish cleaning up inside the Ubuntu Linux distro you chose to keep.`r`n`r`n" +
+                            "What is left: $(if ($readback) { $readback } else { 'see the log' })`r`n`r`n" +
+                            "To remove the rest, open a terminal and run:  wsl -d Ubuntu -u root`r`n`r`n" +
+                            "The full log is at $LogFile."
+                    [void][System.Windows.Forms.MessageBox]::Show(
+                        $warn, 'ClawFactory Uninstall - Linux cleanup incomplete',
+                        [System.Windows.Forms.MessageBoxButtons]::OK,
+                        [System.Windows.Forms.MessageBoxIcon]::Warning)
+                } catch { Write-Log WARN "Could not show the incomplete-teardown dialog: $($_.Exception.Message)" }
+            }
+        }
+    } catch { Write-Log ERROR "In-distro teardown threw: $($_.Exception.Message). ClawFactory files may remain inside the Ubuntu distro." }
 }
 
 #--- 7. HKLM\SOFTWARE\ClawFactory --------------------------------------------
