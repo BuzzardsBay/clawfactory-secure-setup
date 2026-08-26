@@ -43,7 +43,16 @@
 #>
 param(
     [string]$Transcript = 'C:\cfv\stagebox-out-probe.txt',
-    [string]$SeedHost   = 'www.iana.org'
+    # The seeded read-fetch host. CARD #282: this defaulted to www.iana.org, a
+    # host whose address set does not move -- measured on the build machine at
+    # ONE distinct set over six lookups straight at 8.8.8.8. A stable host
+    # cannot detect the defect this seed exists to detect, because that defect
+    # is a REPLAYED STALE SET, and a stale set for a stable host is byte-for-byte
+    # indistinguishable from a fresh one. outlook.office.com measured FOUR
+    # distinct, near-disjoint sets over the same six lookups, and is the host
+    # BP.0c proved rotating ON THE BOX with a stable-host control showing the
+    # rotation measurement discriminates rather than always saying "rotating".
+    [string]$SeedHost   = 'outlook.office.com'
 )
 
 $ErrorActionPreference = 'Continue'
