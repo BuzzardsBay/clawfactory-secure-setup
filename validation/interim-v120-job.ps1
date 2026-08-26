@@ -99,6 +99,23 @@ Say "Staging $JobName..."
 $libPath = Join-Path $PSScriptRoot 'interim-v120-phaselib.ps1'
 $all = @($PhaseScript) + $ExtraFiles
 if ($all -notcontains $libPath) { $all += $libPath }
+# THE SAME HAZARD, ONE PHASE FURTHER ON. interim-v135-switchprovider.ps1 injects
+# its fault by dropping sp-prefix-fw.sh on the box, and its positive control
+# SP.2.CTL0 asserts that the injection landed. Run without the file, the
+# injection never happens, the control cannot fire, and the runner correctly
+# VOIDs all forty rows. That is the harness working and a phase wasted: it cost
+# a full switchprovider run on cfv-175. Close it the way the phaselib line above
+# closes its own: make the dependency structural rather than something a caller
+# has to remember. Matched by LEAF NAME so an explicit -ExtraFiles path, relative
+# or absolute, is not staged twice.
+if ((Split-Path $PhaseScript -Leaf) -eq 'interim-v135-switchprovider.ps1') {
+    $spPath = Join-Path $PSScriptRoot 'sp-prefix-fw.sh'
+    if (-not (Test-Path $spPath)) {
+        throw "interim-v135-switchprovider.ps1 needs sp-prefix-fw.sh beside it and it is not at '$spPath'. Refusing to run a fault-injection phase whose fault cannot be injected."
+    }
+    $leaves = @($all | ForEach-Object { Split-Path $_ -Leaf })
+    if ($leaves -notcontains 'sp-prefix-fw.sh') { $all += $spPath }
+}
 $staged = @($all | ForEach-Object { Push-File $_ })
 $fetch = "`$ErrorActionPreference='Stop'; New-Item -ItemType Directory -Path C:\cfv\jobs -Force | Out-Null; "
 foreach ($s in $staged) {
