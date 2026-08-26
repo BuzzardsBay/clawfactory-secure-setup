@@ -112,8 +112,14 @@ function Get-WinInventory {
                            } else { 0 }
     $inv.uninsExe        = [bool](Test-Path -LiteralPath (Join-Path $APPDIR 'unins000.exe'))
     $inv.programData     = [bool](Test-Path -LiteralPath $PDDIR)
+    # [string] IS LOAD-BEARING, NOT DECORATION. Get-Content -Raw returns a string
+    # carrying the provider's PSPath/PSDrive/Provider NoteProperties, and
+    # ConvertTo-Json -Depth 6 serialises that whole object graph. Measured on
+    # cfv-176: a 108-byte .wslconfig produced a 100,420,570-byte snapshot, which
+    # the comparison pass would then have had to parse back. Cast at the point of
+    # capture so the snapshot holds text and nothing else.
     $inv.installResult   = if (Test-Path -LiteralPath (Join-Path $PDDIR 'install-result.txt')) {
-                               (Get-Content -LiteralPath (Join-Path $PDDIR 'install-result.txt') -Raw).Trim()
+                               [string]((Get-Content -LiteralPath (Join-Path $PDDIR 'install-result.txt') -Raw).Trim())
                            } else { '(absent)' }
     $keys                = @(Get-UninstallRegKeys)
     $inv.regKeys         = $keys
@@ -130,7 +136,7 @@ function Get-WinInventory {
     $inv.desktopCount    = @($inv.desktopIcons).Count
     $inv.studioDir       = [bool](Test-Path -LiteralPath "$env:LOCALAPPDATA\Programs\ClawFactory Studio")
     $inv.wslConfig       = [bool](Test-Path -LiteralPath "$env:USERPROFILE\.wslconfig")
-    $inv.wslConfigText   = if ($inv.wslConfig) { (Get-Content -LiteralPath "$env:USERPROFILE\.wslconfig" -Raw) } else { '(absent)' }
+    $inv.wslConfigText   = if ($inv.wslConfig) { [string](Get-Content -LiteralPath "$env:USERPROFILE\.wslconfig" -Raw) } else { '(absent)' }
 
     $tasks = @()
     try {
@@ -250,7 +256,16 @@ if ($Mode -eq 'Before') {
         "registry=$($inv.regKeyCount) key(s) '$(@($inv.regKeys | ForEach-Object { $_.DisplayName }) -join '; ')', resources=$($inv.resourcesFound)/$($REQUIRED.Count), clawfactory-egress-refresh.service is-enabled='$($distro.UNIT_ISENABLED)', nft table=$($distro.NFT_TABLE) with $($distro.NFT_CHAINS) chain(s), /usr/local/sbin/clawfactory-* count=$($distro.SBIN_CLAWFACTORY_COUNT)."
 
     $inv | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $Snapshot -Encoding UTF8
-    W "held snapshot written to $Snapshot ($((Get-Item $Snapshot).Length) bytes)"
+    $snapBytes = (Get-Item $Snapshot).Length
+    W "held snapshot written to $Snapshot ($snapBytes bytes)"
+    # The snapshot is an INSTRUMENT and can fail in its own way. First run on
+    # cfv-176 wrote 100,420,570 bytes from a box whose largest captured file is
+    # 108 bytes, because an uncast Get-Content -Raw dragged the provider object
+    # graph into ConvertTo-Json. It would have been parsed straight back in the
+    # comparison pass. Bound it, and fail loudly rather than quietly.
+    Record 'UN.1b' 'the held snapshot is a plausible size for what it captured' `
+        $(if ($snapBytes -lt 262144) { 'PASS' } else { 'FAIL' }) `
+        "snapshot=$snapBytes bytes, ceiling=262144. This box's captured text totals a few kilobytes; anything near a megabyte means an object graph was serialised instead of a value, and the comparison pass would have to parse it back."
     Complete-Phase -ResultsJson $ResultsJson -MarkerPrefix 'UNINSTALL'
     Finish 0
 }
