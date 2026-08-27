@@ -1,30 +1,46 @@
 <#
-  v1.4.4 box A: diagnose the TC.1d gate_error, and read the toolchain switch state.
+  v1.4.4 box A: diagnose the TC.1d gate_error.
 
-  WHY THIS EXISTS
-  ---------------
-  The toolchain phase VOIDed on an unmet precondition. Two DIFFERENT causes are
-  tangled in its output and they must be separated before either is reported:
+  THIS IS REVISION 2. REVISION 1 WAS DEFECTIVE AND ITS RESULTS ARE RETRACTED.
+  ---------------------------------------------------------------------------
+  Revision 1 read the gateway token from /home/clawuser/.openclaw/gateway-token,
+  a path that does not exist. Both of its turns therefore went out with an EMPTY
+  Bearer and came back {"error":{"message":"Unauthorized"}}, never reaching the
+  gate logic at all. That is the documented 401 trap: a normal proxy turn needs
+  the ClawChat auth shape or it is rejected before anything interesting happens.
 
-    1. TC.1a/1b/1c FAILed because the toolchain switch was OFF. The switchprovider
-       phase deliberately leaves it OFF (SP.9), and the toolchain phase asserts a
-       FRESH INSTALL has it ON. That is a phase-ordering artifact of running both
-       on one box, predicted in section 6.3 of the close-out before dispatch. It
-       is NOT a product finding and this probe confirms the mechanism rather than
-       assuming it.
+  Worse, revision 1's GD.4a PASSED on that Unauthorized response, because it
+  only tested for the ABSENCE of '"blocked":true'. An auth error contains no such
+  string, so a turn that never ran scored as a turn that was not blocked. Its
+  positive control was equally weak: it matched the word 'error', so it confirmed
+  "a body came back" and called that "reached the gate".
 
-    2. TC.1d FAILed because a real agent turn returned
-         clawfactory_gate:{"blocked":true,"state":"gate_error"}
-       with zero model tokens. The provider route was reachable in the same run
-       (TC.1.CTL PASS), so this is NOT the toolchain toggle. It is the gating
-       proxy failing to VERIFY, which is a different claim and potentially a
-       ship-blocker.
+  Both are the defect class this project keeps paying for: a check that passes
+  when nothing happened. Revision 2 fixes them structurally:
 
-  The install log warned `Step-EnableChatCompletions returned exit=1`, and this
-  probe tests whether that warning and the gate_error are the same fault.
+    * the token is read the way the toolchain phase reads it, from
+      openclaw.json -> gateway.auth.token, and its NON-EMPTINESS is asserted as
+      a precondition before any turn verdict is allowed to mean anything;
+    * every turn is classified into exactly one of UNAUTHORIZED / GATE_BLOCKED /
+      MARKER_OK / OTHER, so "blocked", "never authenticated" and "answered" can
+      never collapse into one another;
+    * the success marker is a string that appears nowhere else in this probe's
+      own output, so the control cannot pass by finding its own echo.
 
-  L17: a new probe inherits NONE of the preconditions of the phases beside it, so
-  every state this probe depends on is measured here rather than carried over.
+  WHAT IS ACTUALLY UNDER TEST
+  ---------------------------
+  The toolchain phase got a REAL gate response with zero model tokens:
+    clawfactory_gate:{"blocked":true,"state":"gate_error"}
+  The provider route was reachable in that same run (TC.1.CTL PASS), so this is
+  not the toolchain toggle. The install log warned
+    Step-EnableChatCompletions returned exit=1
+  and this probe tests whether the two are the same fault.
+
+  If turn 1 is blocked and turn 2 answers, this is a COLD-START regression of the
+  v1.0.45 prime-and-retry fix. If both are blocked, it is not a priming problem.
+  Both readings are taken in ONE run so they are comparable.
+
+  L17: a new probe inherits NONE of the preconditions of the phases beside it.
 #>
 param(
     [string]$Transcript = 'C:\cfv\gatediag-out-probe.txt'
@@ -34,7 +50,7 @@ $ErrorActionPreference = 'Continue'
 . C:\cfv\interim-v120-wslchan.ps1
 . C:\cfv\interim-v120-phaselib.ps1
 
-Start-Phase -Name 'v1.4.4 box A: gate_error diagnosis and toolchain switch state' `
+Start-Phase -Name 'v1.4.4 box A: gate_error diagnosis (revision 2)' `
     -Transcript $Transcript -Sentinel 'GATEDIAG_PROBE_COMPLETE'
 
 $chan = Test-WslChannel
@@ -45,90 +61,111 @@ if (-not $chan.Ok) {
 }
 
 # =========================================================================
-Section '1. The toolchain switch state, to settle cause 1 by measurement'
-$sw = Invoke-WslFile -Tag 'gd1' -User 'root' -Body @'
-echo "--- policy as the control tool reports it ---"
-/usr/local/sbin/clawfactory-toolchainctl status 2>&1 || echo "TOOLCHAINCTL_RC=$?"
-echo "--- the live nft set ---"
-nft list set inet clawfactory toolchain_ipv4 2>&1 | head -20
-'@
-W $sw.Out
-
-$switchOff = $sw.Out -match 'enabled=0|TOOLCHAIN=off|"enabled":false'
-Record 'GD.1' 'The toolchain switch is OFF, which is what made TC.1a/1b/1c FAIL' `
-    $(if ($switchOff) { 'PASS' } else { 'FAIL' }) `
-    "switchReportsOff=$switchOff. SP.9 leaves the toggle OFF by design; the toolchain phase asserts a FRESH install has it ON. If this reads OFF, TC.1a/1b/1c are a phase-ordering artifact on a shared box and NOT a product finding."
-
-# =========================================================================
-Section '2. Is chatCompletions actually enabled? The install warned exit=1.'
-$cc = Invoke-WslFile -Tag 'gd2' -User 'root' -Body @'
-echo "--- gating proxy unit ---"
-systemctl is-active clawfactory-chatgate.service 2>&1 || true
-systemctl is-enabled clawfactory-chatgate.service 2>&1 || true
-echo "--- who owns 8787 and 8788 ---"
+Section '1. Discover the real unit and file names rather than guessing them'
+# Revision 1 asserted on a unit name it invented, and a systemctl query for a
+# unit that does not exist reports inactive, which reads exactly like a stopped
+# service. Enumerate instead.
+$units = Invoke-WslFile -Tag 'gd1' -User 'root' -Body @'
+echo "--- every clawfactory unit and its state ---"
+systemctl list-units --all --no-legend --no-pager 'clawfactory*' 2>&1 | sed 's/^[[:space:]]*//'
+echo "--- every clawfactory unit FILE (catches units that exist but never ran) ---"
+systemctl list-unit-files --no-legend --no-pager 'clawfactory*' 2>&1 | sed 's/^[[:space:]]*//'
+echo "--- openclaw user units, as clawuser owns the gateway ---"
+runuser -u clawuser -- systemctl --user list-units --all --no-legend --no-pager 'openclaw*' 2>&1 | sed 's/^[[:space:]]*//'
+echo "--- listeners on 8787 / 8788 ---"
 ss -lntp 2>/dev/null | grep -E '8787|8788' || echo "NO_LISTENER_8787_8788"
-echo "--- gate config presence ---"
-for f in /etc/clawfactory/spend.json /etc/clawfactory/soul.sha256 /etc/clawfactory/gate.json; do
-  if [ -e "$f" ]; then echo "EXISTS $f mode=$(stat -c %a "$f") owner=$(stat -c %U:%G "$f")"; else echo "ABSENT $f"; fi
-done
-echo "--- gate service journal, last 40 ---"
-journalctl -u clawfactory-chatgate.service -n 40 --no-pager 2>&1 | tail -40 || echo "NO_JOURNAL"
 '@
-W $cc.Out
+W $units.Out
 
-$gateUp = $cc.Out -match '(?m)^active'
-Record 'GD.2' 'The gating proxy service is active' `
-    $(if ($gateUp) { 'PASS' } else { 'FAIL' }) `
-    "systemctl is-active reported active=$gateUp. The proxy owns :8787 and the real gateway sits behind it on :8788."
+$sawAnyUnit = $units.Out -match 'clawfactory'
+Record 'GD.1.CTL' 'POSITIVE CONTROL: the unit enumeration returns clawfactory units at all' `
+    $(if ($sawAnyUnit) { 'PASS' } else { 'FAIL' }) `
+    'an empty enumeration would make every "not active" reading below vacuous'
+
+$proxyListening = $units.Out -match ':8787'
+Record 'GD.1' 'Something is listening on 8787, the gating proxy port' `
+    $(if ($proxyListening) { 'PASS' } else { 'FAIL' }) `
+    "listener on 8787 present=$proxyListening. The root-owned gating proxy owns 8787; the real gateway sits behind it on 8788."
 
 # =========================================================================
-Section '3. The spend meter, which is what fail-safe-blocks a turn it cannot read'
-$sp = Invoke-WslFile -Tag 'gd3' -User 'root' -Body @'
-echo "--- spend state files ---"
-find /var/lib/clawfactory -maxdepth 2 -name '*spend*' -o -maxdepth 2 -name '*meter*' 2>/dev/null | while read f; do
+Section '2. The gate configuration the proxy reads'
+$cfg = Invoke-WslFile -Tag 'gd2' -User 'root' -Body @'
+for f in /etc/clawfactory/soul.sha256 /etc/clawfactory/workspace-soul.sha256 /etc/clawfactory/spend.json /etc/clawfactory/gate.json /etc/clawfactory/chatgate.json; do
+  if [ -e "$f" ]; then echo "EXISTS $f mode=$(stat -c %a "$f") owner=$(stat -c %U:%G "$f") bytes=$(stat -c %s "$f")"; else echo "ABSENT $f"; fi
+done
+echo "--- anything spend/meter shaped ---"
+find /var/lib/clawfactory /etc/clawfactory -maxdepth 2 \( -name '*spend*' -o -name '*meter*' -o -name '*gate*' \) 2>/dev/null | while read f; do
   echo "FOUND $f mode=$(stat -c %a "$f") owner=$(stat -c %U:%G "$f") bytes=$(stat -c %s "$f")"
 done
-echo "--- spend meter as the product reports it ---"
-if [ -x /usr/local/sbin/clawfactory-spendctl ]; then /usr/local/sbin/clawfactory-spendctl status 2>&1; else echo "NO_SPENDCTL"; fi
+echo "--- CONTROL: a path that cannot exist must report ABSENT ---"
+f=/etc/clawfactory/this-cannot-exist-4b71c.json
+if [ -e "$f" ]; then echo "CTL_BAD_EXISTS"; else echo "CTL_ABSENT_OK"; fi
 '@
-W $sp.Out
+W $cfg.Out
+Record 'GD.2.CTL' 'POSITIVE CONTROL: the existence probe tells present from absent' `
+    $(if ($cfg.Out -match 'CTL_ABSENT_OK') { 'PASS' } else { 'FAIL' }) `
+    'without this, every ABSENT above could mean the test cannot see anything'
 
 # =========================================================================
-Section '4. THE SUBJECT: two consecutive turns. v1.0.45 primes and retries the meter.'
-# The FIRST turn on a cold meter was the v1.0.45 defect. If turn 1 gate_errors
-# and turn 2 succeeds, this is a COLD-START regression. If BOTH fail, it is a
-# harder fault. Both readings are taken in ONE run so they can be compared.
+Section '3. The proxy journal, which is where a gate_error explains itself'
+$jr = Invoke-WslFile -Tag 'gd3' -User 'root' -Body @'
+for u in clawfactory-chatgate clawfactory-gate clawfactory-proxy clawfactory-chatproxy; do
+  echo "===== journalctl -u $u ====="
+  journalctl -u "$u" -n 30 --no-pager 2>&1 | tail -30
+done
+echo "===== any journal line mentioning gate_error ====="
+journalctl --no-pager --since "-2 hours" 2>/dev/null | grep -i 'gate_error\|spend\|chatgate' | tail -40 || echo "NO_GATE_ERROR_LINES"
+'@
+W $jr.Out
+
+# =========================================================================
+Section '4. THE SUBJECT: two consecutive turns, with the CORRECT auth shape'
+# Marker chosen so it appears nowhere else in this probe's own output.
 $turns = Invoke-WslFile -Tag 'gd4' -User 'clawuser' -Body @'
-tok=$(cat /home/clawuser/.openclaw/gateway-token 2>/dev/null || echo "")
-if [ -z "$tok" ]; then echo "NO_TOKEN"; fi
+TOKEN=$(node -e 'const j=require("/home/clawuser/.openclaw/openclaw.json");process.stdout.write((j.gateway&&j.gateway.auth&&j.gateway.auth.token)||"")')
+if [ -z "$TOKEN" ]; then echo "TOKEN_EMPTY"; else echo "TOKEN_PRESENT_LEN=${#TOKEN}"; fi
+printf '%s' '{"model":"openclaw/main","stream":false,"messages":[{"role":"user","content":"Reply with exactly: ZQ7GATEPROOF"}]}' > /var/tmp/gd-turn.json
 for n in 1 2; do
   echo "===== TURN $n ====="
-  curl -s -m 90 -X POST http://127.0.0.1:8787/v1/chat/completions \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $tok" \
-    -H "x-openclaw-agent-id: main" \
-    -d '{"model":"openclaw/main","messages":[{"role":"user","content":"Reply with exactly the word GATEDIAGOK and nothing else."}]}' 2>&1
+  curl -s --max-time 200 -X POST http://127.0.0.1:8787/v1/chat/completions \
+    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -H "x-openclaw-agent-id: main" --data @/var/tmp/gd-turn.json | head -c 900
   echo ""
+  [ "$n" = "1" ] && sleep 25
 done
+rm -f /var/tmp/gd-turn.json
 '@
 W $turns.Out
 
-$t1 = ($turns.Out -split '===== TURN 2 =====')[0]
-$t2 = if ($turns.Out -match '===== TURN 2 =====') { ($turns.Out -split '===== TURN 2 =====')[1] } else { '' }
-$t1Blocked = $t1 -match '"blocked":true'
-$t2Blocked = $t2 -match '"blocked":true'
-$t2Ok      = $t2 -match 'GATEDIAGOK'
+# PRECONDITION, not a verdict: without a token nothing below is interpretable.
+$tokenOk = $turns.Out -match 'TOKEN_PRESENT_LEN=[1-9]'
+Require-Precondition -Id 'GD.4.PRE' -Name 'the gateway token was actually read' -Met $tokenOk `
+    -Reason 'revision 1 read an empty token and both of its turns returned Unauthorized, which it then scored as "not blocked". Without a token, a turn verdict is a statement about authentication, not about the gate.' | Out-Null
 
-Record 'GD.4.CTL' 'POSITIVE CONTROL: the probe reached the gate at all (a response body came back)' `
-    $(if ($turns.Out -match 'clawfactory_gate|chatcmpl|error') { 'PASS' } else { 'FAIL' }) `
-    'without a response body, "blocked" and "unreachable" would be indistinguishable'
+function Get-TurnClass([string]$t) {
+    if ($t -match 'ZQ7GATEPROOF')            { return 'MARKER_OK' }
+    if ($t -match '"unauthorized"|Unauthorized') { return 'UNAUTHORIZED' }
+    if ($t -match '"blocked":true')          { return 'GATE_BLOCKED' }
+    if ([string]::IsNullOrWhiteSpace($t))    { return 'EMPTY' }
+    return 'OTHER'
+}
+$p1 = ($turns.Out -split '===== TURN 1 =====')[-1]
+$s1 = ($p1 -split '===== TURN 2 =====')[0]
+$s2 = if ($turns.Out -match '===== TURN 2 =====') { ($turns.Out -split '===== TURN 2 =====')[-1] } else { '' }
+$c1 = Get-TurnClass $s1
+$c2 = Get-TurnClass $s2
+W "TURN1_CLASS=$c1"
+W "TURN2_CLASS=$c2"
 
-Record 'GD.4a' 'Turn 1 on a cold meter is NOT fail-safe blocked' `
-    $(if ($t1Blocked) { 'FAIL' } else { 'PASS' }) `
-    "turn1Blocked=$t1Blocked. v1.0.45 primes and retries the spend meter so the FIRST turn is not fail-safe blocked."
+Record 'GD.4a' 'Turn 1 returns real model output rather than a gate refusal' `
+    $(if ($c1 -eq 'MARKER_OK') { 'PASS' } else { 'FAIL' }) `
+    "turn1Class=$c1. Classified into exactly one of MARKER_OK / GATE_BLOCKED / UNAUTHORIZED / EMPTY / OTHER, so a turn that never ran cannot score as a turn that was not blocked."
 
-Record 'GD.4b' 'Turn 2 completes and returns real model output' `
-    $(if ($t2Ok -and -not $t2Blocked) { 'PASS' } elseif ($t2Blocked) { 'FAIL' } else { 'FAIL' }) `
-    "turn2Blocked=$t2Blocked turn2SaidGATEDIAGOK=$t2Ok. If turn 1 blocks and turn 2 succeeds this is a COLD-START fault; if both block it is not a priming problem."
+Record 'GD.4b' 'Turn 2 returns real model output' `
+    $(if ($c2 -eq 'MARKER_OK') { 'PASS' } else { 'FAIL' }) `
+    "turn2Class=$c2. If turn1=GATE_BLOCKED and turn2=MARKER_OK this is a COLD-START regression of the v1.0.45 prime-and-retry fix. If both are GATE_BLOCKED it is not a priming problem."
+
+Record 'GD.4c' 'DIAGNOSIS: which fault is this' 'INFO' `
+    "turn1=$c1 turn2=$c2. GATE_BLOCKED on both => the gate cannot verify at all on a clean install. MARKER_OK on both => TC.1d was transient and the toolchain phase's own warm-up did not cover it. GATE_BLOCKED then MARKER_OK => cold start."
 
 Complete-Phase -ResultsJson 'C:\cfv\gatediag-results.json' -MarkerPrefix 'GATEDIAG'

@@ -1,6 +1,6 @@
 # CLOSE-OUT: v1.4.4 validation, BOX A
 
-**Status at the time of writing: IN PROGRESS — rows 1,3,5,6,7 PASS. Rows 8-9 VOID pending re-run. A gate_error on a real agent turn is under diagnosis.**
+**Status at the time of writing: IN PROGRESS — rows 1,3,5,6,7 PASS. The gate_error did NOT reproduce; the agent completes turns. Rows 8-9 re-running.**
 Written incrementally so an interrupted session leaves an honest record rather
 than nothing. Sections carry their own state. Anything not measured says so.
 
@@ -887,3 +887,128 @@ gate service state, the spend meter, and **two consecutive turns in one run** �
 because if turn 1 blocks and turn 2 succeeds this is a cold-start regression of the
 v1.0.45 prime-and-retry fix, and if both block it is a harder fault. Those are
 different findings and the difference is measured rather than guessed.
+
+---
+
+## 8D. The `gate_error`: diagnosed, and MY FIRST INSTRUMENT RETRACTED
+
+### 8D.1 Revision 1 was defective and its results are withdrawn
+
+**Retracted in full: `GD.1`, `GD.2`, `GD.4a`, `GD.4b` from the first gatediag run.**
+They are recorded here rather than deleted, because a retracted measurement that
+leaves no trace is how a wrong number gets re-derived later.
+
+Revision 1 read the gateway token from `/home/clawuser/.openclaw/gateway-token`,
+**a path that does not exist**. Both of its turns therefore went out with an empty
+Bearer:
+
+```
+NO_TOKEN
+===== TURN 1 =====  {"error":{"message":"Unauthorized","type":"unauthorized"}}
+===== TURN 2 =====  {"error":{"message":"Unauthorized","type":"unauthorized"}}
+```
+
+That is the documented 401 trap, met head-on.
+
+**And then it scored that as a PASS.** `GD.4a` tested only for the ABSENCE of
+`"blocked":true`; an `Unauthorized` body contains no such string, so **a turn that
+never ran was recorded as a turn that was not blocked**. Its positive control was
+equally weak — it matched the word `error`, so "a body came back" was accepted as
+"reached the gate".
+
+**That is the defect class this project keeps paying for, written into the very
+instrument built to investigate a fail-safe block.** It is the same shape as the
+kill switch printing a success banner over a step that failed.
+
+Two more revision-1 errors, both of which would have produced false findings:
+
+* **`GD.2` asserted on an invented unit name.** There is no
+  `clawfactory-chatgate.service`; the real unit is **`clawfactory-proxy.service`**.
+  `systemctl is-active` on a nonexistent unit reports inactive, **which reads
+  exactly like a stopped service**. It would have been reported as "the gating
+  proxy is down" on a box where it was running fine.
+* **`GD.1` measured the toolchain switch too late to mean anything.** The toolchain
+  phase's own `TC.9` restores the switch to the shipped default at the end, so by
+  the time revision 1 looked, the state it was trying to explain had already been
+  reverted. It is **inconclusive**, not evidence against the confound.
+
+### 8D.2 Revision 2, structurally fixed. **PASS**
+
+```
+PASS=7 FAIL=0 VOID=0 INFO=1  (counted 8 of 8 recorded rows)
+positive controls registered=1 fired=1
+preconditions declared=1 met=1
+
+PHASE VERDICT: PASS. Every positive control fired and every precondition was met.
+```
+
+The fixes are structural rather than patches: the token is read the way the working
+phase reads it and **its non-emptiness is a PRECONDITION**, so a turn verdict can
+never again be a statement about authentication; every turn is classified into
+exactly one of `MARKER_OK` / `GATE_BLOCKED` / `UNAUTHORIZED` / `EMPTY` / `OTHER`;
+and the marker `ZQ7GATEPROOF` appears nowhere else in the probe's own output.
+
+### 8D.3 THE ANSWER: the agent completes turns. `TC.1d` did not reproduce.
+
+```
+TOKEN_PRESENT_LEN=48
+===== TURN 1 =====
+{"choices":[{"message":{"role":"assistant","content":"ZQ7GATEPROOF"}}],
+ "usage":{"prompt_tokens":3,"completion_tokens":11,...}}
+===== TURN 2 =====
+{"choices":[{"message":{"role":"assistant","content":"ZQ7GATEPROOF"}}],
+ "usage":{"prompt_tokens":11678,"completion_tokens":11,...}}
+
+TURN1_CLASS=MARKER_OK
+TURN2_CLASS=MARKER_OK
+```
+
+**Real model output, real token usage, both turns.** So the gate is NOT broken on a
+clean v1.4.4 install, and `Step-EnableChatCompletions returned exit=1` did **not**
+leave the chat path inoperable.
+
+The architecture is correct and was verified rather than assumed:
+
+```
+clawfactory-proxy.service  loaded active running
+  ClawFactory chatCompletions gating proxy (SOUL + spend gate on 127.0.0.1:8787)
+LISTEN 127.0.0.1:8787  pid=12615     <- root-owned gating proxy
+LISTEN 127.0.0.1:8788  pid=12180     <- the real gateway, behind it
+       [::1]:8787 / [::1]:8788       <- both families bound
+```
+
+**The proxy journal contains exactly one `gate_error`, and it is `TC.1d`'s:**
+
+```
+Aug 27 22:25:28  [clawfactory-proxy] listening on 127.0.0.1:8787 -> real gateway 127.0.0.1:8788;
+                 gating POST /v1/chat/completions via /usr/local/sbin/clawfactory-turn-gate.sh as clawuser
+Aug 27 22:52:12  [clawfactory-proxy] chat turn BLOCKED (gate_error) stream=false
+```
+
+One event, at 22:52:12. Nothing before it, nothing after it, and two successful
+turns thirteen minutes later.
+
+### 8D.4 What is NOT claimed
+
+**The root cause of the 22:52:12 `gate_error` is NOT identified.** It happened once
+and did not reproduce. Saying more than that would be an argument dressed as a
+measurement, so:
+
+* **Not claimed: "cold start".** The toolchain phase warms the agent (L17) before
+  `TC.1d`, which weakens that explanation — though the warm-up turn's own result
+  was never asserted, so it may itself have failed silently. Unknown either way.
+* **Not claimed: "the toolchain toggle caused it".** The toggle was OFF at 22:52
+  and ON at 23:05, which is a real difference between the failing and succeeding
+  observations, but the gate runs locally and the provider route was reachable in
+  the same run. **Plausible and unproven.** Recorded as a candidate, not a cause.
+* **Not claimed: "it is harmless".** A one-off unexplained fail-safe block on the
+  primary customer path is worth a card even though it did not reproduce, because
+  the failure mode is a user whose agent silently refuses one turn.
+
+**The direction of the failure is the safe one**: the gate refused a turn it could
+not verify and spent zero model tokens, rather than allowing an unverified turn.
+
+`/etc/clawfactory/spend.json`, `gate.json` and `chatgate.json` are all **ABSENT**,
+with a control proving the probe can tell present from absent. The gate reads its
+configuration from somewhere other than those paths. Recorded as an observation,
+not a defect: the gate demonstrably works.
