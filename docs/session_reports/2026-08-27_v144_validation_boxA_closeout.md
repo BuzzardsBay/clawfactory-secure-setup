@@ -1,6 +1,6 @@
 # CLOSE-OUT: v1.4.4 validation, BOX A
 
-**Status at the time of writing: IN PROGRESS — rows 1, 3, 5, 6, 7 PASS. Rows 8-9 in flight.**
+**Status at the time of writing: IN PROGRESS — rows 1,3,5,6,7 PASS. Rows 8-9 VOID pending re-run. A gate_error on a real agent turn is under diagnosis.**
 Written incrementally so an interrupted session leaves an honest record rather
 than nothing. Sections carry their own state. Anything not measured says so.
 
@@ -807,3 +807,83 @@ is an intactness check and a one-byte trailing newline does not make the referen
 parse differently, which is why it passed. Recorded because a control that reports
 a number other than the one it expected and still says PASS is worth a reader
 knowing about, even when the reason is benign.
+
+---
+
+## 8C. MATRIX ROWS 8 and 9: **VOID (instrument)**, and the two causes tangled inside it
+
+```
+PASS=0 FAIL=0 VOID=30 INFO=0  (counted 30 of 30 recorded rows)
+positive controls registered=7 fired=7
+preconditions declared=1 met=0
+
+PHASE VERDICT: VOID (instrument). This phase reports no product result at all.
+TOOLCHAIN_PROBE_COMPLETE rc=4
+```
+
+**No product verdict is claimed for rows 8 or 9.** The unmet precondition is
+`TC.3.PRE.PRE`, "a real agent turn completes with the toolchain toggle ON", and a
+missing precondition is never a product verdict. All seven positive controls fired,
+so the instrument was working; it declined to report, which is the phase runner
+doing its job.
+
+**Two different causes are tangled in this output and they must not be reported as
+one thing.**
+
+### 8C.1 Cause 1: `TC.1a/1b/1c` — the shared-box confound, predicted before dispatch
+
+```
+TC.1a.PRE  FAIL  A fresh install has the toolchain switch ON     policy reports enabled=false
+TC.1b.PRE  FAIL  The switch being on has actually populated the set   0 address(es) live, 0 persisted
+TC.1c.PRE  FAIL  With the switch ON, the software sources are reachable   github and npm reachable=False
+```
+
+**This is a phase-ordering artifact, not a product finding.** The `SP.*` phase ends
+with `SP.9.PRE PASS: The box is left with the toggle OFF for the reboot pass`, and
+the toolchain phase asserts that a **fresh install** has the toggle ON. The
+toolchain phase's own later output confirms the state it found:
+`{"ok":true,"enabled":false,"changed":false,"note":"already off"}`.
+
+**This is exactly the confound named in section 6.3 before either phase was
+dispatched**, which is the only reason it is being reported as a confound now
+rather than argued into one after the fact. The v1.4.0 baseline ran rows 5 to 7 and
+rows 8 to 9 on two different boxes; this job puts them on one, per the card.
+
+It is confirmed by measurement in `interim-v144-gatediag.ps1` rather than by this
+reasoning alone, and rows 8 and 9 are **re-run from the correct starting state**
+before any verdict is offered on them.
+
+### 8C.2 Cause 2: `TC.1d` — a real agent turn is fail-safe blocked. **NOT the toggle.**
+
+```
+{"id":"chatcmpl_cc56ed63…","model":"openclaw/main",
+ "choices":[{"message":{"role":"assistant",
+   "content":"ClawFactory could not verify that this turn is allowed, so it refused it (fail-safe). "}}],
+ "usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0},
+ "clawfactory_gate":{"blocked":true,"state":"gate_error"}}
+```
+
+**Zero model tokens, `state":"gate_error"`.** The gate could not verify the turn and
+refused fail-safe, which is the security-correct direction and is also a product
+that cannot answer.
+
+**It is not the toolchain toggle.** `TC.1.CTL.PRE` PASSED in the same run with
+`provider reachable=True`, so the agent's route to its model was open. The toolchain
+switch governs GitHub and npm, not the provider.
+
+The phase's own note is the right standard and is quoted rather than paraphrased:
+*"this is the control turn for TC.3. It is recorded as its own row as well as
+gating TC.3, because 'the agent cannot reach its model with the toggle ON' is a
+ship-blocker in its own right and must not be visible only as the VOID reason of
+another row."*
+
+**A candidate cause is already on the record from this run's own install log**, and
+the two were flagged as connected before this phase ran:
+`[WARN] Step-EnableChatCompletions returned exit=1. The gateway may still be
+operational; the native chat app may not connect until this is fixed manually.`
+
+**Under diagnosis, not yet a finding.** `interim-v144-gatediag.ps1` measures the
+gate service state, the spend meter, and **two consecutive turns in one run** —
+because if turn 1 blocks and turn 2 succeeds this is a cold-start regression of the
+v1.0.45 prime-and-retry fix, and if both block it is a harder fault. Those are
+different findings and the difference is measured rather than guessed.
