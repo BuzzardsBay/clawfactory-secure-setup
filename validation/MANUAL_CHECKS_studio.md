@@ -251,7 +251,7 @@ blank, would satisfy "does not say Studio backend unreachable" perfectly.
 **And the header:**
 
 - [ ] 6f. The version reads **1.3.2**. This is Studio's own version and it is deliberately
-      NOT the same as the ClawFactory installer's version, which is 1.4.1. **If it says
+      NOT the same as the ClawFactory installer's version, which is 1.4.3. **If it says
       1.3.1 or 1.3.0, the shipped payload is an OLD Studio and that is a FAIL** — and it
       means checks 8, 9 and 10 are testing the wrong artifact, so record it and stop.
 - [ ] 6g. In the top bar, the version and the word **Templates** are visibly
