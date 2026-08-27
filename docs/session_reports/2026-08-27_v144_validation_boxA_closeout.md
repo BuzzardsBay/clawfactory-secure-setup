@@ -1125,3 +1125,140 @@ ends with a garbled line, `啒乎剅䕟䥘䍔䑏㵅ര`, which is a UTF-16/UTF-8
 artifact of the runner's own exit-code line. It affects the transcript's last line
 only; the sentinel, the 15/15 count and `rc=0` all parsed correctly. Recorded
 because an unreadable line in an evidence file is worth a reader knowing is benign.
+
+---
+
+## 8G. MATRIX ROW 14: Guard 2 send path. **VOID, with a named reason. NOT a product FAIL.**
+
+The phase reported:
+
+```
+PASS=14 FAIL=7 VOID=4 INFO=1  (counted 26 of 26 recorded rows)
+positive controls registered=1 fired=1
+preconditions declared=0 met=0
+PHASE VERDICT: FAIL.
+```
+
+**Those seven FAILs are NOT reported as product defects, and the reason is a rule
+rather than a judgement call.** PROMPT 15: *"The SMTP app password is a
+deliberately KEPT throwaway. Do not ask for a new one and do not ask for it to be
+revoked. **If a phase needs it and it is absent, that phase is VOID.**"*
+
+The credential is absent, measured rather than assumed:
+
+```
+cred : stat: cannot statx '/etc/clawfactory/send-credential.json': No such file or directory
+--- credential configured? (existence only, value never read) ---
+CREDENTIAL_ABSENT
+```
+
+It is absent **by design in this run**: configuring it is the human-in-the-loop
+Studio step, and this job mandates zero outbound email.
+
+### 8G.1 The evidence that these are precondition failures, not defects
+
+**`G2.10` is the clearest case, because its own control passed:**
+
+```
+G2.10   FAIL  Test 10: credential file unreadable by the agent uid
+G2.10c  PASS  CONTROL: a world-readable config IS readable by the agent
+              proves the denial above is a permission boundary, not a missing file
+CREDHOST=
+NO_SECRET_CONFIGURED
+```
+
+The reader demonstrably works. The **subject file does not exist**. "Unreadable by
+the agent uid" cannot be measured against a file that is absent, and a FAIL here
+says nothing about the product's credential protection.
+
+**`G2.11c` is a CONTROL that FAILED**, which by the runner's own rules makes the
+rows around it uninterpretable rather than failing:
+
+```
+G2.11c  FAIL  CONTROL: a readable attachment is accepted
+--- broker down: the agent client must fail LOUD and preserve the draft ---
+clawfactory-send: the send broker is unreachable (connect ENOENT /run/clawfactory/send.sock).
+```
+
+The phase deliberately takes the broker down to test the loud-failure path, and the
+socket was still down for what followed. **A control that did not fire voids what
+it protects.**
+
+**`G2.1` never got a request id at all** — `requestId=` is empty — so tests 2
+through 6, which all operate on that request, had no subject to act on.
+
+### 8G.2 What DID pass, and is worth keeping
+
+```
+G2.0  PASS  Send broker reachable: request socket EXISTS with correct modes
+            req-sock   : /run/clawfactory/send.sock  660 root:clawuser
+            admin-sock : /run/clawfactory/send-admin.sock  600 root:root
+            ctl        : /usr/local/sbin/clawfactory-sendctl.js  750 root:root
+            store      : /var/lib/clawfactory/send  700 root:root
+```
+
+The **ownership and mode structure of the send stack is intact**: the request socket
+is group-accessible to `clawuser`, the admin socket is root-only, the control script
+is root-only, and the store is root-only. That is the structural shape Guard 2's
+"no send path at the agent's identity" claim rests on, and it holds.
+
+`clawfactory-send.service` and `clawfactory-send-gc.timer` are both **active**.
+
+### 8G.3 `#198` stays VOID, exactly as the job card directs
+
+```
+G2.198  VOID  Card #198: external delivery, real credential, third-party mailbox
+```
+
+**Zero outbound email was sent. `phase3b` was not run.** The gating at
+`interim-v120-phase3.ps1:468` (`if ($credPresent -and $ExpectRealCredential)`) meant
+#198 could not execute, and the phase was invoked without `-ExpectRealCredential`.
+
+### 8G.4 A HARNESS FINDING: phase 3 declares no precondition and so reports FAIL where PROMPT 15 requires VOID
+
+`preconditions declared=0 met=0`.
+
+**This is an instrument defect, not a product defect, and it is the more useful
+finding of the two.** PROMPT 15 states the rule plainly, and the phase has no
+mechanism to apply it: it cannot tell "the send path is broken" from "there is
+nothing configured to send with", so it reports the second as the first.
+
+The consequence is concrete and this run nearly walked into it: **a reader
+skimming `FAIL=7` on the Guard 2 suite would conclude the approval-gated send path
+is broken on v1.4.4.** It is not; it is unconfigured.
+
+**The fix is the same shape the other phases already use** — `Require-Precondition`
+on `CREDENTIAL_PRESENT`, so the affected rows record VOID with a named reason.
+`interim-v135-switchprovider.ps1` and `interim-v130-toolchain.ps1` both do exactly
+this and both behaved correctly this session. **Carded, not fixed here**: changing
+an instrument mid-run is the wrong order, and box D re-runs this phase.
+
+### 8G.5 The verdict recorded for row 14
+
+**VOID**, reason: *the Guard 2 suite requires a configured SMTP credential; none is
+configured on this box by design, and PROMPT 15 directs that such a phase is VOID.*
+The v1.4.0 baseline recorded this row as "PASS on the mechanism, VOID on delivery";
+**this run cannot claim the mechanism half**, because the mechanism tests had no
+credential and no request id to work with.
+
+---
+
+## 8H. MATRIX ROW 13: zero malformed verdict rows. **PASS**
+
+Every phase this session counted N of N, with no row the runner could not read:
+
+| Phase | Counted |
+| --- | --- |
+| phase 1 (row 1) | 19 of 19 |
+| providergate (row 3) | 12 of 12 |
+| switchprovider (rows 5–7) | 41 of 41 |
+| toolchain, first attempt | 30 of 30 |
+| gatediag revision 2 | 8 of 8 |
+| toolchain, re-run (rows 8–9) | 30 of 30 |
+| harness self-test (row 12) | 15 of 15 |
+| phase 3 (row 14) | 26 of 26 |
+
+**No phase invented a verdict word and no row was uncountable**, including the two
+phases that ended FAIL and the one that ended VOID. That is the property row 13
+asserts, and row 12's self-test independently proved the runner *would* have caught
+a malformed verdict had one occurred.
