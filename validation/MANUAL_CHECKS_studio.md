@@ -2,7 +2,7 @@
 
 Ten checks, all in ClawFactory Studio on the VM over RDP. This is matrix row 11.
 
-**Updated 2026-08-24 (second pass) for the v1.4.1 build.** Everything quoted below was
+**Updated 2026-08-27 for the v1.4.4 build.** Everything quoted below was
 verified against the app.asar this build actually ships (sha256 `a64a118f...2d2a49e`),
 not against the source and not against intention: 25 of 25 expected strings PRESENT,
 11 of 11 retired strings ABSENT, with a positive control confirming the bundle was
@@ -251,7 +251,7 @@ blank, would satisfy "does not say Studio backend unreachable" perfectly.
 **And the header:**
 
 - [ ] 6f. The version reads **1.3.2**. This is Studio's own version and it is deliberately
-      NOT the same as the ClawFactory installer's version, which is 1.4.3. **If it says
+      NOT the same as the ClawFactory installer's version, which is 1.4.4. **If it says
       1.3.1 or 1.3.0, the shipped payload is an OLD Studio and that is a FAIL** — and it
       means checks 8, 9 and 10 are testing the wrong artifact, so record it and stop.
 - [ ] 6g. In the top bar, the version and the word **Templates** are visibly
