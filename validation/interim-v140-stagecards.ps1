@@ -129,13 +129,13 @@ $asarCtl = @(Get-ChildItem 'C:\Users' -Recurse -Filter 'app.asar' -ErrorAction S
              Where-Object { $_.FullName -match 'ClawFactory Studio NOT REAL' })
 $asar = @{ Out = "CONTROL_FALSE_PATH_FOUND=$($asarCtl.Count)" }
 W $asar.Out
-$pinned  = '5c4ffbf420814939579f00f0b8e69e949ba34af20d239ddcdc6cf4da383e2d85'
+$pinned  = 'a64a118f7ae748059b482589d2c124d082cc42dbf9d3239ba615079982d2a49e'
 $globSane = $asar.Out -match 'CONTROL_FALSE_PATH_FOUND=0'
 # VERDICT TRIAGE. A glob that matches a path it must not match means the search
 # is not discriminating, so a hit proves nothing: VOID. No asar at all means
 # Studio is not installed where the product says it installs, which is a real
 # finding and a FAIL. A digest that differs from the pin means the shipped
-# payload is not the rebuilt 1.3.1, which is the exact drift the pin exists for.
+# payload is not the rebuilt 1.3.2, which is the exact drift the pin exists for.
 Record 'SC.3' 'The installed Studio app.asar equals the digest this build pinned' `
     $(if (-not $globSane) { 'VOID' } elseif ($asarSha -eq $pinned) { 'PASS' } elseif (-not $asarSha) { 'FAIL' } else { 'FAIL' }) `
     "installedAsarSha=$(if ($asarSha) { $asarSha } else { 'NOT FOUND' }) pinnedAsarSha=$pinned equal=$($asarSha -eq $pinned) globDiscriminates=$globSane"
