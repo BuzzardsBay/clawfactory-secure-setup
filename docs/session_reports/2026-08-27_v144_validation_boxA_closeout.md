@@ -1,6 +1,6 @@
 # CLOSE-OUT: v1.4.4 validation, BOX A
 
-**Status at the time of writing: IN PROGRESS — rows 1,3,5,6,7 PASS. The gate_error did NOT reproduce; the agent completes turns. Rows 8-9 re-running.**
+**Status at the time of writing: IN PROGRESS — rows 1,3,5,6,7,8,9 PASS. Rows 12-14 in flight. Rows 10-11 await the operator.**
 Written incrementally so an interrupted session leaves an honest record rather
 than nothing. Sections carry their own state. Anything not measured says so.
 
@@ -1012,3 +1012,79 @@ not verify and spent zero model tokens, rather than allowing an unverified turn.
 with a control proving the probe can tell present from absent. The gate reads its
 configuration from somewhere other than those paths. Recorded as an observation,
 not a defect: the gate demonstrably works.
+
+---
+
+## 8E. MATRIX ROWS 8 and 9, RE-RUN from the correct starting state. **BOTH PASS**
+
+```
+PASS=30 FAIL=0 VOID=0 INFO=0  (counted 30 of 30 recorded rows)
+positive controls registered=7 fired=7
+preconditions declared=1 met=1
+
+PHASE VERDICT: PASS. Every positive control fired and every precondition was met.
+TOOLCHAIN_PROBE_COMPLETE rc=0
+```
+
+A clean sweep: every row PASS, nothing VOID, all seven controls fired.
+
+### 8E.1 The confound of section 8C.1 is now PROVEN, not argued
+
+The three rows that FAILed on the first attempt all PASS on the re-run, with the
+only difference being the toolchain switch's starting state:
+
+| Row | First attempt (switch OFF) | Re-run (switch ON, shipped default) |
+| --- | --- | --- |
+| `TC.1a` A fresh install has the toolchain switch ON | **FAIL** `policy reports enabled=false` | **PASS** |
+| `TC.1b` the switch being on has populated the set | **FAIL** `0 address(es) live, 0 persisted` | **PASS** |
+| `TC.1c` with the switch ON the sources are reachable | **FAIL** `github and npm reachable=False` | **PASS** |
+
+**This is the measurement that converts section 6.3's prediction into a result.**
+It was named as a candidate confound before either phase was dispatched, and it is
+now demonstrated by re-running from the correct state rather than by reasoning
+about it. **Rows 8 and 9 carry no product defect.**
+
+### 8E.2 `TC.1d` PASSES, confirming the transient reading from a second direction
+
+```
+TC.1d.PRE    PASS  A real agent turn completes with the toolchain toggle ON
+TC.3.PRE.PRE PASS  PRECONDITION: a real agent turn completes with the toolchain toggle ON
+TC.3.PRE     PASS  A real agent turn completes end to end with the toolchain switch OFF
+```
+
+The row that produced the `gate_error` now passes, and its precondition is met so
+`TC.3` reports a real verdict rather than VOIDing. Together with the proxy journal
+holding exactly one `gate_error` (section 8D.3), **the transient reading is
+corroborated by two independent observations.** The root cause remains
+unidentified and is still not claimed.
+
+### 8E.3 What rows 8 and 9 actually establish
+
+```
+TC.2b  PASS  switching off actually emptied the live set AND the persisted file
+TC.2c  PASS  with the switch OFF, the software sources are unreachable for uid 1000
+TC.4   PASS  a real five-hourly refresh does NOT re-open a route the user closed
+TC.4b  PASS  the sources are still unreachable after the refresh, measured not inferred
+TC.5   PASS  switching back ON restores the route (reversible, not one-way)
+TC.6   PASS  the agent cannot change the toolchain switch through any channel it can reach
+TC.8   PASS  the tripwire FAILS the unit when the toolchain accept rule is removed
+TC.8c  PASS  the toolchain set cannot be deleted while its accept rule references it
+TC.7a/b/c PASS  user-added destinations still work, revoking still removes, the two sets do not disturb each other
+```
+
+`TC.4` is the L30 row — a scheduled refresh re-opening a user-closed route — and it
+holds, **with `TC.4.CTL` proving the refresh actually ran and actually added
+provider addresses**, so the PASS is not the refresh silently failing to happen.
+
+`TC.6` is the containment row: uid 1000 cannot flip its own switch, with
+`TC.6.CTL` proving uid 1000 *can* write somewhere it owns, so the refusals are real
+refusals rather than a broken writer.
+
+### 8E.4 One PASS that does NOT retire its residual
+
+`TC.1c` PASSED here. **That does not close `#261`.** `#261` is about
+*intermittency*: the switch reads ON while the firewall holds a snapshot of
+addresses that the sources answer from a larger rotating pool, previously measured
+at 5 of 12 attempts before a reboot and 2 of 6 after one. **A single reachability
+reading against a rotating pool is close to a coin flip**, and one PASS is one
+sample. The residual stands and is re-measured properly on the reboot pass.
