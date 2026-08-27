@@ -1,6 +1,6 @@
 # CLOSE-OUT: v1.4.4 validation, BOX A
 
-**Status at the time of writing: IN PROGRESS — cfv-179 installing v1.4.4. TASK 0 complete; no matrix row measured yet.**
+**Status at the time of writing: IN PROGRESS — cfv-179 installed, matrix row 1 PASS. Rows 3, 5-9, 12-14 in flight.**
 Written incrementally so an interrupted session leaves an honest record rather
 than nothing. Sections carry their own state. Anything not measured says so.
 
@@ -543,15 +543,96 @@ anomaly being reported as a clean product finding.
 
 ---
 
-## 7. Sections 7 onward: NOT YET MEASURED
+## 7. MATRIX ROW 1: clean install, all resources, all pins. **PASS**
 
-The install is running at the time of writing. Every matrix row, every section,
-the wrapper phase and the uninstall branch are owed and none is claimed in either
-direction.
+```
+PASS=15 FAIL=0 VOID=0 INFO=4  (counted 19 of 19 recorded rows)
+positive controls registered=2 fired=2
+preconditions declared=0 met=0
+
+PHASE VERDICT: PASS. Every positive control fired and every precondition was met.
+PHASE1_PROBE_COMPLETE rc=0
+```
+
+Install exit was clean at 16 minutes: `install-result.txt: INSTALLER_DONE=success`.
+Studio's per-user installer landed in the original user profile, de-elevated, as
+designed.
+
+### 7.1 The evidence was retrieved through a hash gate, not read off the console
+
+`az vm run-command` truncates its payload, and the v1.4.3 run produced a reading
+where the completion sentinel arrived and **only 25 of 54 evidence rows did**. So
+the transcript was fetched in chunks with the box's own digest as the gate:
+
+```
+FETCH_SHA=b28a333edde06b65a675d7b4a3bf43e9f4b378991e8ba480514b4d7f704b7585
+FETCH_BYTES=11020
+FETCH_CHUNKS=6
+LOCAL_SHA=b28a333edde06b65a675d7b4a3bf43e9f4b378991e8ba480514b4d7f704b7585
+FETCH_INTACT=True
+```
+
+A short read cannot be mistaken for a complete one, because the reassembled copy
+must hash to what the box computed before any of it is quoted.
+
+### 7.2 The rows that settle questions TASK 0 raised
+
+```
+PIN.version         PASS   Installed version reports 1.4.4
+PIN.studio.asar     PASS   the INSTALLED app.asar matches the build-time digest
+PIN.bundle          PASS   all 34 preflight resources shipped
+PIN.soul            PASS   e70212603f2f91e6abf6db576c9535b1aaad60506e2fb075c199f18160db7941
+PIN.soul.indistro   PASS   same digest, as installed in the distro
+PIN.soul.rootpin    PASS   root-owned /etc/clawfactory/soul.sha256 matches
+PIN.persona         PASS   0557d07004d4d067d8cd9e7cee7b2a3a783e0ac8ff4c492c0c152d7e35ff63a0
+PIN.workspaceSoul   PASS   441b6279f6613c313e87e9e9e034f97a220540cddbf1cf738bb9a86c37a5a257
+PIN.rootfs          INFO   ubuntu 22.04 jammy; tarball not re-derivable post-install
+P1.CHAN             PASS   POSITIVE CONTROL: the WSL channel discriminates
+P1.3.CTL / P1.3c    PASS   the enumeration sees a present resource and not an absent one
+```
+
+**`PIN.version` reading 1.4.4 is the evidence that the TASK 0 repin is live rather
+than merely committed.** Before this morning `interim-v120-phase1.ps1` would have
+been read against a stale literal.
+
+**`PIN.studio.asar` PASS settles section 2.6 by measurement**, not by reading the
+`.iss`: the installed `app.asar` equals `a64a118f…`, so Studio 1.3.2 is what
+actually shipped and the by-hand checklist's `1.3.2` strings are correct.
+
+**`PIN.rootfs` recorded INFO, exactly as section 2.3 predicted.** The dead literal
+is confirmed dead by observation rather than only by reading.
+
+**Derivation 3, a second time and from inside the probe:**
+`On-VM artifact sha256: 6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1`.
+
+### 7.3 Seven install warnings, none an ERROR, and what each is
+
+`ERROR lines : 0`. The seven `WARN` lines are recorded in full rather than
+summarised, because three of them are the kind that get rediscovered as findings:
+
+| Warning | Reading |
+| --- | --- |
+| `Virtualization may be disabled in BIOS. WSL2 may fail to start.` | The v1.4.3 run measured this on the same image and found **WSL 2, not a WSL1 fallback** — a detection artifact at this VM size. **Not assumed here**: it is re-measured in the next phase, because WSL1 would be a different isolation story than the structural claims rest on |
+| `gateway-install block exited 1, but the unit file exists` | The installer's own text names this as the known-benign non-zero block exit and defers to the `/status` health poll. Consistent with the v1.0.45 lineage |
+| `Step-EnableChatCompletions returned exit=1` | **Tracked, not dismissed.** The installer says the native chat app may not connect. This is the ClawChat gating path, and it is followed up rather than left as a warning nobody read |
+| `bonjour drop-in returned 1` | Install continues; the drop-in is to be verified rather than assumed |
+| three × `[bootstrap] skill-scout / skill-builder / publisher: placeholder` | The documented stub agents. Consistent with the standing record that "four agents" overstates what ships |
+
+**`AUTOMOUNT_LINE=enabled=false`** — the drift this project has chased repeatedly
+is absent on this box. **`MNT_C_PRESENT=yes`** is the documented empty stub and is
+NOT evidence of Windows visibility; a directory test is not a valid check for it.
 
 ---
 
-## 8. Task accounting so far
+## 8. Sections 8 onward: IN PROGRESS
+
+Matrix row 3 is dispatched at the time of writing. Rows 5 to 9 and 12 to 14, the
+sections, the wrapper phase and the uninstall branch are owed and none is claimed
+in either direction.
+
+---
+
+## 9. Task accounting so far
 
 | Task | State |
 | --- | --- |
