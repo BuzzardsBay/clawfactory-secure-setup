@@ -16,9 +16,11 @@ ClawFactory Secure Setup is built on **defense in depth**: multiple independent 
 > **Two classes of guarantee.** ClawFactory's controls split into two kinds, and
 > the distinction matters when you assume the agent itself may be hostile.
 > **Structural** controls (file isolation, egress allowlist, inbound deny,
-> credential-at-rest, safety-rules *file integrity*, the user kill switch) are
+> credential-at-rest, safety-rules *file integrity*) are
 > enforced by the OS/kernel and hold against **both** a network attacker **and** a
-> hostile agent running as `clawuser`. **Gateway-path** controls (spend cap,
+> hostile agent running as `clawuser`. The user kill switch was in this list until
+> v1.4.4 and has been removed from it: it is an action you take, not a boundary
+> that holds, and it stopped nothing at all on every release up to v1.4.3. **Gateway-path** controls (spend cap,
 > chatCompletions gating, safety-rules *enforcement at turn time*) hold on the
 > path through the local gateway but are **advisory** against an agent that
 > starts the runtime by another route. The full split, the one accepted residual

@@ -29,7 +29,7 @@ And the boundary that travels with all of them: **this covers email. It is not a
 - **Provider key in DPAPI**: read from Windows Credential Manager, written via `wsl.exe` stdin to `~/.openclaw/auth-profiles.json` mode 600. Never on a command line, never in `.env`.
 - **`SOUL.md`**: safety policy at mode 444, root-owned and `chattr +i`, with its SHA-256 re-checked in code before every gated turn.
 - **Windows Firewall inbound-deny on TCP/8787**: belt-and-suspenders against any future misconfiguration that flips the gateway bind to `0.0.0.0`.
-- **Kill Switch**: Start Menu shortcut that stops the gateway and the agent processes.
+- **Kill Switch**: Start Menu shortcut that unmounts every granted folder, stops the gateway and the agent processes, then counts the agent's processes inside the sandbox and reports per claim what it actually managed to stop. Fixed in v1.4.4; on every release up to v1.4.3 both of its sandbox commands failed on a quoting fault and it reported success anyway.
 - **Guard 1, quarantine delete**: the `rm` on the agent's PATH moves files under `/workspaces` into a root-owned hold for 30 days; restore from Studio.
 - **Guard 2, approval-gated send**: the agent queues a message with a root-owned broker; nothing leaves until you approve that exact message.
 - **Guard 3, the web access switch**: deny-by-default read-fetch allowlist, plus an opt-out for the software sources, both driven from Studio.

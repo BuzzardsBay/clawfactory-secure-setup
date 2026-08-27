@@ -1,6 +1,6 @@
 # ClawFactory Security Findings
 
-*Last updated: 2026-08-23. Applies to ClawFactory Secure Setup v1.4.0, the free release.*
+*Last updated: 2026-08-27. Applies to ClawFactory Secure Setup v1.4.4.*
 
 This document is for someone deciding whether to trust ClawFactory, not for someone who already has. It says what the product actually enforces, what it does not, and how we know the difference. Where a boundary is weaker than its name suggests, that is stated here rather than left for you to discover.
 
@@ -12,7 +12,11 @@ ClawFactory is free and open source under Apache-2.0. There is no licence check,
 
 ## How we test
 
-Every claim in the structural table below was proven **consumer-side**: by asking the agent itself to cross the boundary and recording its actual output, on a freshly installed machine. We do not accept a configuration file or a mount table as evidence that a control works, because a misconfigured control and a working control look identical from the config side.
+Claims in the structural table below are proven **consumer-side** wherever the boundary is one the agent can be asked to cross: we ask the agent itself to cross it and record its actual output, on a freshly installed machine. We do not accept a configuration file or a mount table as evidence that a control works, because a misconfigured control and a working control look identical from the config side.
+
+Two rows cannot be measured that way, and the table says so in its own Status column rather than borrowing the sentence above. **Inbound deny** is a claim about a machine other than this one, so it is measured as the absence of a listening surface plus the presence of the firewall rule, not by a connection attempt from a second host. **Credential protection** is a claim about where a secret rests, so it is measured as ownership and file mode, not by asking the agent to fetch it. Both are weaker evidence than a recorded refusal, and calling them the same thing would be the kind of flattening this document exists to avoid.
+
+**This paragraph used to say "every claim", without exception.** It was wrong, and the row that made it wrong was the kill switch: listed as a proven structural guarantee, never once executed on an installed machine, and inert on every release from v1.0 to v1.4.3. It is no longer in the table; see "The kill switch is a user action, not a standing boundary" below.
 
 Validation runs on clean cloud VMs built from a stock Windows image, installed exactly as a customer would install.
 
@@ -35,13 +39,12 @@ Enforced by the operating system, the filesystem, or the network stack. They hol
 |---|---|---|
 | **File isolation**, meaning the agent cannot read files you did not grant it | WSL2 sandbox with Windows automount disabled; explicit per-folder grants mapped into the sandbox | **Proven.** The agent refused to read an ungranted file by direct path, by directory listing, through a symlink, through `../../..` traversal, and via filesystem-wide search. It could not read `/etc/shadow`. The target file's contents never appeared in any output. |
 | **Egress allowlist**, meaning the agent cannot reach network addresses outside a fixed set | nftables rules scoped to the agent's system identity | **Proven, with the scoping residual below.** Non-allowlisted hosts, raw IP addresses, non-standard ports, and arbitrary DNS resolvers are all blocked. Read "Address scoping" and "The baseline route" before relying on this. |
-| **Inbound deny**, meaning nothing on your network can reach the agent | Loopback-only gateway plus a Windows Firewall inbound block | **Proven.** No listening surface is exposed off the machine. |
+| **Inbound deny**, meaning nothing on your network can reach the agent | Loopback-only gateway plus a Windows Firewall inbound block | **Proven producer-side, not consumer-side.** The gateway binds loopback only, no listening surface is exposed off the machine, and the inbound block is present. We have not driven a connection attempt from a second host on the network, so this row rests on the absence of a listener rather than on a recorded refusal. |
 | **No send path at the agent's identity**, so the agent cannot send email | The mail broker runs as root; SMTP ports are blocked for the agent's UID, including to loopback | **Proven.** The agent holds no mail credential and has no route out. |
 | **Approval binding**, so an approval covers one message, once | The broker refuses a mutated payload and refuses a re-used approval | **Proven.** |
 | **Quarantine hold**, meaning a deleted file the user can restore | Root-owned quarantine the agent's UID cannot reach | **Proven for the hold.** The *routing* of deletes into it is advisory; see "Guard 1 covers deletion by name". |
-| **Credential protection**, so your API key is never left in readable config or on a command line | Windows Credential Manager (DPAPI) on the Windows side; inside the sandbox the key exists only in a mode-600 file | **Proven** for the storage path. *Nuance:* the sandbox copy is permission-scoped, not encrypted at rest, and the agent is provisioned its own key by design. See "Provider-key exposure". |
+| **Credential protection**, so your API key is never left in readable config or on a command line | Windows Credential Manager (DPAPI) on the Windows side; inside the sandbox the key exists only in a mode-600 file | **Proven for the storage path, by reading ownership and file mode rather than by a recorded refusal.** *Nuance:* the sandbox copy is permission-scoped, not encrypted at rest, and the agent is provisioned its own key by design, so a consumer-side test would not be a refusal in any case. See "Provider-key exposure". |
 | **Safety-rules integrity**, so the rules file cannot be altered by the agent | Root-owned, read-only, immutable flag, hash-pinned at install | **Proven.** The agent cannot write, change permissions on, or delete-and-recreate the file. |
-| **Kill switch**, so you can stop everything immediately | Terminates the real agent process | **Proven.** |
 
 ### Gateway-path guarantees
 
@@ -66,7 +69,7 @@ These are the things we know are weaker than they sound. None of them is hypothe
 
 **Actor model.** This requires the ability to execute a shell command as the agent's identity inside the sandbox. It is not reachable from the network, and it is not a defect in file isolation. The realistic actor is the agent itself, acting on instructions from content it processes. Because our design principle is to assume the model may be hostile, we treat that actor as in scope rather than hypothetical.
 
-**What it does and does not affect.** Every structural guarantee continues to hold against a turn started this way. Such a turn still cannot read ungranted files, still cannot reach addresses outside the allowlist, still cannot send email, still cannot alter the safety-rules file, and is still stopped by the kill switch. What it can do is run without spend accounting and without the gateway-side checks, using the API key you already provisioned. **The exposure is cost and unmetered operation, not data access.**
+**What it does and does not affect.** Every structural guarantee continues to hold against a turn started this way. Such a turn still cannot read ungranted files, still cannot reach addresses outside the allowlist, still cannot send email, and still cannot alter the safety-rules file. What it can do is run without spend accounting and without the gateway-side checks, using the API key you already provisioned. **The exposure is cost and unmetered operation, not data access.** This paragraph used to end with "and is still stopped by the kill switch"; that sentence has been removed, because the kill switch was inert when it was written and is not a standing boundary now that it works. See below.
 
 **Why we have not patched it.** The controls that could distinguish these processes (file permissions, network rules, sandboxing policy) all key on identity, and the two processes share one. Any mitigation short of giving the agent its own identity can be routed around by that same identity, while creating the false impression that the boundary moved. We would rather state the boundary accurately than ship a control that looks like a fix and is not.
 
@@ -119,6 +122,21 @@ What bounds the damage is the egress allowlist: a held key can only be sent to a
 The user-facing wording is deliberately limited to match: *this covers deletion by name, which is how deletion is ordinarily expressed; it does not cover every possible way a program can destroy a file.*
 
 **Status: accepted for v1.** Closing it properly needs a filesystem-level interception layer, which was scoped and cut rather than deferred.
+
+### The kill switch is a user action, not a standing boundary
+
+**The finding.** Until v1.4.4 the Start Menu kill switch stopped nothing. Both of the commands it sent into the sandbox died on a quoting fault, the script ignored their exit codes, and it printed *"the gateway is stopped, and any running agent turn is killed"* over a gateway that was still answering and a process that was still alive. Its third action, unmounting your granted folders, did work. This was true of every release from the first, and it was listed in the structural table above as **proven** the entire time.
+
+**How it got there, which matters more than the bug.** Nothing had ever run the script on an installed machine. Our validation suite extracted the shell fragments these Windows scripts build and ran *those*, so a defect in the wrapper that builds them was invisible to it by construction. The first run that executed the scripts themselves found this and one other ship-blocker in the same hour.
+
+**What changed in v1.4.4.** The quoting is fixed, and — the more important half — the script now measures. After it issues the stop it counts the agent's processes inside the sandbox and prints only what that count supports, per claim, with a non-zero exit when it cannot confirm. It can now report its own failure, which is the property it lacked.
+
+**Why it is here and not in the structural table.** Two reasons, and the first survives validation.
+
+1. A kill switch is an action you take, not a boundary that holds. The structural table is for controls that hold *regardless of what the agent does*; a stopped process running as the agent's own identity can be started again by that identity. What the kill switch guarantees is that when you run it, it tells you the truth about what it managed to stop.
+2. **It has not been validated on a clean machine in this release.** The fix was proven on an installed v1.4.3 box by hand-patching that box, with the shipped script as a control that failed in the same run. That is real evidence and it is not the same as a clean-install measurement, and a claim does not enter the structural table on the strength of a hand-patched box.
+
+**Status: fixed in v1.4.4, proven by hand-patch on an installed machine, not yet validated from a clean install.** Until it is, treat it as: it unmounts your granted folders, it attempts to stop the gateway and any running turn, and it will say so plainly if it could not.
 
 ### The build stamp is forgeable
 
