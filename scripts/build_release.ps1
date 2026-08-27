@@ -685,7 +685,10 @@ $stamp = [ordered]@{
     version       = $buildVersion
     unsignedSha256 = $unsignedHash
     unsignedBytes = (Get-Item -LiteralPath $installerPath).Length
-    gatesPassed   = @('soul', 'bundle', 'worktree', 'studio', 'version', 'persona', 'workspace-soul', 'rootfs')
+    # This list is hand-maintained and is the artifact's provenance record, so a
+    # gate added above and not added here makes the stamp under-report what ran.
+    # 'interpolation' was missing from the first v1.4.4 build for that reason.
+    gatesPassed   = @('soul', 'bundle', 'interpolation', 'worktree', 'studio', 'version', 'persona', 'workspace-soul', 'rootfs')
     stampedUtc    = (Get-Date).ToUniversalTime().ToString('o')
 }
 # BOM-less UTF-8 on purpose; see the same note in sign_installer.ps1. PS 5.1's
