@@ -469,15 +469,89 @@ NSG.
 
 ---
 
-## 6. Sections 6 onward: NOT YET MEASURED
+## 6. Three judgement calls taken before dispatching any phase
 
-Nothing has been installed. Every matrix row, every section, the wrapper phase
-and the uninstall branch are all owed and none of them is claimed in either
+Recorded here rather than buried beside the results they affect.
+
+### 6.1 Rows 10 and 11 are deferred out of the stated order, and why
+
+The job card fixes the phase order and asks for it to be stated. **It is followed
+with one deviation: matrix rows 10 and 11 are deferred**, and everything after
+them keeps its specified position.
+
+Both are structurally human-only and neither can be automated around:
+
+* **Row 10, the reboot pass.** Auto-logon is one-shot and PROMPT 15 forbids
+  re-arming it, so after a reboot a person must log in and restart the runner.
+* **Row 11, the by-hand panel checks.** Ten Studio checks read by eye.
+
+The deviation is safe because **the job card's own rationale for the order is
+about phases that change box state** — the wrapper phase, which switches the box
+to ollama, and RemoveAll, which destroys the install. Rows 10 and 11 change
+nothing that rows 3, 5 to 9 and 12 to 14 measure. The two state-changing phases
+keep their positions, second to last and last.
+
+**What is NOT claimed:** that deferring them is free. Row 10 is the reboot pass,
+and any row measured before it is measured on a box that has not rebooted. That
+is the same condition every pre-reboot row has always been measured under, and
+the `.POSTREBOOT` variants exist precisely to re-measure the ones that matter.
+
+### 6.2 The job card's zero-outbound-email clause, and a correction to it
+
+The card says: *"Do not run `phase3b` or any probe that transmits. It sends
+twice, in test 3 and in test 6."*
+
+**`phase3b` is not run.** That is obeyed without qualification.
+
+**The reason given is not quite right, and the card asks to be told so.** The two
+sends named — test 3 and test 6 — are in `interim-v120-phase3.ps1`, and both go
+to a **local SMTP sink** started on the box for the purpose (`sink@example.com`,
+a node listener answering `220 cf-sink ESMTP`). Test 6's own verdict is computed
+from `approvedBytesAtSink` and `tamperedBytesAtSink`. **No packet leaves the VM
+on either.**
+
+The one path in that file that genuinely transmits is card **#198**, and it is
+gated at line 468 behind **both** a present credential **and** the
+`-ExpectRealCredential` switch:
+
+```powershell
+if ($credPresent -and $ExpectRealCredential) {
+```
+
+So `interim-v120-phase3.ps1` is run **without `-ExpectRealCredential`**, which
+leaves #198 recorded with its reason rather than executed. **`#198` stays VOID as
+a receiving-provider outcome**, exactly as the card directs, and zero outbound
+email is achieved — but by gating the third path, not by avoiding the two the
+card named.
+
+### 6.3 Rows 5 to 7 and rows 8 to 9 share a box here; the v1.4.0 baseline used two
+
+The v1.4.0 matrix measured rows 5, 6, 7 on `cfv-170` and rows 8, 9 on `cfv-174`.
+This job puts all of them on box A, which is correct per the card and is what the
+`SP.*` phase was designed for: it is an A/B on one box, deliberately, so that DNS,
+timing and provider addresses do not become a second variable, and it is
+**self-cleaning** — the fixed arm's own flush removes the pre-fix arm's pollution.
+
+It does, however, rewrite the nft allowlist, and rows 8 and 9 measure reachability
+against that allowlist. The phase does **not** change the configured provider —
+it renders and runs the firewall block rather than executing
+`switch-provider.ps1`, which is the blind spot v1.4.3 section 12.3 identified.
+
+**Stated so it is not discovered later:** if any `TC.*` row reports an anomaly, the
+shared box is a candidate confound and will be named as one rather than the
+anomaly being reported as a clean product finding.
+
+---
+
+## 7. Sections 7 onward: NOT YET MEASURED
+
+The install is running at the time of writing. Every matrix row, every section,
+the wrapper phase and the uninstall branch are owed and none is claimed in either
 direction.
 
 ---
 
-## 7. Task accounting so far
+## 8. Task accounting so far
 
 | Task | State |
 | --- | --- |
