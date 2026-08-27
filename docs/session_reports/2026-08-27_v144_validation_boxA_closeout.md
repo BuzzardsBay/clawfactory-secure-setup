@@ -1,6 +1,6 @@
 # CLOSE-OUT: v1.4.4 validation, BOX A
 
-**Status at the time of writing: IN PROGRESS — rows 1,3,5,6,7,8,9 PASS. Rows 12-14 in flight. Rows 10-11 await the operator.**
+**Status: BOX A PARTIAL, PAUSED AT AN OPERATOR HANDOFF. cfv-179 is DEALLOCATED and not billing.** Rows 1,3,5,6,7,8,9,12,13 PASS; row 14 VOID; rows 10,11 and the RemoveAll branch await the operator.
 Written incrementally so an interrupted session leaves an honest record rather
 than nothing. Sections carry their own state. Anything not measured says so.
 
@@ -1417,3 +1417,181 @@ by `WR.1/7/8/9`; its **CR census half is not**.
 
 **Not owed by any box:** `phase3b` and card `#198`. Zero outbound email is mandated
 and `#198` stays VOID as a receiving-provider outcome.
+
+---
+
+## 10. No fitness-to-publish verdict
+
+By instruction, and it would be unsupportable in any case. **Box A is one of four,
+and box A itself is incomplete**: rows 10 and 11 are unmeasured, sections 14.8,
+14.9 and 14.10 were not reached, `WR.5`/`WR.6` are owed, and the RemoveAll branch
+has not run. A verdict on that coverage would rest on an unmeasured premise.
+
+**What can be said without a verdict:** the two defects that made v1.4.3 a NO are
+fixed and now measured on a clean install with controls that fired, and nothing
+measured this session is a regression.
+
+---
+
+## 11. End-of-session gate
+
+### 11.1 Task accounting
+
+| Task | State |
+| --- | --- |
+| Job card moved to `docs/cc_jobs/`, committed | **DONE** `191bff5` |
+| PROMPT 15 preamble, stop condition checked | **DONE**, did not fire |
+| Three required reports read in full | **DONE** |
+| TASK 0.1 plan stated before `az vm create` | **DONE**, section 4 |
+| TASK 0.2 the two named fixes | **DONE** `cef6cbd`, `b11c2c5` |
+| TASK 0.2 wider enumeration | **DONE**, section 2, plus a sixth class in 2.5a |
+| TASK 0.2 canary | **DONE, 3 of 3**, section 2.2 |
+| TASK 0.3 upload + verify by download and re-hash | **DONE**, section 1 |
+| TASK 0.4 starting estate, unfiltered | **DONE**, section 3 |
+| TASK 1 phase order stated and followed | **DONE**, with rows 10/11 deferred and the deviation recorded in 6.1 |
+| TASK 2.1 kill switch from a clean install | **DONE, PASS**, section 8I.1 |
+| TASK 2.2 refuses to claim success unverified | **DONE, PASS**, section 8I.2 |
+| TASK 2.3 switch-provider completes | **NOT DONE** — `WR.5`, owed |
+| TASK 2.4 fail-closed toolchain guard refuses | **NOT DONE** — `WR.6`, owed |
+| TASK 2.5 Ollama honesty line | **NOT DONE** — rides `WR.5`, owed |
+| TASK 2.6 the other wrapper rows | **DONE, PASS**, section 8I.3 |
+| TASK 3.1 section 14.8 | **NOT DONE** |
+| TASK 3.2 section 14.9 | **NOT DONE** |
+| TASK 3.3 section 14.10 | **NOT DONE** |
+| TASK 3.4 section 14.11, execution half | **DONE, PASS**; CR-census half **NOT DONE** |
+| TASK 3.5 section 14.6 | **DONE, PASS**, section 8I.4 |
+| TASK 3.6 14.12 build-time, not sought on the box | **DONE** — correctly not attempted |
+| TASK 4 operator handoffs | Card 1 delivered; the reboot-pass card is delivered with this close-out |
+| TASK 5 standing traps | Followed; four hit and each is recorded |
+| TASK 6 teardown | **NOT DUE** — the box is deallocated, not deleted, because the run resumes |
+| TASK 7 close-out | this file |
+
+### 11.2 Resource ledger
+
+| | |
+| --- | --- |
+| VMs provisioned | **1** — `cfv-179`, Standard_D2s_v4, `clawfactory-win11-baseline-v2` |
+| VMs running now | **0** — `cfv-179` **deallocated**, exit 0, confirmed `VM deallocated` |
+| VMs deleted | **0** — deliberately. The run resumes on this box |
+| Running window | roughly **14:32 to 17:36 local**, about 3 hours of compute at ~$0.10/hour, so **about $0.30**, plus the OS disk which bills either way |
+| Licence slots | none consumed; no licence check exists since v1.4.0 |
+| Blobs | one 440 MB artifact plus seven phase scripts in the validation container, retained as evidence, not billable compute |
+
+**Resources that exist and must be swept at teardown**, recorded so the sweep can
+be checked against a list rather than a memory:
+
+```
+cfv-179                    Microsoft.Compute/virtualMachines
+cfv-179-osdisk             Microsoft.Compute/disks
+cfv-179VMNic               Microsoft.Network/networkInterfaces
+cfv-179-pip                Microsoft.Network/publicIPAddresses
+cfv-179-nsg                Microsoft.Network/networkSecurityGroups
+cfv-179/enablevmaccess     Microsoft.Compute/virtualMachines/extensions
+```
+
+`az vm delete` removes only the first. **NIC first**, because it references the
+public IP and the NSG.
+
+**The VMAccess extension is new since section 5.1** and appeared when the operator
+set the admin password at Card 1. That is the expected and only intended use of
+`az vm user update` in this run: **this session never called it**, and it must not
+be called again.
+
+**RDP rule scope**, stated exactly as TASK 6 requires: `67.164.251.99/32`, port
+3389, Allow, Inbound, on `cfv-179-nsg`. Never `0.0.0.0/0`. Verified twice
+independently at creation and again at deallocation.
+
+**Credential hygiene.** No password was generated, printed, requested or set by
+this session. The provider key was read from Windows Credential Manager by the
+driver and reported only as `provider key present (value never printed)`. The
+gateway token was read **on the box, by the probe, inside the distro**; only its
+length reached the transcript (`TOKEN_PRESENT_LEN=48`). No secret value appears in
+any evidence file, commit or message.
+
+### 11.3 Delta security sweep
+
+Scoped to what this session changed. **No product code was modified.** The only
+committed changes are two stale-default fixes in `validation/`, one new validation
+probe, and this close-out.
+
+* **`interim-v140-relgate-box.ps1`** — a digest and a byte count. Narrows what the
+  driver will accept; cannot widen it.
+* **`MANUAL_CHECKS_studio.md`** — a version number a human reads. No runtime effect.
+* **`interim-v144-gatediag.ps1`** — new, **not bundled**, does not ship. It reads
+  unit states, file modes and journals, and sends two chat turns as `clawuser`. It
+  writes nothing outside `/var/tmp` and removes what it writes.
+* **Nothing shipped changed**, so the artifact validated is byte-identical to the
+  one built at `25945d5` and signed as `6e655603…`.
+
+**On the box:** every phase that injected a fault also removed it, and each removal
+was verified rather than assumed — `PG.2d` restored the provider route, `SP.7b`/`7e`
+restored the seed, `SP.2`'s fixed arm flushed the pre-fix pollution, `TC.8b` left
+the firewall intact, `TC.9` left the shipped default state, and `WR.4`'s injected
+fault was a copy rather than the shipped file. **The box is left installed,
+firewalled, toggle ON, provider `claude`.**
+
+**One residual reported and untouched:** `SP.8`, the address-scoping limit where
+`clawhub.ai` is co-hosted with `openclaw.ai`. Not adjusted, not retired, not
+inverted.
+
+### 11.4 Delta bug review
+
+Bugs found in this session's own work.
+
+1. **My gatediag probe read a nonexistent token path**, so both its turns returned
+   `Unauthorized` and never reached the gate. **Fixed in revision 2**; results
+   retracted in section 8D.1.
+2. **The same probe scored that as a PASS**, because it tested only for the absence
+   of `"blocked":true`. **A turn that never ran was recorded as a turn that was not
+   blocked.** Fixed structurally: token non-emptiness is now a precondition and
+   every turn is classified into exactly one named state.
+3. **The same probe asserted on an invented unit name**, `clawfactory-chatgate`.
+   The real unit is `clawfactory-proxy`. `systemctl is-active` on a nonexistent unit
+   reports inactive, **which reads exactly like a stopped service**, and it would
+   have been reported as "the gating proxy is down" on a box where it was running.
+   Fixed by enumerating units instead of asserting on a guessed name.
+4. **The same probe measured the toolchain switch after `TC.9` had restored it**, so
+   it could not settle the question it was written to settle. Recorded as
+   inconclusive rather than treated as evidence.
+5. **My first phase dispatch passed a bare leaf name** where the dispatcher takes a
+   path. It threw before uploading, so the box was untouched.
+6. **My sweep instrument covered `.ps1` only** and would have missed the stale
+   version in `MANUAL_CHECKS_studio.md`, which is the one a human reads at the
+   keyboard. Found by sweeping the other file types by hand; the gap is recorded in
+   section 2.6 rather than silently patched.
+7. **I hit the `H()` / `Get-History` alias collision** documented in the v1.4.4
+   close-out, in exactly the same way. Cosmetic; renamed.
+8. **A heredoc in one of my commit commands failed to parse**, writing nothing. Caught
+   by checking `git status` rather than assuming the append had happened.
+
+**Four of these eight are the same defect class this project keeps paying for: a
+check that passes when nothing happened.** They were caught because the phase
+runner's rules were applied to my own instruments as well as to the product, and
+because row 12 independently proved the runner would catch a malformed verdict. That
+is uncomfortable and it is the honest record.
+
+### 11.5 Cards `#284` to `#292`
+
+**Moved only as far as box A's evidence supports.** A card whose fix is proven on
+one box of four is not `done` if its scope spans the others.
+
+| Card scope | Recommendation | Why |
+| --- | --- | --- |
+| **The kill switch fix** (v1.4.4 TASK 2.1/2.2) | **Evidence sufficient to close on box A's part**, but hold at Review until the wrapper phase re-runs with `-RunProviderSwitch`, because `WR.5`/`WR.6` are part of the same v1.4.4 change set | proven from a clean install with both readers and a fault-landed control |
+| **`switch-provider.ps1` fix** | **STAYS OPEN.** `WR.5` was not executed | rows 5–7 prove the *rendered firewall block* is correct; they do not execute the wrapper, which is the defect class v1.4.3 found |
+| **The documentation / structural-table change** | **No box-A evidence either way** | not a runtime claim |
+| **Anything scoped to uninstall** | **STAYS OPEN** | box D |
+| **`#261`** | **STAYS OPEN.** `TC.1c` passed once; that is one sample against a rotating pool | section 8E.4 |
+
+**Two new cards are owed from this session:**
+
+1. **Phase 3 declares no precondition** and reports FAIL where PROMPT 15 requires
+   VOID, so a reader sees `FAIL=7` on the Guard 2 suite and concludes the
+   approval-gated send path is broken when it is merely unconfigured. Fix:
+   `Require-Precondition` on `CREDENTIAL_PRESENT`. Section 8G.4.
+2. **One unexplained `gate_error`** on the primary customer path at 22:52:12, which
+   did not reproduce across two later turns. Root cause not identified. Section 8D.4.
+
+**A third, lower priority:** six drivers carry stale `$VmName` defaults naming
+deleted boxes. All fail safe. The correct fix is a mandatory parameter, not a
+repoint. Section 2.5a.
