@@ -494,5 +494,9 @@ reassembled=573f91caecaeabddc7df663ca22aa494abbeb67bbbd90f2b3933151d88433bf3
 MATCH=True
 ```
 
-Evidence retained at `validation-runs/cfv-178-148-manifest.txt` and
-`validation-runs/cfv-178-148-rows.txt`.
+Evidence retained **on the build machine only**, at
+`validation-runs/cfv-178-148-manifest.txt` and `validation-runs/cfv-178-148-rows.txt`.
+`validation-runs/` is gitignored by design, so these are not committed and a reader
+of the repository alone cannot see them. The counts and the canary lines quoted
+above are therefore the committed record, and they are quoted in full for that
+reason rather than summarised.
