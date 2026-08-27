@@ -1,0 +1,412 @@
+# CLOSE-OUT: v1.4.4 validation, BOX A
+
+**Status at the time of writing: IN PROGRESS — TASK 0 COMPLETE, NOT YET PROVISIONED.**
+Written incrementally so an interrupted session leaves an honest record rather
+than nothing. Sections carry their own state. Anything not measured says so.
+
+**No fitness-to-publish verdict appears in this document, by instruction.** Box A
+is one of four and a verdict on partial coverage would rest on an unmeasured
+premise.
+
+---
+
+## 0. PROMPT 15 preamble
+
+Pasted and followed, VM clauses included. **No clause was deleted.**
+
+The job card's stop condition did not fire. The copy at
+`C:\Users\bmcki\OneDrive\Desktop\Claude Prompts\FrontierAI_CC_Prompt_Library.md`
+is 925 lines and carries PROMPT 15 at line 645 with its notes at 878. It is
+current, so the run proceeds.
+
+All three required reports were read in full before anything was touched:
+`2026-08-27_v144_wrapper_fixes_closeout.md` (967 lines, section 9 is the box
+plan), `2026-08-27_v143_validation_closeout.md` (1199 lines) and
+`2026-08-27_site_killswitch_claims_closeout.md` (579 lines).
+
+Job card moved to `docs/cc_jobs/CC_v1_v144_Validation_BoxA_v1.md` and committed
+at `191bff5`.
+
+---
+
+## 1. The artifact. Derivations 1 and 2 agree; derivation 3 is owed on the box
+
+**Derivation 1, build machine.** The standing rule is that the post-expiry
+Authenticode check comes first, so it did:
+
+```
+AUTHENTICODE=Valid
+SIGNER=CN=Bret Mckinney, O=Bret Mckinney, L=West Valley City, S=ut, C=US
+NOTAFTER=08/28/2026 15:23:23
+SHA256=6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1
+BYTES=440610608
+MATCH_SHA=True
+MATCH_BYTES=True
+```
+
+`NotAfter` one day out is **normal** for Trusted Signing, which mints three-day
+certificates daily. It is not an expiry warning and no alarm is raised on it.
+
+**Derivation 2, blob storage, BY DOWNLOAD AND RE-HASH.** The job card is explicit
+that a service property will not do. Recorded here is what the service property
+said *and* what the round trip said, so the two can be compared:
+
+```
+LOCAL_SHA=6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1
+LOCAL_BYTES=440610608
+UPLOADING combined-cfv-179.exe ...
+SERVICE_PROPERTY_BYTES=440610608      <- the WEAK check, the one the driver does
+DOWNLOADING back to a different path ...
+ROUNDTRIP_SHA=6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1
+ROUNDTRIP_BYTES=440610608
+DERIVATION2_MATCH=True
+```
+
+**The re-hash carries a control, because a comparison that cannot fail is not a
+comparison.** One byte of the downloaded copy was flipped and re-hashed:
+
+```
+CONTROL_ONE_BYTE_FLIPPED_SHA=f480f4078f3fde631ab13ae44a49e5abf95be113d906eba343944b906e721775
+CONTROL_FIRED=True
+```
+
+**Why this was done by hand rather than left to the driver.** The driver's own
+staging check at `interim-v140-relgate-box.ps1:204` reads
+`properties.contentLength` — the service agreeing with itself about how many
+bytes it believes it stored. It cannot detect a corrupted body of the correct
+length. The driver's *later* on-box check is a real SHA-256 and is derivation 3.
+
+**Derivation 3 is owed** and is recorded in section 5 when the box exists.
+
+| | |
+| --- | --- |
+| version | v1.4.4 |
+| signed sha256 | `6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1` |
+| signed bytes | 440,610,608 |
+| unsigned, as the ledger records | `548562c72d5261bc62d590df03746ea2bb52134a413e10d137b590e589fdcdea` |
+| build commit | `25945d5`, stamp fix `31e2aa1` |
+| Studio | unchanged at 1.3.2, installer pin `ac59375…` |
+
+The signed digest is not reproducible across signing runs and no fresh sign was
+performed here, so nothing in this run treats a differing signed digest as a
+defect.
+
+---
+
+## 2. TASK 0.2: the stale-default sweep
+
+The job card is explicit that **the enumeration is the deliverable and the two
+named fixes are not.**
+
+### 2.1 Method, and why it is a token sweep rather than an AST-node sweep
+
+The v1.4.3 session proved by canary that an AST pass over `param()` defaults and
+assignment right-hand sides finds only **4 of 6** planted pin shapes: it misses a
+digest held as an **array element** and a digest inside a **here-string body**.
+Both are shapes a real pin can take.
+
+So this sweep tokenizes each file with the PowerShell tokenizer and scans every
+`String`, `Number`, `Comment` and `CommandArgument` token. The tokenizer sees a
+string regardless of where it sits in the tree, which covers both missed shapes.
+**Comments are swept deliberately**: a stale value in a comment misleads a reader
+exactly the way a stale value in code misleads a runner, and this project has
+already shipped one defect that lived entirely in comments.
+
+Five classes, matching the five the job card names: `DIGEST` (64 hex), `VERSION`
+(dotted numeric), `BYTES` (integers of artifact scale), `HOST` (dotted DNS names
+on a known TLD), `PATH` (a path-separated artifact-extension string).
+
+```
+SWEPT_FILES=58   (48 in validation\, 10 in validation\diag\)
+TOTAL_HITS=920
+```
+
+The vacuity guard matters and is stated: the sweep **throws** rather than
+reporting clean if it matches zero files. The v1.4.3 session's equivalent
+instrument once reported `LEGACY_PROBE_FILES=0` from a bad glob, which made every
+"no hits" column mean "nothing was searched".
+
+### 2.2 The canary, planted in a shape the tree does not already contain
+
+The rule is that a canary certifies the pattern only against the shape of the
+canary, so it must look like the thing you are afraid of missing. Every digest in
+the real tree sits in a plain `String` token. So the canary was planted as the
+two shapes that are **absent** from the tree and were the two the AST method
+missed:
+
+```
+PLANTED: a stale artifact digest and byte count inside a HERE-STRING BODY
+PLANTED: a stale version literal as an ARRAY ELEMENT
+
+CANARY_HIT: interim-v141-bootpath.ps1  394 BYTES   String 440602224
+CANARY_HIT: interim-v141-bootpath.ps1  394 DIGEST  String 90c673dd1122...99aabb
+CANARY_HIT: interim-v141-bootpath.ps1  398 VERSION String 1.4.0
+```
+
+**3 of 3 found.** The file was then restored **by writing back the original bytes
+that were saved before planting**, not with `git checkout --`, and the restoration
+was proven by hash rather than by `git status`:
+
+```
+ORIG_SHA=27850df3f374a48e81842ba32b8abd293113f7154be894820b679c76b01995da BYTES=23689
+PLANTED_SHA=c206a9d1c59109d5c52151536c332ba8ad74aa9f09a25df7d5e92c20493f4cd6
+RESTORED_SHA=27850df3f374a48e81842ba32b8abd293113f7154be894820b679c76b01995da BYTES=23689
+git status --short -> empty
+```
+
+That method was chosen deliberately. `git checkout --` under this machine's
+system-level `core.autocrlf=true` silently re-materialises a file as CRLF while
+`git status`, `git diff` and `grep` all report it clean — the failure met live in
+the site job earlier the same day, which corrupted 1,080 line endings invisibly.
+
+### 2.3 The enumeration: digests
+
+| Site | Name | Verdict |
+| --- | --- | --- |
+| `interim-v140-relgate-box.ps1:54,55` | Sha256, ExpectBytes | **WAS STALE** at `b2cd6408…` / 440609096, the v1.4.3 artifact. **FIXED** to `6e655603…` / 440610608 |
+| `interim-v120-phase1.ps1:65` | PIN.soul | **CURRENT.** Re-derived: `resources/safety-rules.md` hashes to `e70212603f2f91e6abf6db576c9535b1aaad60506e2fb075c199f18160db7941` |
+| `interim-v120-phase1.ps1:66` | PIN.persona | **CURRENT.** Re-derived: `resources/persona.md` hashes to `0557d07004d4d067d8cd9e7cee7b2a3a783e0ac8ff4c492c0c152d7e35ff63a0` |
+| `interim-v120-phase1.ps1:67` | PIN.workspaceSoul | **CURRENT by construction.** Composed from the two files above, both re-derived unchanged |
+| `interim-v120-phase1.ps1:68` | PIN.rootfs | **CURRENT, and still a dead literal.** Re-derived: `resources/ubuntu-rootfs.tar.gz` hashes to `1483cc5c1dce13064f774834cbffdff226559fd522a67a381a8ea77d63fb4109`, equal to the pin. Nothing compares it post-install; the file lands in `{tmp}` and is deleted. Recorded because a literal that looks load-bearing and is not is the same reading hazard as a stale one. **Left alone**, as in v1.4.3 |
+| `interim-v120-phase1.ps1:95` and `interim-v140-stagecards.ps1:132` | studioAsar | **CURRENT, and the two sites agree** at `a64a118f…`. This is the INSTALLED `app.asar`, a different subject from the installer pin `ac59375…` that the build gates. Studio is unchanged, so both hold |
+| `interim-v120-phase3.ps1:204`, `phase3b.ps1:149`, `phase6.ps1:395` | all-zeros | **NOT A PIN.** A deliberately wrong hash passed to `approve` as a negative control. Classification unchanged from v1.4.3 |
+| `interim-v120-validate.ps1:180,181` | Sha256, ExpectBytes | **STALE, DELIBERATELY LEFT** at `257f30ff…` / 440613512. That driver is forbidden by PROMPT 15: it arms a one-shot auto-logon by resetting the admin account with `az vm user update`. A stale digest in a driver nobody may run is **a brake, not a hazard** — its preflight throws before provisioning. Refreshing it would make a forbidden instrument look blessed |
+| `validation/diag/g4-probe.ps1:76,77` | Sha256, ExpectBytes | **STALE** at `5bef35dc…` / 440606872. Out of scope: a Guard 4 diagnostic, not a matrix instrument, and not run by this job |
+| `job3-validate.ps1:66` | CombinedSha256 | **STALE** at `ffe86406…`, the v1.1.0 combined installer. Out of scope: the archived JOB 3 validator |
+
+### 2.4 The enumeration: version literals
+
+The `VERSION` class is intrinsically noisy — it matches section numbers (`5.2`,
+`6.3`), IP addresses, `Set-StrictMode -Version 3.0` and PowerShell `5.1`. Stating
+that plainly rather than presenting a filtered list as if it were the raw one.
+The load-bearing subset:
+
+| Site | Verdict |
+| --- | --- |
+| `interim-v120-phase1.ps1:97` `PIN.version` | **CURRENT at `1.4.4`.** The job card said to confirm rather than assume, and this is the confirmation: read directly from the file, not inferred from the commit that claimed to bump it |
+| `ClawFactory-Secure-Setup.iss` `#define MyAppVersion` | `"1.4.4"` |
+| `setup.ps1` `$InstallerVersion` | `'1.4.4'` — the two agree, which is what the build's version gate enforces |
+| `interim-v144-wrappers.ps1:1,156` | `1.4.4`, current |
+| `interim-v140-stagecards.ps1:138` | Studio `1.3.2`, current |
+| `MANUAL_CHECKS_studio.md:254` | **WAS STALE at `1.4.3`. FIXED** to `1.4.4`. See 2.6 |
+| `MANUAL_CHECKS_studio.md:5` | **WAS STALE.** Header read "Updated 2026-08-24 (second pass) for the v1.4.1 build", two releases behind. **FIXED** |
+| `MANUAL_CHECKS_studio.md` checks 6b, 6f, 6g, Studio `1.3.2` | **CURRENT**, confirmed against the built bundle rather than assumed. See 2.6 |
+| `MANUAL_CHECKS_studio.md:11,226,285` | `v1.4.0` / `v1.4.1` in **historical narrative** ("Until v1.4.1 the lobster was a bare span"). Correct as history, **left** |
+
+### 2.5 The enumeration: seed hosts, byte counts, artifact paths
+
+**Seed hosts.** 30 distinct DNS names across `validation\`. No stale entry found:
+the product hosts (`api.anthropic.com`, `openclaw.ai`, `clawhub.ai`,
+`api.clawhub.ai`, `api.clawfactory.app`, `api.github.com`, `github.com`,
+`raw.githubusercontent.com`, `objects.githubusercontent.com`,
+`codeload.github.com`, `registry.npmjs.org`) match the documented base and
+toolchain sets; the remainder are deliberate probe targets (`example.com/.org/.net`,
+`www.iana.org`, `neverssl.com`, `api.ipify.org`, `wikipedia.org`), competitor
+provider endpoints used as controls (`api.openai.com`, `auth.openai.com`,
+`api.x.ai`), SMTP targets (`smtp.gmail.com`, `smtp.office365.com`,
+`smtp.mail.yahoo.com`, `outlook.office.com`) and infrastructure
+(`management.azure.com`, `ubuntu.com`, `docs.python.org`).
+
+**Byte counts.** Seven hits. Five are the digest/byte pairs already classified
+above. Two are **false positives of the instrument and are named as such**:
+`615079982` and `944583470` are decimal-looking substrings *inside* a 64-hex
+digest on the same line. They are reported rather than filtered, because a filter
+that silently drops them is a filter that could silently drop a real one.
+
+**Default artifact paths.** One distinct `PATH` hit,
+`/mnt/c/Users/*/AppData/Local/Programs/clawfactory-studio/resources/app.asar`.
+Every driver artifact default resolves to `Output\ClawFactory-Secure-Setup.exe`
+on the build machine or `C:\cfv\combined-setup.exe` on the box; none names a
+versioned filename except the archived JOB 3 validator. All **CURRENT**.
+
+### 2.6 A finding the instrument's own scope would have missed, and the fix to both
+
+**The sweep as first written covered `.ps1` only.** `validation\` also holds two
+`.sh` files and six `.md` files, and one of the `.md` files is the by-hand
+checklist an operator reads at the keyboard. Swept separately by hand:
+
+`MANUAL_CHECKS_studio.md:254` told the operator that Studio's `1.3.2` is
+deliberately not the same as the ClawFactory installer's version, **and then named
+1.4.3**. That is the exact defect the v1.4.3 session found and fixed in the same
+line when it read `1.4.1`. It goes stale on every release and nothing enforces it.
+A human reads that sentence mid-check, so a wrong value there invites a wrong FAIL
+on a correct install.
+
+**Studio's own strings are current and were confirmed, not assumed**, as TASK 4.3
+requires — against the built bundle rather than against intention:
+
+```
+resources\ClawFactory-Studio-Setup-1.3.2.exe
+  sha256 ac5937516e7edbb5aac00433bfa6e5074449cbc28b132883099391639e1e7dca
+ClawFactory-Secure-Setup.iss:16
+  #define StudioInstaller "ClawFactory-Studio-Setup-1.3.2.exe"
+```
+
+`resources\` also holds `ClawFactory-Studio-Setup-1.3.0.exe` and `-1.3.1.exe`.
+Neither is referenced by the `.iss`, so neither ships. Recorded because three
+Studio installers in one directory is a reading hazard for the next person, not
+because it is a defect today.
+
+### 2.7 Commits
+
+```
+cef6cbd  validation: repin the release-gate driver to the v1.4.4 signed artifact
+b11c2c5  validation: the by-hand checklist quoted the v1.4.3 installer version
+```
+
+Both files are `eol=lf` in the index and in the worktree before and after
+(`git ls-files --eol`), so neither edit re-materialised line endings.
+
+The sweep instrument itself is **not committed**. It is a throwaway, and
+committing it would imply a maintenance promise this job did not make — the same
+decision, for the same reason, as the v1.4.3 session.
+
+---
+
+## 3. TASK 0.4: the starting estate, unfiltered
+
+```
+=== az resource list -g clawfactory-validation, UNFILTERED ===
+clawfactoryvalc467              Microsoft.Storage/storageAccounts
+bake-vmVNET                     Microsoft.Network/virtualNetworks
+clawfactory-win11-baseline      Microsoft.Compute/images
+clawfactory-win11-baseline-v2   Microsoft.Compute/images
+AZ_EXIT=0
+```
+
+**Exactly the expected residual and nothing else.** Widened beyond the job card's
+ask to the whole subscription, because "the resource group is clean" and "nothing
+is billing" are different claims:
+
+```
+=== az vm list -d, SUBSCRIPTION-WIDE ===   AZ_EXIT=0   VM_LIST_EMPTY=True
+=== az disk list -g clawfactory-validation ===  DISK_EXIT=0  DISK_LIST_EMPTY=True
+=== az network nic / public-ip / nsg list, subscription-wide ===  all exit 0, all empty
+=== az resource list, ALL resource groups ===
+clawfactory-validation  clawfactoryvalc467             Microsoft.Storage/storageAccounts
+clawfactory-validation  bake-vmVNET                    Microsoft.Network/virtualNetworks
+clawfactory-validation  clawfactory-win11-baseline     Microsoft.Compute/images
+clawfactory-validation  clawfactory-win11-baseline-v2  Microsoft.Compute/images
+NetworkWatcherRG        NetworkWatcher_westus2         Microsoft.Network/networkWatchers
+clawfactory-signing     clawfactory-signing            Microsoft.CodeSigning/codeSigningAccounts
+```
+
+`cfv-178` and its four orphans are gone, as the job card predicted. The
+NetworkWatcher is Azure's own auto-created resource and the signing account is the
+build-time code-signing account; neither is validation estate and neither bills
+compute. **Zero VMs, zero disks, zero NICs, zero public IPs, zero NSGs. Nothing is
+billing compute at the start of this run.**
+
+**One instrument note, recorded because an errored `az` command's empty output is
+not evidence.** The first `az disk list` was issued subscription-wide and returned
+`DISK_EXIT=2` with `ERROR: the following arguments are required: --resource-group/-g`.
+That exit code was checked rather than the empty output believed; the call was
+re-issued with `-g` and returned exit 0 and genuinely empty. Had the exit code not
+been read, a required-argument error would have read as "no disks exist".
+
+---
+
+## 4. TASK 0.1: the plan, and an honest statement of its size
+
+*(Recorded BEFORE `az vm create`, as the job card requires. Outcomes are appended
+below as they happen.)*
+
+**Box: one. `cfv-179`, Standard_D2s_v4, image `clawfactory-win11-baseline-v2`,
+resource group `clawfactory-validation`, `-Provider claude`.** One box, as
+instructed; boxes B, C and D are separate sessions on separate days and no second
+VM is provisioned here.
+
+### 4.1 Phase order
+
+Fixed by TASK 1 and stated here so the close-out can be checked against it. Two
+phases change box state and that is why the order is not negotiable.
+
+| # | Phase | Carries | Why here |
+| --- | --- | --- | --- |
+| 1 | `interim-v120-phase1.ps1` | Matrix row 1, clean install, all seven pins | Everything else needs an install |
+| 2 | providergate | Matrix row 3 | |
+| 3 | switchprovider, `-ExtraFiles validation\sp-prefix-fw.sh` | Matrix rows 5, 6, 7 | v1.4.3 made the staging structural; confirm it stages rather than trusting it |
+| 4 | toolchain | Matrix rows 8, 9 | |
+| 5 | phases 2, 3, 5, 6 and harness self-test | Matrix rows 12, 13, 14 | |
+| 6 | reboot pass, `-PostReboot` | Matrix row 10 | **Operator touch:** auto-logon is one-shot, so a human logs in and restarts the runner |
+| 7 | by-hand panel checks | Matrix row 11 | **Operator touch:** ten Studio checks plus the panels, at the keyboard |
+| 8 | sections 14.8, 14.9, 14.10, 14.11, 14.6 | The v1.4.3 carry-forward | 14.6 needs the gateway genuinely down, which now depends on 2.1 |
+| 9 | `interim-v144-wrappers.ps1 -RunProviderSwitch` | WR.1–WR.9, and 2.1–2.5 | **Second to last.** WR.5 switches the box to ollama and would confound anything after it |
+| 10 | RemoveAll uninstall branch, 16 rows | Section 14.4 | **Last of all.** It destroys the install |
+
+`rename-agent.ps1` is an operator click inside step 7, not an unattended row: it
+blocks on a modal `MessageBox` and an unattended phase would hang rather than fail.
+
+**`SP.8` will FAIL.** It is the documented address-scoping residual. It is not
+adjusted, retired or inverted.
+
+### 4.2 Cost, stated before it is spent rather than discovered
+
+| | |
+| --- | --- |
+| Wall clock, estimated | **7 to 9 hours** |
+| Operator touches, estimated | **5** |
+| Compute | one `Standard_D2s_v4` at roughly $0.10/hour, so **under $1** for the whole box, plus its OS disk |
+
+The five touches, named so they can be planned for rather than discovered:
+
+1. **RDP login at provisioning**, to set the admin password and start the runner.
+   Nothing launches `wrapper.cmd`; the driver deliberately arms no auto-logon.
+2. **RDP login after the reboot pass** (matrix row 10). Auto-logon is one-shot.
+3. **The by-hand panel checks** (matrix row 11), ten Studio checks plus panels.
+   30 to 45 minutes at the keyboard.
+4. **The `rename-agent.ps1` modal click.**
+5. **The RemoveAll uninstall dialog.**
+
+### 4.3 Does box A fit in one session? Stated before provisioning, as instructed
+
+**Not as an unattended session, and the constraint is operator availability rather
+than money.** Seven to nine hours with five keyboard touches is a working day with
+a human on call, not a run that can be started and collected later. The job card
+asks to be told this before provisioning rather than half way through, so it is
+said here.
+
+**It does fit as a working day, and it fits as two half-days**, because the box can
+be deallocated between step 7 and step 8 and restarted the next morning. That
+costs nothing beyond the OS disk and adds no operator touch that is not already
+planned: restarting a deallocated box requires an RDP login to restart the runner,
+and touch 2 is already exactly that.
+
+This is a decision for the operator and it is carded rather than taken. Nothing is
+provisioned until it is answered, because a box provisioned into an absence is the
+failure this project has already paid for once at 64 hours.
+
+---
+
+## 5. Sections 5 onward: NOT YET MEASURED
+
+Nothing has been installed. Derivation 3, every matrix row, every section, the
+wrapper phase and the uninstall branch are all owed and none of them is claimed
+in either direction.
+
+---
+
+## 6. Task accounting so far
+
+| Task | State |
+| --- | --- |
+| Job card moved to `docs/cc_jobs/`, committed | **DONE**, `191bff5` |
+| PROMPT 15 preamble, stop condition checked | **DONE**, did not fire |
+| Three required reports read in full | **DONE** |
+| TASK 0.1 plan stated before `az vm create` | **DONE**, section 4 |
+| TASK 0.2 two named fixes | **DONE**, `cef6cbd` and `b11c2c5` |
+| TASK 0.2 wider enumeration | **DONE**, section 2 |
+| TASK 0.2 canary | **DONE, 3 of 3**, section 2.2 |
+| TASK 0.3 upload + verify by download and re-hash | **DONE**, section 1 |
+| TASK 0.4 starting estate, unfiltered | **DONE**, section 3 |
+| TASK 1 phase order | **STATED**, section 4.1. Not run |
+| TASK 2 the v1.4.4 changes | **NOT RUN** |
+| TASK 3 the v1.4.3 sections | **NOT RUN** |
+| TASK 4 operator handoffs | Card 1 printed; awaiting the go/no-go |
+| TASK 5 standing traps | Followed; two hit already and are recorded (sections 2.2, 3) |
+| TASK 6 teardown | **NOT DUE** — nothing provisioned |
+| TASK 7 close-out | this file |
+
+**Resource ledger so far: zero VMs provisioned, zero VMs running, nothing
+billing compute.** One 440 MB blob uploaded to the validation container, which is
+retained as evidence and is not billable compute.
