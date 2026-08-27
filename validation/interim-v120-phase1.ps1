@@ -94,7 +94,7 @@ $PIN = @{
     # diagnose, not a product failure to report.
     studioAsar    = 'a64a118f7ae748059b482589d2c124d082cc42dbf9d3239ba615079982d2a49e'
 
-    version       = '1.4.1'
+    version       = '1.4.3'
 }
 
 # The names are transcribed from setup.ps1 Step-Preflight $required. Held here as
