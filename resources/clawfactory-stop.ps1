@@ -119,11 +119,38 @@ try {
 # turn both run as clawuser, so one count settles both claims. CF_VERIFY_OK is
 # printed only when pgrep actually exists: an unverified state must never be
 # able to read as zero.
+#
+# NO SHELL VARIABLE AND NO COMMAND SUBSTITUTION, and that is measured rather than
+# stylistic. On cfv-178 a payload of the form
+#     n=$(pgrep -u clawuser -f '[o]penclaw' | wc -l); echo CF_PROCS=$n
+# printed `CF_PROCS=` with n EMPTY, as clawuser and as root, with the gateway both
+# up and down -- while the identical pipeline run WITHOUT the assignment reported
+# the count correctly through the same wsl.exe channel. `$?` survives this channel;
+# a variable assigned from $( ) does not. Two earlier versions of this verifier
+# were emptied that way and reported COULD NOT BE VERIFIED over a stop that had
+# genuinely succeeded.
+#
+# So the count is emitted directly as the payload's only output and parsed here.
+# The pgrep-presence check is a SEPARATE call and is not optional: if pgrep were
+# missing, its error would go to /dev/null and `wc -l` would print 0, and a
+# missing tool would read as "nothing is running" -- the exact false negative this
+# file exists to prevent, inverted.
+#
+# Worth keeping in view: through both wrong readers the script still refused to
+# claim success. A false "could not verify" is a bug. A false "everything is
+# stopped" is the defect that shipped for four months.
 Write-Host 'Verifying...'
-$verify = Invoke-StopWsl 'if command -v pgrep >/dev/null 2>&1; then n=$(pgrep -u clawuser -c -f ''[o]penclaw'' 2>/dev/null); echo CF_VERIFY_OK CF_PROCS=$n; else echo CF_VERIFY_UNAVAILABLE; fi'
-$verified = $false
-$procs    = -1
-if ($verify.Text -match 'CF_VERIFY_OK\s+CF_PROCS=(\d+)') { $verified = $true; $procs = [int]$Matches[1] }
+$havePgrep = Invoke-StopWsl 'command -v pgrep >/dev/null 2>&1 && echo CF_PGREP_PRESENT || echo CF_PGREP_ABSENT'
+$countOut  = Invoke-StopWsl 'pgrep -u clawuser -f ''[o]penclaw'' 2>/dev/null | wc -l'
+$verified  = $false
+$procs     = -1
+# [regex]::Match, not -match: a second -match overwrites $Matches, and reading it
+# after the wrong one is a defect this session already shipped once today.
+$countMatch = [regex]::Match($countOut.Text, '(?m)^\s*(\d+)\s*$')
+if (($havePgrep.Text -match 'CF_PGREP_PRESENT') -and $countMatch.Success) {
+    $verified = $true
+    $procs    = [int]$countMatch.Groups[1].Value
+}
 
 # --- 5. Say only what was measured -----------------------------------------
 Write-Host ''
@@ -141,7 +168,12 @@ if ($verified -and $procs -eq 0) {
 } elseif ($verified) {
     Write-Host "  Gateway and turns: STILL RUNNING ($procs OpenClaw process(es) as the agent)." -ForegroundColor Red
 } else {
+    # Print what the verifier actually returned. The first version of this file
+    # swallowed it, so a reader defect was indistinguishable from a sandbox that
+    # could not be reached, and diagnosing it cost a round trip to a running box.
     Write-Host '  Gateway and turns: COULD NOT BE VERIFIED. No claim is made either way.' -ForegroundColor Red
+    Write-Host "                     (pgrep check: $($havePgrep.Text -replace '\s+', ' '))" -ForegroundColor Red
+    Write-Host "                     (count read:  $($countOut.Text  -replace '\s+', ' '))" -ForegroundColor Red
 }
 
 Write-Host ''
