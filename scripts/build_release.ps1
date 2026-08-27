@@ -155,8 +155,13 @@ function Test-AstType($n, $t) { $n.GetType().Name -eq $t }
 
 $shippedPs1 = @()
 foreach ($line in (Get-Content -LiteralPath $issPath)) {
-    if ($line -match '^Source:\s*"([^"]+)"' -and $Matches[1] -match '\.ps1$') {
-        $shippedPs1 += (Join-Path $RepoRoot ($Matches[1] -replace '\\', '/'))
+    # $Matches must be consumed into a variable BEFORE any further -match runs:
+    # a second -match overwrites it, and the .ps1 test below is a second -match.
+    # Written the obvious way first, this silently yielded $null and the gate
+    # tried to parse the repo root as a file. Its own canary caught that.
+    if ($line -match '^Source:\s*"([^"]+)"') {
+        $srcPath = $Matches[1]
+        if ($srcPath -like '*.ps1') { $shippedPs1 += (Join-Path $RepoRoot ($srcPath -replace '\\', '/')) }
     }
 }
 if ($shippedPs1.Count -eq 0) {
@@ -207,8 +212,11 @@ foreach ($psFile in $shippedPs1) {
     }
 }
 if ($interpDefects.Count -gt 0) {
-    Fail ("UNDEFINED INTERPOLATION in shipped scripts. PowerShell expands these; they are not prose. " +
-          "Escape each as ``$name, or reword so no dollar sign appears -- " + ($interpDefects -join ' | '))
+    # The escape guidance is built from a SINGLE-quoted fragment on purpose: written
+    # inside the double-quoted string it lives in, the backtick escaped the dollar
+    # and the advice printed as "Escape each as ," which is worse than no advice.
+    Fail ('UNDEFINED INTERPOLATION in shipped scripts. PowerShell expands these; they are not prose. ' +
+          'Escape each as `$name, or reword so no dollar sign appears -- ' + ($interpDefects -join ' | '))
 }
 Write-Host ("Interpolation gate OK: {0} shipped .ps1 files parse, and none interpolates a variable the file never defines." -f $shippedPs1.Count)
 
