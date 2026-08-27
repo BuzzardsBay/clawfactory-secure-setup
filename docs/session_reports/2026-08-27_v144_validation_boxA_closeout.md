@@ -1,6 +1,6 @@
 # CLOSE-OUT: v1.4.4 validation, BOX A
 
-**Status at the time of writing: IN PROGRESS — cfv-179 installed. Rows 1 and 3 PASS. Rows 5-7 in flight.**
+**Status at the time of writing: IN PROGRESS — rows 1, 3, 5, 6, 7 PASS. Rows 8-9 in flight.**
 Written incrementally so an interrupted session leaves an honest record rather
 than nothing. Sections carry their own state. Anything not measured says so.
 
@@ -708,3 +708,102 @@ same in a results file."**
 
 **Carried forward as owed**, not quietly absorbed into the PASS. Closing it costs a
 dedicated install and is a candidate for box B or C, which install anyway.
+
+---
+
+## 8B. MATRIX ROWS 5, 6 and 7: the `SP.*` switch rows. **ALL THREE PASS**
+
+```
+PASS=39 FAIL=1 VOID=0 INFO=1  (counted 41 of 41 recorded rows)
+positive controls registered=13 fired=13
+preconditions declared=1 met=1
+
+PHASE VERDICT: FAIL. Failing checks: SP.8.PRE
+SWITCHPROVIDER_PROBE_COMPLETE rc=1
+```
+
+**The phase verdict is FAIL and the three matrix rows it carries all PASS. Both
+statements are true and neither is allowed to hide the other**, so they are stated
+together. The single failing row is `SP.8`, which the job card names in advance as
+the documented address-scoping residual.
+
+| Matrix row | The claim | Evidence | Verdict |
+| --- | --- | --- | --- |
+| **5** | no toolchain address enters the allowlist after a switch | `SP.4a` no toolchain address in `allowed_ipv4`; `SP.4b` none in `allowed-ips.txt` | **PASS** |
+| **6** | with the toggle OFF, GitHub and npm unreachable after a switch | `SP.5a` | **PASS** |
+| **7** | CONTROL for 6: with the toggle ON, they ARE reachable | `SP.6a` | **PASS** |
+
+### 8B.1 The A/B that proves the Guard 3 fix holds on v1.4.4
+
+The phase demonstrates the defect and the fix on the same box, in the same run,
+with only the script text differing:
+
+```
+SP.2.CTL.PRE  PASS  THE FAULT LANDED: the pre-fix block actually ran and rebuilt the allowlist
+SP.2a.PRE     PASS  REFERENCE: the 1.3.4 script puts toolchain addresses into allowed_ipv4
+SP.2b.PRE     PASS  REFERENCE: the 1.3.4 script PERSISTS them to allowed-ips.txt
+SP.2c.PRE     PASS  THE SECURITY FAILURE: with the toggle OFF, GitHub and npm are reachable again after the switch
+SP.2d.PRE     PASS  The panel still reports the toggle as OFF while the route is open
+SP.4a/4b.PRE  PASS  after the FIXED switch, NO toolchain address in either place
+SP.4c.PRE     PASS  the provider route SURVIVED the fixed rebuild
+```
+
+**The old defect reproduces and the shipped v1.4.4 script does not exhibit it.**
+`SP.3.CTL.PRE` matters here: the fixed block was rendered from the **INSTALLED**
+`switch-provider.ps1`, so this measures the artifact that shipped rather than the
+repo.
+
+### 8B.2 The fail-closed guard refuses on every malformed input, and cleans up
+
+```
+SP.7.CTL.PRE  PASS  THE FAULT LANDED: a toolchain host really was added to the seed
+SP.7a.PRE     PASS  a toolchain host in the seed makes the fixed script REFUSE rather than widen the unrevocable set
+SP.7b.PRE     PASS  the injected fault was removed again, so later phases start from the real seed
+SP.7c.PRE     PASS  an EMPTY seed is fatal and the firewall is left untouched
+SP.7d.PRE     PASS  a MALFORMED seed line is fatal and is named in the refusal
+SP.7e.PRE     PASS  the real seed was restored and the script succeeds again
+```
+
+That is the PROMPT 15 input-shape sweep answered by execution rather than by
+reading: present, poisoned, empty and malformed each have a decided and measured
+meaning, and **a fault denies rather than defaulting**.
+
+### 8B.3 `SP.8`: the documented residual, reported verbatim and NOT adjusted
+
+```
+SP.8.PRE  FAIL  PANEL-COPY CHECK: with the toggle OFF, is the SKILL HUB actually unreachable?
+  clawhub.ai:443 CONNECTED with the toggle OFF (api.clawhub.ai blocked=True). The panel copy
+  says the toggle stops skill installation, and on this box it does not, because clawhub.ai
+  shares an address with the permanently-allowed base host openclaw.ai. PRE-EXISTING and not
+  caused by the switch-provider fix, which is proven separately by SP.5a. The finding is that
+  a control's copy overstates what the control can do
+```
+
+**Not adjusted, not retired, not inverted**, per the job card. It is the
+address-level-versus-hostname-level limit already on record: the toggle is
+structural at the address level, and `clawhub.ai` is co-hosted with a base host
+that must stay allowed. `SP.1z` records the co-hosting map as INFO.
+
+### 8B.4 The calibration that makes every reachability row above mean something
+
+```
+SP.1.CTL.PRE  PASS  the reachability probe both connects AND is refused in the same run
+  provider reachable=True (must be true); un-allowlisted site refused=True (must be true).
+  A probe proven in only one direction passes whether the log rule sits above or below the
+  accepts, which is the cfv-167 error
+```
+
+Both halves, in the same run. That is the standing rule that a one-directional
+reachability probe once produced a false ship-blocker.
+
+`SP.9.PRE` PASS: **the box is left with the toggle OFF**, which is the defined
+starting state the reboot pass needs.
+
+### 8B.5 One instrument observation, recorded rather than smoothed over
+
+`SP.2.CTL0.PRE` passed with `landed 3772 bytes, expected 3771` — a one-byte
+difference, consistent with a trailing newline added by the write path. The control
+is an intactness check and a one-byte trailing newline does not make the reference
+parse differently, which is why it passed. Recorded because a control that reports
+a number other than the one it expected and still says PASS is worth a reader
+knowing about, even when the reason is benign.
