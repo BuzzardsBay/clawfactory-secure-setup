@@ -323,3 +323,176 @@ PROMPT 15 credential rule rather than a defect to engineer around.
 
 Upload to the service took 36 seconds; the download onto the box took 12 minutes, which
 is `Invoke-WebRequest` buffering 440 MB in PowerShell 5.1 and is normal for this rig.
+
+---
+
+## 5. TASK 1 row 1 and the pins: phase 1. **PASS**
+
+```
+PASS=15 FAIL=0 VOID=0 INFO=4  (counted 19 of 19 recorded rows)
+positive controls registered=2 fired=2
+preconditions declared=0 met=0
+
+PHASE VERDICT: PASS. Every positive control fired and every precondition was met.
+PHASE1_PROBE_COMPLETE rc=0
+```
+
+Install exit code 0. Studio per-user installer landed in the original user profile
+at exit 0, de-elevated, as designed.
+
+Rows that settle questions TASK 0 raised:
+
+```
+PIN.version              PASS   Installed version reports 1.4.3
+PIN.studio.asar          PASS   Studio pin: the INSTALLED app.asar matches the build-time digest
+PIN.bundle               PASS   Bundle completeness (all 34 preflight resources shipped)
+PIN.soul.indistro        PASS   Pin 2of7 SOUL as installed in distro
+PIN.soul.rootpin         PASS   Root-owned /etc/clawfactory/soul.sha256 matches pin
+PIN.workspaceSoul        PASS   Pin 3of7 composed workspace SOUL matches pin
+PIN.rootfs               INFO   Pin 4of7 rootfs identity (distro produced by the pinned tarball)
+P1.CHAN                  PASS   POSITIVE CONTROL: the file-based WSL channel discriminates
+```
+
+**PIN.version reading 1.4.3 is the evidence that the TASK 0 fix is live rather than
+merely committed.** Before this morning it read 1.4.1 and would have mislabelled
+every row of this run.
+
+**PIN.studio.asar PASS settles section 2.4 by measurement.** The installed
+`app.asar` equals `a64a118f...`, so repinning `interim-v140-stagecards.ps1` away
+from the 1.3.1 value was correct, and `SC.3` would indeed have reported FAIL on
+this correct install had it been left alone.
+
+**PIN.rootfs recorded INFO, as section 2.3 predicted.** The dead literal is
+confirmed dead by observation, not only by reading.
+
+### 5.1 The virtualization warning, answered rather than assumed
+
+The install log carries:
+
+```
+[WARN] Virtualization may be disabled in BIOS. WSL2 may fail to start.
+```
+
+That matters more than most warnings here. If WSL2 were genuinely unavailable the
+installer falls back to WSL1, and WSL1 is a different isolation story than the one
+the structural claims rest on. Measured in the interactive session, because a
+per-user distro is invisible to `run-command`:
+
+```
+WHOAMI=cfv-178\clawadmin
+---wsl -l -v---
+  NAME      STATE           VERSION
+* Ubuntu    Running         2
+---wsl --status---
+Default Distribution: Ubuntu
+Default Version: 2
+DISTROS=Ubuntu
+CONTROL_FAKE_PRESENT=False
+```
+
+**WSL 2.** The warning is a detection artifact on this VM size, not a fallback.
+
+Two controls, because an answer this convenient deserves them. `CONTROL_FAKE_PRESENT=False`
+shows a distro name that cannot exist is not listed while the real one is, so the
+reader discriminates. `WHOAMI` shows the job executed in the interactive session
+rather than as SYSTEM, which is the only context that can see the distro at all.
+
+---
+
+## 6. TASK 4.1, section 14.8: the bundled bytes on the box ARE the committed bytes. **PASS**
+
+The item that has never run anywhere, and the one that ten files would have failed
+against every release up to and including v1.4.2.
+
+### 6.1 Result
+
+```
+files compared      : 54  (of 54 tracked bundled)
+DIGEST MATCH        : 54
+DIGEST MISMATCH     : 0
+ABSENT / NO ROW     : 0
+CR != 0             : 3   (all three binary, see 6.3)
+```
+
+**Every one of the 54 tracked files the `.iss` bundles has, on the installed
+machine, a SHA-256 identical to its committed blob at `de4da85`.**
+
+### 6.2 The negative half, which is what makes the above mean anything
+
+Three canaries, all fired:
+
+```
+CANARY_ALTERED|C:\cfv\canary\altered.md|present|78d4c36a8b5016a810b17ceda3574ddc19cacaded00099976a6bca853c6cd890|0|4278
+CANARY_CR     |C:\cfv\canary\withcr.md |present|81cf0971bfc3d4e75931fb2bdecb88304a25f03a97ae6e7b1d4787afdb057f16|1|4278
+CANARY_ABSENT |...\this-cannot-exist.md|absent|-|-|-
+```
+
+- **ALTERED.** A copy of `safety-rules.md` with one byte appended, read by the same
+  probe body, hashes to `78d4c36a...` against the committed `e7021260...`. The
+  comparison detects a one-byte change.
+- **CR.** A copy with a single CR inserted reports `cr=1`. **This is the control
+  that matters most.** A CR counter that always returned 0 would have passed all 54
+  files and produced exactly the same clean result.
+- **ABSENT.** A path that cannot exist reports `absent`, so a missing file cannot
+  read as a match.
+
+### 6.3 The three CR-bearing files are binaries, and the assertion does not apply
+
+`logo.png` at cr=2, `lobster.ico` at cr=463, `ClawChat.exe` at cr=35509. A `0x0D`
+byte in a PNG, an icon or an executable is data, not a line ending. Confirmed from
+git rather than asserted:
+
+```
+i/-text w/-text attr/text=auto eol=lf   resources/ClawChat.exe
+i/-text w/-text attr/text=auto eol=lf   resources/lobster.ico
+i/-text w/-text attr/text=auto eol=lf   resources/logo.png
+```
+
+`-text` on both sides means git auto-detected them as binary and never normalised
+them, which is what the repo-wide `text=auto` rule is for. **All three digests match
+their committed blobs exactly**, which is the claim that matters. So: **CR=0 across
+all 51 text files, and 54 of 54 digests match.**
+
+### 6.4 Three instrument defects in my own generator, each caught before it reported
+
+Recorded because all three failed in the direction that produces a full, confident,
+uniform answer, which is the shape this project has been burned by repeatedly.
+
+1. **The leaf variable never expanded**, so all 54 destination paths came out
+   pointing at one nonexistent path. Would have reported 54 files missing on the box
+   and read as a catastrophic product failure.
+2. **The path parse emptied**, and the generator then reported **55 tracked files,
+   every one carrying `e3b0c442...`, which is the SHA-256 of the empty string.** A
+   uniform digest across every row is the most alarming output this check could
+   produce, and it was produced by a parse bug rather than by the product.
+3. **The backslash conversion ate itself**, leaving 50 of 55 files marked untracked.
+
+The generator now carries seven assertions that must all pass before the manifest is
+usable, including that no row holds the empty-string digest, that no row carries an
+unexpanded variable, and that the tracked count is 54. **That 54 is independent
+corroboration**: derived here by parsing the `.iss`, and matching the v1.4.3
+close-out own count of 54 tracked bundled files, reached by a different route.
+
+### 6.5 Two further findings, in the retrieval rather than the probe
+
+**The completion sentinel arrived without the evidence.** The first version printed
+its rows directly and `run-command` truncated the middle: `PROBE_148_COMPLETE` was
+present and **only 25 of 54 rows were**. A reader gating on the sentinel would have
+called it complete and counted 25 files as 54. The probe now writes to a file on the
+box and reports counts, and the rows are retrieved in chunks.
+
+**The transfer carries its own control.** The box reports the SHA-256 of the results
+file, and the reassembled local copy must hash to the same value. It did not, on the
+first attempt: 54 rows instead of 57. The cause was my retrieval filter, which
+required a literal `CANARY` followed by a pipe and therefore silently dropped all
+three `CANARY_ALTERED`-style rows. **The three canaries are exactly what this check
+depends on, and the filter dropped precisely those.** Fixed, refetched, and the
+reassembled digest now equals the digest the box computed:
+
+```
+reassembled=573f91caecaeabddc7df663ca22aa494abbeb67bbbd90f2b3933151d88433bf3
+MATCH=True
+```
+
+Evidence retained at `validation-runs/cfv-178-148-manifest.txt` and
+`validation-runs/cfv-178-148-rows.txt`.
