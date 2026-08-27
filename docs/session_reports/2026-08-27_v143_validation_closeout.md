@@ -740,3 +740,176 @@ did not exist either before or after the launcher ran, so the launcher wrote no
 state line on this run. Whether that is because the `ALREADY_RUNNING` branch was
 taken and the log path differs from the one derived here, or because the log is
 never written, is **not yet established** and is not claimed either way.
+
+---
+
+## 11. TASK 4.5, section 14.6, RE-RUN with its precondition established. **PASS**
+
+The first attempt (section 10) was VOID. Re-run after putting the gateway down by
+the method control C proved works:
+
+```
+BEFORE      http=down(502)  procs=0
+Stopped systemd service: openclaw-gateway.service
+AFTER_STOP  http=down(502)  procs=0
+PRECONDITION_MET=True  (http=down(502) AND procs=0, both agree)
+LAUNCHER_EXIT=0
+LOG_USED=C:\ProgramData\ClawFactory\launcher.log
+--- new log lines ---
+[2026-08-27 17:12:02] [STARTED]
+```
+
+and the started gateway is genuinely healthy, not merely spawned:
+
+```
+poll 1  http=200  procs=1
+```
+
+**`[STARTED]`, not `[ALREADY_RUNNING]`, is the whole result.** That is precisely
+the v1.4.2 change: on a box whose gateway is down the launcher starts it rather
+than silently doing nothing.
+
+**The launcher's own log corroborates that the earlier VOID was the right call**,
+because it holds both runs:
+
+```
+[2026-08-27 17:03:36] [ALREADY_RUNNING]     <- the VOID attempt
+[2026-08-27 17:12:02] [STARTED]             <- this one
+```
+
+The first run took the `ALREADY_RUNNING` path, exactly as predicted, and would
+have scored a PASS indistinguishable from this one while proving nothing.
+
+### 11.1 Two corrections to my own instrument
+
+**The "launcher log is absent" note in section 10 was my path bug, not a product
+finding.** The log lives at `C:\ProgramData\ClawFactory\launcher.log`. Section 10
+looked under a `logs\` subdirectory that does not exist and I recorded the result
+as "not yet established" rather than as a finding, which is the only reason it did
+not become one.
+
+**The gateway reader was wrong and the precondition gate caught it.** The first
+re-run reported `http=up(502)` with `procs=0` and refused to measure. Port 8787 is
+the **root-owned gating proxy**, which answers even when the real gateway behind it
+is down, returning 502. Treating any HTTP response as "up" made a dead gateway look
+alive. Corrected so only a 2xx counts, and the gate now requires **two independent
+readers to agree**, the HTTP status and a process count taken inside the distro.
+
+The gate refusing to produce a verdict on a disagreement is the harness working.
+Had it not been a gate, this would have been a VOID reported as a PASS.
+
+---
+
+## 12. TASK 4.4 concluded: `switch-provider.ps1` is BROKEN FOR EVERY PROVIDER
+
+The fourth script of section 14.11, and the second ship-blocker.
+
+```
+SWITCHPROV_EXIT=1
+C:\Program Files\ClawFactory\resources\switch-provider.ps1 : The variable '$baseHosts'
+cannot be retrieved because it has not been set.
+    + FullyQualifiedErrorId : VariableIsUndefined,switch-provider.ps1
+```
+
+### 12.1 The mechanism
+
+`switch-provider.ps1` sets `Set-StrictMode -Version 3.0` at line 24. At line 168 it
+builds its firewall payload as an **expandable** here-string, `$fwScript = @"`.
+Every bash variable inside is correctly escaped as backtick-dollar. **Four
+occurrences of `$baseHosts` are not**, at lines 182, 185, 194 and 235, and all four
+are inside *comments*:
+
+```
+# hardcoded 16-host mirror of setup.ps1's $baseHosts, and seven of those hosts
+# #245 moved them out of $baseHosts into @toolchain_ipv4 so the user's toggle
+# own $baseHosts to /etc/clawfactory/base-hosts.seed (root:root 0644) and this
+#   construction: these are setup.ps1's $baseHosts and nothing else. If you are
+```
+
+PowerShell expands them when the here-string is evaluated, the variable does not
+exist, and StrictMode turns that into a terminating error. **The script dies while
+building its firewall payload, before it applies anything.**
+
+This is not provider-specific. The here-string is built on the path every provider
+takes, so **the Start Menu "Switch AI Provider" item cannot work at all.**
+
+### 12.2 It was introduced by the commit that fixed the Guard 3 defeat
+
+`git log -S` puts all four occurrences in **`3818bc0`, 2026-08-19,
+"fix(egress): switch-provider no longer re-seeds the toolchain hosts it cannot
+revoke"**.
+
+That commit fixed a real and serious defect: the provider switch used to re-seed
+seven toolchain hostnames into the set nothing can revoke, silently defeating the
+user's toolchain toggle while the panel still reported it as off. The fix is
+correct, and it added a fail-closed guard that refuses to write any toolchain host
+into the allowlist.
+
+**The explanatory comments the fix added are what broke the script.** A defect was
+replaced by a worse one, in the same file, in the same commit, and nothing noticed.
+
+### 12.3 Why no previous run caught it, which is the transferable part
+
+`validation/interim-v135-switchprovider.ps1` does not execute
+`switch-provider.ps1`. It extracts the **firewall block** as rendered bash and runs
+that inside the distro as root; `validation/sp-prefix-fw.sh` is by its own header
+*"the firewall block of resources/switch-provider.ps1 as it stood at commit
+9710c5a, rendered"*.
+
+So the suite tests the **payload** and never the **PowerShell wrapper that builds
+the payload**. A defect in the wrapper's string interpolation is invisible to it by
+construction, and both ship-blockers found today live in exactly that blind spot.
+
+**This is what section 14.11 was written to close**, and on its first execution it
+found two.
+
+### 12.4 The failure is fail-safe, verified rather than reasoned
+
+The script threw while building the payload, so nothing should have been applied.
+Checked instead of assumed:
+
+```
+TABLE=present
+ALLOWED_V4=37
+TOOLCHAIN_V4=28
+ALLOWED_FILE_LINES=46
+SEED_HOSTS=9
+CTL=ok_fake_set_not_found
+```
+
+The egress firewall is intact, the toolchain addresses are still in their own
+separate set rather than in the unrevocable one, and the base seed still holds the
+documented nine hosts. The control fired: a set that cannot exist is not found, so
+these counts mean something.
+
+**So `switch-provider.ps1` fails closed.** It does not damage the firewall; it
+simply cannot do its job.
+
+### 12.5 A third, smaller finding in the same script
+
+```
+bash: line 1: ollama: command not found
+  [x] Ollama running with model llama3.1:8b
+```
+
+Line 155 is an unconditional `Write-Host`. It reports the provider as running
+immediately after the shell reported the binary missing. Same class as the Kill
+Switch: **a success line that is printed rather than earned.**
+
+This one is confined to the Ollama path and is materially less serious than the
+other two, because Ollama could not install on this box anyway. It is recorded
+because it is the same defect class and a fixer should sweep for it rather than
+patch one instance.
+
+### 12.6 Scope of the quoting class, enumerated and canaried
+
+The Kill Switch defect is a class, so the class was swept rather than the instance
+patched. Across 39 WSL invocation sites in the shipped `.ps1` files, exactly
+**two** pass an inline command containing double quotes inside a single-quoted
+`bash -lc` argument, and both are the two Kill Switch lines. A third grep hit in
+`setup.ps1` is inside a diagnostic *message string* shown to the user, not an
+executed command.
+
+The sweep was canaried before being trusted: a synthetic instance planted in a copy
+of `switch-provider.ps1` was found, and the real `switch-provider.ps1` reports zero.
+So "only two sites" is a measurement, not an absence of results.
