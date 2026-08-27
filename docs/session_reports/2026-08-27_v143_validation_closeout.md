@@ -913,3 +913,36 @@ executed command.
 The sweep was canaried before being trusted: a synthetic instance planted in a copy
 of `switch-provider.ps1` was found, and the real `switch-provider.ps1` reports zero.
 So "only two sites" is a measurement, not an absence of results.
+
+---
+
+## 13. The blocker-2 defect class, swept across every shipped script
+
+Because the fix should cover the class rather than the instance, and because the
+discovery in 12.3 is that nothing has ever executed these wrappers, the whole
+shipped surface was swept for the same shape: **an undefined variable interpolated
+inside an expandable string, in a file that sets StrictMode.**
+
+Parsed rather than grepped, because a regex cannot distinguish an escaped
+backtick-dollar from a real interpolation, nor a variable assigned elsewhere from
+one never assigned at all.
+
+**Canaried before it was trusted**, against the known defect:
+
+```
+File                Line Var        Strict
+switch-provider.ps1  182 $baseHosts   True
+switch-provider.ps1  185 $baseHosts   True
+switch-provider.ps1  194 $baseHosts   True
+switch-provider.ps1  235 $baseHosts   True
+TOTAL = 4
+```
+
+Exactly the four sites found by hand, at the same line numbers. The instrument
+detects a real instance.
+
+**Swept across all 10 shipped `.ps1` files** (the eight in `resources\`, plus
+`setup.ps1` and `smoke-test.ps1`): **TOTAL = 4**, the same four.
+
+**The class is confined to `switch-provider.ps1`.** No other shipped script
+carries it. That bounds the second blocker to one file and four comment lines.
