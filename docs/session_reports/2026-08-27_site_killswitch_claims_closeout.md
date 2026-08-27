@@ -1,8 +1,14 @@
 # CLOSE-OUT: correcting the kill switch claims on the live site
 
-**Status: COMPLETE, and nothing is published.** The corrections are written,
-committed and pushed to a branch that GitHub Pages does not serve. The live site
-is unchanged. Publishing is the operator's action and it is carded below.
+**Status: COMPLETE, and PUBLISHED.** The corrections were staged on a branch,
+carded to the operator, and **the operator then ran the publish command himself
+in the same session.** The live site is corrected and verified.
+
+> **Sections 0 to 9 below were written before the publish and are left as
+> written**, because they are the record of the job as specified: the job's own
+> stop condition was "stage it, do not publish". Wherever they say the live site
+> is unchanged or that publishing is outstanding, **that was true when written and
+> is superseded by section 10**, which carries the publish and its verification.
 
 **Headline: the job card named five sites. There are eight, and a second live
 security overclaim was found beside them that has nothing to do with the kill
@@ -492,3 +498,82 @@ No defect was introduced into either repository.
   a real connection from a second host, that row becomes consumer-side proven and
   this note can be closed; if it never does, it is worth revisiting whether a
   marketing table should carry it at all.
+
+---
+
+## 10. THE PUBLISH, and what the live site now serves
+
+**This section supersedes every statement above that says the live site is
+unchanged.** After the operator card was printed, the operator ran the publish
+command from that card verbatim, taking **both** commits rather than only the
+kill switch one. The merge was fast-forward, so what is live is exactly what was
+reviewed on the branch; no merge commit, no resolution, no new content.
+
+```
+41365d3..74a2537  main -> main   (fast-forward, 16 insertions, 12 deletions, 1 file)
+```
+
+| | before | after |
+| --- | --- | --- |
+| `origin/main` | `41365d3` | **`74a2537`** |
+| Pages build | `41365d3`, built | **`74a2537`, status `built`, duration 42.9s, `error.message` null** |
+| `https://clawfactory.app/` | HTTP 200, old copy | **HTTP 200, corrected copy** |
+
+### 10.1 Verified against the served page, not against the repo
+
+The CDN served the old copy for 32 consecutive polls after the push and flipped on
+the 33rd, which is worth recording: **a single check a minute after publishing
+would have reported failure.** The build API said `building` throughout. Both were
+polled to completion rather than sampled once.
+
+Fetched from `https://clawfactory.app` with cache-busting, all five original
+strings return a count of **zero**:
+
+| String | Occurrences live |
+| --- | --- |
+| `one-click kill switch` | 0 |
+| `One-click shutdown from Start Menu` | 0 |
+| `Studio management app, kill switch` | 0 |
+| `loopback-only gateway, Kill Switch` | 0 |
+| `to restart the gateway` | 0 |
+
+And the corrections are present: `per-folder file grants` twice (meta description
+and hero), the new FAQ once, `permission-scoped rather than encrypted` once,
+`class="control-name"` nine times, and `>Kill Switch</li>` **zero** times.
+
+### 10.2 Verified again in a real browser against the live origin
+
+Source counts can be satisfied by text that never renders, so the published page
+was also driven in a browser at `https://clawfactory.app`:
+
+- hero renders the corrected sentence, wrapping normally, layout intact
+- controls table renders **nine** rows, ending `…Web access denied by default,
+  Approval-gated email, 30-day recoverable delete`, with no Kill Switch row
+- both product cards render **eight** items each
+- the new FAQ **expands on click** against the live origin, `aria-expanded` false
+  to true
+- exactly **two** occurrences of "kill switch" in the whole rendered page: the
+  corrected ClawChat instruction and the new FAQ
+
+### 10.3 What this closes, and what it does not
+
+**Closed.** The live false security claim is gone from `clawfactory.app`. The
+residual recorded in section 8.3, that the correction existed only on a branch and
+the finding was therefore documented rather than fixed, **no longer applies.** The
+class this belonged to, the same class as `#274` that was a reason to refuse
+publication of v1.4.0, is closed on the published surface.
+
+**Not closed, and unchanged by the publish:**
+
+- `docs/RELEASE_NOTES_v1.4.3.md:73` and `:201`, deliberately left, unpublished.
+- The site repo still has no `.gitattributes`; `*.html text eol=lf` is still owed,
+  and `core.autocrlf=true` is still live system-wide on this machine for every
+  other repository. Section 8.4 item 1.
+- The **Inbound deny** evidence-class note in section 9 stands as written.
+- **The kill switch itself is still not validated from a clean install.** The site
+  now says so in its own FAQ, which is the point of the change, but the underlying
+  measurement is still owed and belongs to the next validation run rather than to
+  this job.
+
+Branch `fix/killswitch-claims` remains on origin at the same commit as `main` and
+can be deleted at any time; it holds nothing `main` does not.
