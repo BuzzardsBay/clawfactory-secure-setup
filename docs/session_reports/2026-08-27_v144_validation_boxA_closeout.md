@@ -1088,3 +1088,40 @@ addresses that the sources answer from a larger rotating pool, previously measur
 at 5 of 12 attempts before a reboot and 2 of 6 after one. **A single reachability
 reading against a rotating pool is close to a coin flip**, and one PASS is one
 sample. The residual stands and is re-measured properly on the reboot pass.
+
+---
+
+## 8F. MATRIX ROW 12: the harness self-test. **PASS, 15 of 15**
+
+```
+HARNESS SELF-TEST PASSED: 15/15.
+Each of the five injected faults was caught, each paired control shows the guard discriminates,
+and fault 5 additionally proved that its injection landed rather than assuming it.
+HARNESS_SELFTEST_COMPLETE rc=0
+```
+
+**This row carries more weight than its position suggests**, because every verdict
+in this close-out is produced by the machinery it tests. If the phase runner could
+be fooled, nothing above would mean anything.
+
+What it establishes, in the runner's own words:
+
+```
+SELF.4b       PASS  nothing reported yields VOID, not a silent agreement, and the phase is not a clean pass
+SELF.4d       PASS  a row-level void withholds the phase pass but does NOT downgrade sound rows
+SELF.5.inject PASS  FAULT 5 INJECTION LANDED: the fault fired and the verdict really did arrive empty
+SELF.5        PASS  an empty verdict records VOID, names the row, and withholds the phase pass
+SELF.5ctl     PASS  a well-formed verdict from the same expression still reports PASS
+SELF.5b       PASS  an unrecognised verdict records VOID and names its raw value
+SELF.5c       PASS  an uncountable malformed verdict is INSTRUMENT-level, and the sound row is downgraded with it
+```
+
+`SELF.5.inject` is the one that makes the rest trustworthy: **a fault injection that
+does not inject scores a false pass and looks exactly like a working control**, so
+the injection's landing is asserted rather than assumed.
+
+**One cosmetic instrument nit**, recorded rather than ignored: the job transcript
+ends with a garbled line, `啒乎剅䕟䥘䍔䑏㵅ര`, which is a UTF-16/UTF-8 decoding
+artifact of the runner's own exit-code line. It affects the transcript's last line
+only; the sentinel, the 15/15 count and `rc=0` all parsed correctly. Recorded
+because an unreadable line in an evidence file is worth a reader knowing is benign.
