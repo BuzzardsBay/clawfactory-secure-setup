@@ -304,3 +304,22 @@ clawfactory-win11-baseline-v2   Microsoft.Compute/images
 
 Back to exactly the four expected residuals. Box A was then re-provisioned as
 `cfv-178` on a fresh name, with the redirect removed.
+
+### 4.2 Box A staged. Derivation 3, on the box.
+
+```
+[09:49:31]   uploaded combined-cfv-178.exe (440609096 bytes, confirmed at the service)
+[10:01:53] Staged, digest re-verified ON THE BOX. OK staged; artifact=b2cd6408e5d6fe39116c6e5c559f7de6cf86b2ac2d7a4a8e9093e399edb8c6a1 size=440609096
+[10:02:25]   WROTE wrapper=5201 runner=112 AutoAdminLogon=
+```
+
+**All three derivations agree**: by hand on the build machine, through the driver's
+preflight with the Authenticode check, and re-derived on the box after a 440 MB
+transfer. The run prompt's instruction was to stop if any differed. None did.
+
+`AutoAdminLogon=` is empty and was **asserted rather than set**. The driver arms no
+auto-logon, which is what makes the two operator logins the correct price of the
+PROMPT 15 credential rule rather than a defect to engineer around.
+
+Upload to the service took 36 seconds; the download onto the box took 12 minutes, which
+is `Invoke-WebRequest` buffering 440 MB in PowerShell 5.1 and is normal for this rig.
