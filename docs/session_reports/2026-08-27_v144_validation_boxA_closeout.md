@@ -1262,3 +1262,158 @@ Every phase this session counted N of N, with no row the runner could not read:
 phases that ended FAIL and the one that ended VOID. That is the property row 13
 asserts, and row 12's self-test independently proved the runner *would* have caught
 a malformed verdict had one occurred.
+
+---
+
+## 8I. TASK 2: the v1.4.4 changes, on a clean install. **THE HEADLINE ROWS PASS**
+
+```
+PASS=13 FAIL=0 VOID=0 INFO=4  (counted 17 of 17 recorded rows)
+positive controls registered=5 fired=5
+preconditions declared=1 met=1
+
+PHASE VERDICT: PASS. Every positive control fired and every precondition was met.
+WRAPPERS_COMPLETE rc=0
+```
+
+Run **without** `-RunProviderSwitch`, deliberately: `WR.5` switches the box to
+ollama and matrix row 11 reads provider state by hand, so switching before the
+panel checks would confound them. The switch rows are re-run with the flag after
+row 11, in the job card's specified position.
+
+### 8I.1 TASK 2.1: the kill switch, from a clean install. **PASS**
+
+**This is the defect that made v1.4.3 a NO**, and it is fixed and measured on a
+clean box rather than on a hand-patched one:
+
+```
+WR.3.CTL  PASS  POSITIVE CONTROL: the gateway was UP before the kill switch ran, by BOTH readers
+WR.3.PRE  PASS  PRECONDITION: a running gateway to stop
+WR.3      PASS  clawfactory-stop.ps1 actually stops the gateway and any agent turn
+```
+
+**Both readers, not one.** Port 8787 is the root-owned gating proxy and answers 502
+while the gateway behind it is dead, so an any-HTTP-response-means-up reader is a
+defect that has already voided a phase. The control confirms UP by both before the
+subject runs.
+
+Until v1.4.3 this script's two WSL lines failed on a quoting fault and it printed
+its success banner anyway, on **every release since v1.0**.
+
+### 8I.2 TASK 2.2: it refuses to claim success when it cannot verify. **PASS**
+
+```
+WR.4.CTL  PASS  POSITIVE CONTROL: the fault was actually injected (the copy names a distro that does not exist)
+WR.4      PASS  with every sandbox call failing, clawfactory-stop.ps1 refuses to claim success
+```
+
+**The fault-landed control is what makes this row mean anything.** A fault injection
+that does not inject scores a false pass and looks exactly like a working control.
+A success path that has never failed is indistinguishable from one that cannot.
+
+### 8I.3 TASK 2.6 and section 14.11: the shipped wrappers EXECUTE
+
+```
+WR.1.CTL  PASS  smoke-test.ps1 printed its own summary line, so a silent death is distinguishable from a clean run
+WR.1      PASS  smoke-test.ps1 executes from its installed form and reports zero failures
+WR.7      PASS  post-install.ps1 executes (-Provider later, the no-credential branch)
+WR.8      PASS  bootstrap.ps1 executes and is re-runnable
+WR.9.CTL  PASS  a deliberately malformed library refuses to dot-source, so a clean load means the file is sound
+WR.9      PASS  clawfactory-grants.ps1 dot-sources cleanly and defines its functions
+```
+
+**`post-install.ps1` and `bootstrap.ps1` had never been executed by any harness
+generation.** The v1.4.4 close-out's coverage table recorded both as `--` in every
+column. They now run from their installed form.
+
+### 8I.4 TASK 3.5 and section 14.6: the launcher against a genuinely down gateway. **PASS**
+
+```
+WR.2  PASS  launcher.ps1 STARTS a stopped gateway rather than reporting ALREADY_RUNNING
+```
+
+**This closes the item that VOIDed in v1.4.3.** That run could not establish the
+precondition, because the only supported way to put the gateway down was the kill
+switch and the kill switch did not work. Here `WR.3` puts it down for real, and
+`WR.2` then measures the launcher against a genuinely down gateway. **The two fixes
+compose: fixing the kill switch made section 14.6 measurable.**
+
+### 8I.5 The four INFO rows, and why a skipped row must not look like a passed one
+
+```
+WR.5   INFO  switch-provider.ps1 NOT EXECUTED in this run
+WR.6   INFO  the fail-closed toolchain guard NOT EXERCISED in this run
+WR.10  INFO  rename-agent.ps1 NOT EXECUTED: it blocks on a modal MessageBox
+WR.11  INFO  uninstall.ps1 NOT EXECUTED here: running it is the destruction it performs
+```
+
+**TASK 2.3, 2.4 and 2.5 are therefore NOT measured on a clean install yet.** They
+ride `WR.5`/`WR.6` behind `-RunProviderSwitch` and are owed. `WR.10` is an operator
+click in row 11; `WR.11` is the RemoveAll branch, last of all.
+
+---
+
+## 9. Where box A stands, and what boxes B, C and D still owe
+
+### 9.1 Every row measured this session, with its verdict and evidence
+
+| Row / item | Verdict | Evidence |
+| --- | --- | --- |
+| **1** clean install, all resources, all pins | **PASS** | 15/0/0/4 of 19; 2 of 2 controls; section 7 |
+| **3** install-time provider-route gate | **PASS** | 11/0/0/1 of 12; 6 of 6 controls; section 8A |
+| **5** no toolchain address enters after a switch | **PASS** | `SP.4a`, `SP.4b`; section 8B |
+| **6** toggle OFF, sources unreachable after a switch | **PASS** | `SP.5a`; section 8B |
+| **7** CONTROL: toggle ON, reachable | **PASS** | `SP.6a`; section 8B |
+| **8** `TC.3` real agent turn, toggle OFF | **PASS** | 30/0/0/0 of 30 on re-run; section 8E |
+| **9** `TC.*` regression | **PASS** | same phase; 7 of 7 controls; section 8E |
+| **12** harness self-test | **PASS** | 15 of 15 faults caught; section 8F |
+| **13** zero malformed verdict rows | **PASS** | eight phases, all N of N; section 8H |
+| **14** Guard 2 send path | **VOID** | credential absent by design, PROMPT 15 rule; section 8G |
+| **TASK 2.1** kill switch from a clean install | **PASS** | `WR.3` + `WR.3.CTL` both readers; section 8I.1 |
+| **TASK 2.2** refuses to claim success unverified | **PASS** | `WR.4` + fault-landed control; section 8I.2 |
+| **TASK 2.6** WR.1/2/3/4/7/8/9 | **PASS** | 13/0/0/4 of 17; 5 of 5 controls; section 8I |
+| **TASK 3.5** section 14.6 launcher vs down gateway | **PASS** | `WR.2`; section 8I.4 |
+| **`SP.8`** address-scoping residual | **FAIL, expected** | reported verbatim, not adjusted; section 8B.3 |
+
+### 9.2 What box A still owes, and it is NOT a small remainder
+
+| Owed | Why not done | Needs |
+| --- | --- | --- |
+| **Row 10**, reboot pass | auto-logon is one-shot; PROMPT 15 forbids re-arming it | operator |
+| **Row 11**, ten by-hand panel checks | read by eye | operator |
+| **TASK 2.3 / 2.4 / 2.5**, `WR.5` / `WR.6` | behind `-RunProviderSwitch`; must run AFTER row 11 or it confounds the panel reading | unattended, after row 11 |
+| **TASK 2.6** `rename-agent.ps1` | blocks on a modal dialog | operator click |
+| **TASK 3.1**, section 14.8 bundled bytes = committed bytes, with a planted CR | never run this session | unattended |
+| **TASK 3.2**, section 14.9 orchestrator-prompt reaches the distro CR=0 | never run this session | unattended |
+| **TASK 3.3**, section 14.10 keepalive from its LF form + no console flash at logon | the flash half is a logon observation | operator + unattended |
+| **RemoveAll branch, 16 rows** | destroys the install; last of all | operator dialog |
+| **`PG.3f`** Level 2 control, the installer's loud abort | costs a full install | box B or C |
+
+**Sections 14.8, 14.9 and 14.10 were NOT reached.** They are the v1.4.3
+carry-forward debt and they remain owed. Section 14.11's *execution* half is covered
+by `WR.1/7/8/9`; its **CR census half is not**.
+
+### 9.3 What boxes B, C and D owe, so the next session inherits a spec
+
+**Box B, `-Provider later`**
+
+* Matrix **row 4**: provider gate skipped with a stated reason.
+* Candidate host for **`PG.3f`**, the Level 2 control, since it installs anyway.
+
+**Box C, licence host blocked, prior artifact as the control**
+
+* Matrix **row 2**: install completes with `api.clawfactory.app` unreachable.
+* The other candidate host for **`PG.3f`**.
+
+**Box D, normal install, uninstall is the subject**
+
+* **TASK 2 in full**: install, keep-Linux uninstall through the real dialog, read-back
+  against a held before-state, reinstall that completes, teardown log, the
+  fault-injected negative half, the next-boot check.
+* **This is v1.4.2 debt and it has never been measured on any release.**
+* **Re-runs phase 3 with a configured credential**, which is what would turn row 14
+  from VOID into a real verdict.
+* Carries the harness fix from section 8G.4 if it is made by then.
+
+**Not owed by any box:** `phase3b` and card `#198`. Zero outbound email is mandated
+and `#198` stays VOID as a receiving-provider outcome.
