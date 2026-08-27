@@ -152,7 +152,19 @@ PYEOF
     # Ensure Ollama is installed and running
     wsl -d $WslDistro -u root -- bash -lc 'command -v ollama >/dev/null 2>&1 || (curl -fsSL https://ollama.com/install.sh | bash); systemctl enable ollama 2>/dev/null || true; systemctl restart ollama 2>/dev/null || true'
     wsl -d $WslDistro -u $WslUser -- bash -lc "ollama pull $($cfg.Model)" | Out-Null
-    Write-Host "  [x] Ollama running with model $($cfg.Model)"
+    # This line used to be an unconditional Write-Host, and on cfv-178 it printed
+    # "[x] Ollama running with model llama3.1:8b" on the line immediately after the
+    # shell said "ollama: command not found". Same defect class as the kill switch:
+    # a success marker that is printed rather than earned. Ask the sandbox whether
+    # the model is actually there, and say what the answer was.
+    $ollamaState = (wsl -d $WslDistro -u $WslUser -- bash -lc "command -v ollama >/dev/null 2>&1 || { echo CF_OLLAMA_ABSENT; exit 0; }; ollama list 2>/dev/null | grep -q '$($cfg.Model)' && echo CF_OLLAMA_READY || echo CF_OLLAMA_NO_MODEL" 2>&1 | Out-String)
+    if ($ollamaState -match 'CF_OLLAMA_READY') {
+        Write-Host "  [x] Ollama running with model $($cfg.Model)"
+    } elseif ($ollamaState -match 'CF_OLLAMA_ABSENT') {
+        Write-Warning "Ollama is NOT installed in the sandbox, so the agent will have no model to talk to. The install step above failed; the firewall change below still applies. Install Ollama and run this script again."
+    } else {
+        Write-Warning "Ollama is installed but the model $($cfg.Model) is not present, so the agent will have no model to talk to. The firewall change below still applies. Run 'ollama pull $($cfg.Model)' inside the sandbox and try again."
+    }
 }
 
 # 2. Update egress firewall (backend-aware: nftables OR iptables-legacy)
@@ -179,10 +191,10 @@ set -euo pipefail
 # that is the only shape in which a switch can actually close a route.
 #
 # This script used to violate that rule. Until 2026-08-19 the list below was a
-# hardcoded 16-host mirror of setup.ps1's $baseHosts, and seven of those hosts
+# hardcoded 16-host mirror of setup.ps1's `$baseHosts, and seven of those hosts
 # were the toolchain hosts: api.github.com, github.com, raw.githubusercontent.com,
 # codeload.github.com, clawhub.ai, api.clawhub.ai and registry.npmjs.org. Card
-# #245 moved them out of $baseHosts into @toolchain_ipv4 so the user's toggle
+# #245 moved them out of `$baseHosts into @toolchain_ipv4 so the user's toggle
 # could revoke them; this mirror was not updated, and this mirror is what the
 # shipped Start Menu item "Switch AI Provider" runs. One click re-seeded all seven
 # into the unrevocable set, persisted them, and survived reboot -- after which the
@@ -191,7 +203,7 @@ set -euo pipefail
 # action.
 #
 # The fix is not to edit the mirror. It is to delete it. setup.ps1 now records its
-# own $baseHosts to /etc/clawfactory/base-hosts.seed (root:root 0644) and this
+# own `$baseHosts to /etc/clawfactory/base-hosts.seed (root:root 0644) and this
 # script reads that. One owner, every other reader reads. Duplication is only
 # acceptable when something compares the copies, and the cheapest comparison is
 # not having a second copy.
@@ -232,7 +244,7 @@ if [ -f "`$BASE_SEED" ]; then
     echo "[switch-provider] base hosts read from `$BASE_SEED (`$(echo `$BASE_HOSTS | wc -w) host(s))"
 else
     # Fallback for installs made before base-hosts.seed existed. TOOLCHAIN-FREE by
-    # construction: these are setup.ps1's $baseHosts and nothing else. If you are
+    # construction: these are setup.ps1's `$baseHosts and nothing else. If you are
     # about to add a host here, it belongs in setup.ps1 instead.
     BASE_HOSTS="openclaw.ai docs.openclaw.ai nodejs.org deb.nodesource.com archive.ubuntu.com security.ubuntu.com ports.ubuntu.com esm.ubuntu.com ppa.launchpad.net"
     echo "[switch-provider] WARNING: `$BASE_SEED is absent (install predates it); using the built-in base host list (`$(echo `$BASE_HOSTS | wc -w) hosts)" >&2
