@@ -946,3 +946,254 @@ detects a real instance.
 
 **The class is confined to `switch-provider.ps1`.** No other shipped script
 carries it. That bounds the second blocker to one file and four comment lines.
+
+---
+
+## 14. TASK 8: FITNESS TO PUBLISH
+
+Written fresh. Every claim carries verbatim evidence. Anything argued rather than
+measured is labelled INFERRED in the sentence that makes it.
+
+### 14.1 What is proven, and would survive an audit
+
+**The artifact under test is the one that was built.** Four independent
+derivations agree, and Authenticode is Valid:
+
+```
+b2cd6408e5d6fe39116c6e5c559f7de6cf86b2ac2d7a4a8e9093e399edb8c6a1  (build machine, by hand)
+[09:39:36] artifact verified: b2cd6408...b8c6a1 (440609096 bytes), Authenticode Valid
+[10:01:53] Staged, digest re-verified ON THE BOX. OK staged; artifact=b2cd6408...b8c6a1 size=440609096
+[16:18:21] On-VM artifact sha256: b2cd6408e5d6fe39116c6e5c559f7de6cf86b2ac2d7a4a8e9093e399edb8c6a1
+```
+
+**A clean install completes, and every pin holds.**
+
+```
+PASS=15 FAIL=0 VOID=0 INFO=4  (counted 19 of 19 recorded rows)
+positive controls registered=2 fired=2
+PHASE VERDICT: PASS. Every positive control fired and every precondition was met.
+```
+
+**Section 14.8: the bundled bytes on the installed box are the committed bytes.**
+This is the headline of v1.4.3 and it is proven, with the negative half that makes
+it mean anything:
+
+```
+files compared      : 54  (of 54 tracked bundled)
+DIGEST MATCH        : 54
+DIGEST MISMATCH     : 0
+CANARY_ALTERED  -> 78d4c36a...  (differs from the committed e7021260..., one byte appended)
+CANARY_CR       -> cr=1         (the CR counter can count)
+CANARY_ABSENT   -> absent       (a missing file cannot read as a match)
+```
+
+**Section 14.9: the orchestrator prompt reaches the distro with CR=0**, delivered
+byte-identical to its committed blob, read as the right identity:
+
+```
+BYTES=4277  CR=0  LINES=65
+SHA=f7f8163426790c05bbec090cc7efcfd83809a81531214fd26db68c6e4d12ec43
+WHOAMI=clawuser UID=1000
+CTL_CR_COUNTER=1   CTL_ABSENT=ok   CHAN_SELFTEST_OK=True
+```
+
+**Section 14.10: the keepalive runs from its LF form.**
+
+```
+TASK_PRESENT=True  TASK_STATE=Ready  TASK_LASTRESULT=0
+VBS_BYTES=764 VBS_CR=0   WSL_PROCESSES=2   CTL_FAKE_TASK_PRESENT=False
+```
+
+**Section 14.6: the launcher starts a down gateway**, with the precondition
+genuinely established and two readers agreeing:
+
+```
+PRECONDITION_MET=True  (http=down(502) AND procs=0, both agree)
+[2026-08-27 17:12:02] [STARTED]
+poll 1  http=200  procs=1
+```
+
+**WSL 2, not a WSL1 fallback**, despite the install log's BIOS warning:
+
+```
+* Ubuntu    Running         2
+CONTROL_FAKE_PRESENT=False
+```
+
+**Two of the four scripts in 14.11 execute correctly from their LF form:**
+
+```
+SMOKE_EXIT=0 / Result: 19 pass, 0 fail, 0 skip
+GRANTS_DOTSOURCE_OK=True  GRANTS_FUNCTIONS_DEFINED=43
+CTL_BAD_DOTSOURCE_OK=False_control_fired
+```
+
+**The egress firewall is intact and correctly partitioned:**
+
+```
+TABLE=present  ALLOWED_V4=37  TOOLCHAIN_V4=28  SEED_HOSTS=9
+CTL=ok_fake_set_not_found
+```
+
+### 14.2 What is VOID or unmeasured, and why
+
+- **Matrix rows 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14: NOT RUN.** The run was
+  stopped when the second ship-blocker was found. Rows 2 and 4 need their own
+  boxes; 10 and 11 need the operator; the rest were planned for this box and were
+  not reached.
+- **TASK 2, the keep-Linux uninstall headline: NOT RUN.** This is the single item
+  that would have turned the v1.4.1 NO into a yes, and it was planned for a
+  separate box that was never provisioned.
+- **TASK 3, the RemoveAll branch: NOT RUN.**
+- **Section 14.10's "no console window flashes at logon": DEFERRED.** It is a
+  by-hand observation that only a human at a logon can make, and it belongs to the
+  reboot pass, which did not happen.
+- **`#198`: VOID BY DESIGN**, as the run prompt directs. Zero outbound email was
+  authorised, `phase3b` was not run, and no send was attempted. It is recorded as a
+  receiving-provider outcome rather than a ClawFactory behaviour: the delivery path
+  is already proven end to end, a real message was accepted with a `250 OK`, and the
+  failure is inbound filtering at the recipient. No spend was made re-testing it.
+- **The first attempt at 14.6 was VOID** and was re-run rather than reported. Its
+  named reason is in section 10 and the launcher's own log corroborates it.
+
+### 14.3 What stands in the way
+
+**Two ship-blockers, both found by executing scripts that had only ever been
+parsed, and both in the same blind spot.**
+
+**BLOCKER 1. The Kill Switch does not kill anything, and reports that it did.**
+
+```
+GATEWAY_BEFORE_STOP=up(200)
+/bin/bash: -c: line 1: syntax error near unexpected token `('
+/bin/bash: -c: line 1: `bash -lc "openclaw gateway stop 2>/dev/null || echo "(gateway not running)""'
+STOP_EXIT=0
+GATEWAY_AFTER_STOP=up(200)
+```
+
+while printing to the user:
+
+```
+Done. The agent can no longer see your files, the gateway is stopped,
+and any running agent turn is killed.
+```
+
+Both of its WSL lines fail. Three controls place the defect in the shipped script:
+a plain command through the same path works (`CONTROL_A_OK`), the shipped line
+fails verbatim standalone (`CONTROL_B_EXIT=2`), and the same line with the inner
+double quotes removed works (`Stopped systemd service: openclaw-gateway.service`,
+`CONTROL_C_EXIT=0`, leaving `STATUS=down` and zero openclaw processes).
+
+Not a v1.4.3 regression. Both lines are byte-identical at `89f49db` and `de4da85`,
+and `git log -S` places the pattern in `d9b6d36`, the initial v1.0 release.
+
+**BLOCKER 2. `switch-provider.ps1` fails for every provider.**
+
+```
+SWITCHPROV_EXIT=1
+switch-provider.ps1 : The variable '$baseHosts' cannot be retrieved because it has not been set.
+    + FullyQualifiedErrorId : VariableIsUndefined,switch-provider.ps1
+```
+
+Four unescaped `$baseHosts`, all inside comments, inside the expandable here-string
+that builds the firewall payload, in a file that sets `Set-StrictMode -Version 3.0`.
+Bounded by an AST sweep to exactly those four sites across all 10 shipped scripts.
+Introduced by `3818bc0`, the commit that fixed the Guard 3 toolchain re-seed.
+
+It fails closed, verified rather than reasoned: `TABLE=present ALLOWED_V4=37
+TOOLCHAIN_V4=28 SEED_HOSTS=9`.
+
+**BLOCKER 3, documentation.** `SECURITY_FINDINGS.md` lists, in the **structural**
+table, *"Kill switch, so you can stop everything immediately | Terminates the real
+agent process | Proven."* That claim is false as written, and the structural table
+is the one the marketing claims are allowed to match.
+
+**Minor, same class.** `switch-provider.ps1:155` prints `[x] Ollama running with
+model ...` unconditionally, immediately after `bash: line 1: ollama: command not
+found`.
+
+### 14.4 The two previously unvalidated releases are NOT fully covered
+
+Asked explicitly by the run prompt, and the answer is no.
+
+v1.4.2's changes live almost entirely in the keep-Linux uninstall branch, and
+**none of that branch was measured**: TASK 2 and TASK 3 were not run. Of v1.4.2's
+six change areas, only the launcher change (14.6) was measured. Of v1.4.3's
+additions, 14.8, 14.9, 14.10 and half of 14.11 were measured and passed, 14.12
+needed no on-box check by its own terms, and 14.11 is where both blockers surfaced.
+
+So: **v1.4.3's own line-ending work is proven. v1.4.2 remains substantially
+unmeasured.**
+
+### 14.5 `#261`, as an accepted written condition of shipping
+
+**Not measured this session.** No `#261` work was in scope and none was done. The
+figures below are the previous session's, restated so a release-notes reader has
+them, and labelled as prior measurement rather than as this run's:
+
+> With the software-sources switch reading **ON** and a freshly-resolved set, the
+> route answered **2 of 6** attempts after a real reboot, and **5 of 12** before
+> one. The user's own allowed site answered **9 of 12**. The panel reads
+> `On. 28 network addresses reachable.` and admits no "sometimes".
+
+In the terms a reader of the release notes needs: **with the software-sources
+switch on, fetches from GitHub and npm succeed intermittently, roughly half the
+time in measurement, because the firewall holds a snapshot of addresses while those
+services answer from a larger rotating pool. The switch is not lying about being
+on. The address list behind it is incomplete. Turning it off still reliably
+blocks.**
+
+**I make no recommendation for or against publishing on it.** That is the
+operator's call and he has it.
+
+### 14.6 Verdict
+
+# NO.
+
+One sentence, and it contains no argued premise: **the Kill Switch, which
+`SECURITY_FINDINGS.md` lists as a proven structural guarantee, does not stop the
+gateway or kill the agent process, and tells the user that it did.**
+
+Three qualifications, so the verdict is not read as broader than it is.
+
+1. **v1.4.3's own work is sound.** The line-ending re-materialisation, the build
+   gate it added, and the four new checks it created are proven where they were
+   measurable. Nothing found today is a v1.4.3 regression. Both blockers predate
+   it, one by a week and one by every release ever shipped.
+2. **Nothing found today is a containment escape.** The firewall is intact and
+   correctly partitioned, the pins hold, file isolation was not implicated, and
+   both failures fail closed. The Kill Switch's folder-unmount half works. What is
+   broken is the ability to *stop* the agent on demand, and a provider switch.
+3. **The install path is unaffected.** A clean install completes at 15 PASS / 0
+   FAIL with both controls firing.
+
+### 14.7 What would turn this into a yes
+
+**The fixes are small and bounded.** Stated as scope, not as a promise, and the
+effort judgement below is INFERRED:
+
+- **Blocker 1:** two lines, `resources/clawfactory-stop.ps1:27` and `:30`. Control
+  C already demonstrated the working shape on the box.
+- **Blocker 2:** four comment lines, `resources/switch-provider.ps1:182,185,194,235`.
+  Escape the dollars or reword the comments.
+- **Blocker 3:** move the kill switch out of the structural table, or restate what
+  it actually guarantees, in `SECURITY_FINDINGS.md` and anywhere that table is
+  mirrored.
+- **Minor:** make `switch-provider.ps1:155` conditional.
+
+**INFERRED, and labelled as such:** I judge these low-risk because each is a
+localised edit with a demonstrated correct form, and because the AST sweep bounds
+blocker 2 to one file. That is an argument about effort, not a measurement, and it
+is not part of the verdict.
+
+**Then the measurement that is actually owed**, and it is not small: a rebuild
+changes the binary, and **prior measurements do not transfer across a rebuild** —
+which is the premise this entire job was written on. So a v1.4.4 needs the full
+matrix, TASK 2 and TASK 3, not just a re-run of what broke.
+
+**The one thing I would add to that run:** section 14.11 exists because an AST
+parse is not an execution, and on its first outing it found two ship-blockers in
+scripts the suite had only ever parsed. **Every shipped PowerShell entry point
+should be executed on the box, not parsed** — including `post-install.ps1`,
+`rename-agent.ps1` and `bootstrap.ps1`, which this run did not reach and which live
+in the same blind spot.
