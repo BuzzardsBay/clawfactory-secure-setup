@@ -1,6 +1,6 @@
 # CLOSE-OUT: v1.4.4 validation, BOX A
 
-**Status at the time of writing: IN PROGRESS — cfv-179 PROVISIONED AND STAGED, install not yet started.**
+**Status at the time of writing: IN PROGRESS — cfv-179 installing v1.4.4. TASK 0 complete; no matrix row measured yet.**
 Written incrementally so an interrupted session leaves an honest record rather
 than nothing. Sections carry their own state. Anything not measured says so.
 
