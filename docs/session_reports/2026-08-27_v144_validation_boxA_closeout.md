@@ -1,6 +1,6 @@
 # CLOSE-OUT: v1.4.4 validation, BOX A
 
-**Status at the time of writing: IN PROGRESS — cfv-179 installed, matrix row 1 PASS. Rows 3, 5-9, 12-14 in flight.**
+**Status at the time of writing: IN PROGRESS — cfv-179 installed. Rows 1 and 3 PASS. Rows 5-7 in flight.**
 Written incrementally so an interrupted session leaves an honest record rather
 than nothing. Sections carry their own state. Anything not measured says so.
 
@@ -656,3 +656,55 @@ in either direction.
 **Resource ledger so far: zero VMs provisioned, zero VMs running, nothing
 billing compute.** One 440 MB blob uploaded to the validation container, which is
 retained as evidence and is not billable compute.
+
+---
+
+## 8A. MATRIX ROW 3: install-time provider-route gate. **PASS**
+
+```
+PASS=11 FAIL=0 VOID=0 INFO=1  (counted 12 of 12 recorded rows)
+positive controls registered=6 fired=6
+preconditions declared=1 met=1
+
+PHASE VERDICT: PASS. Every positive control fired and every precondition was met.
+PROVIDERGATE_PROBE_COMPLETE rc=0
+```
+
+**This row is strong because it was measured in both directions in one run**, which
+is the shape a gate has to be proven in — "the gate did not fire" and "the gate is
+not wired up" are otherwise indistinguishable:
+
+```
+PG.2.CTL0  PASS  the gate probe was extracted from the INSTALLED setup.ps1
+PG.2.CTL1  PASS  the gate probe reached the distro intact
+PG.2.CTL2  PASS  THE FAULT LANDED: the provider host now resolves to an unroutable address
+PG.2.CTL3  PASS  the gate probe SUCCEEDS on the healthy box in this same run
+PG.2a      PASS  TEST 2: the provider-route gate PASSED on this healthy box
+PG.2c      PASS  with the provider route deliberately broken, the gate's probe FAILS
+PG.2d      PASS  the rig was removed and the provider resolves normally again
+```
+
+`PG.2.CTL0` matters more than it looks: the probe under test was extracted from
+the **installed** `setup.ps1`, not from the repo, so this measures the artifact
+that shipped rather than a copy of the source.
+
+`PG.2d` matters for everything after it. A fault-injection phase that leaves its
+fault behind poisons every later phase, and this one would have bricked the
+agent's provider route. Removal was verified, not assumed:
+`RESTORED=160.79.104.10`.
+
+### 8A.1 What row 3 does NOT prove, recorded as INFO rather than omitted
+
+```
+PG.3f  INFO  LEVEL 2 CONTROL NOT RUN: the installer's loud abort was not observed in this run
+```
+
+The phase's own words, kept because they are the correct standard: *"Level 1 above
+proves the gate MEASURES correctly in both directions on the shipped probe. It does
+NOT observe the installer aborting. Re-run this phase with `-RunFullInstallControl`
+to close that half; it costs a full install. Recorded as INFO rather than omitted,
+because a control that was skipped and a control that passed must never look the
+same in a results file."**
+
+**Carried forward as owed**, not quietly absorbed into the PASS. Closing it costs a
+dedicated install and is a candidate for box B or C, which install anyway.
