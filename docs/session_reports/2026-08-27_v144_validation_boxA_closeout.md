@@ -411,15 +411,73 @@ failure this project has already paid for once at 64 hours.
 
 ---
 
-## 5. Sections 5 onward: NOT YET MEASURED
+## 5. Box A provisioned and staged. Derivation 3 agrees
 
-Nothing has been installed. Derivation 3, every matrix row, every section, the
-wrapper phase and the uninstall branch are all owed and none of them is claimed
-in either direction.
+The operator chose the **split** plan (steps 1 to 7 today, box deallocated
+overnight, steps 8 to 10 tomorrow) and confirmed the RDP address.
+
+```
+[14:32:42]   artifact verified: 6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1 (440610608 bytes), Authenticode Valid
+[14:32:43]   provider key present (value never printed)
+[14:32:43]   build machine public IP: 67.164.251.99
+[14:35:54] Provisioned.
+[14:35:57]   RDP rule confirmed by read-back: 67.164.251.99/32
+[14:35:58]   public IP: 52.247.200.136
+[14:35:59]   agent: Ready
+[14:48:50] Staged, digest re-verified ON THE BOX. OK staged; artifact=6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1 size=440610608
+[14:49:22]   WROTE wrapper=5201 runner=112 AutoAdminLogon=
+DRIVER_EXIT=0
+```
+
+**All three derivations agree**: by hand on the build machine, through blob
+storage by download and re-hash, and re-derived on the box after a 440 MB
+transfer. The job card's instruction was to stop if any differed. None did.
+
+`AutoAdminLogon=` is empty and was **asserted rather than set**. The driver arms
+no auto-logon, which is what makes the operator logins the correct price of the
+PROMPT 15 credential rule rather than a defect to engineer around.
+
+**The RDP scope was verified twice, independently.** Once by the driver's own
+read-back, and once afterwards by a separate `az network nsg rule show` from this
+session:
+
+```
+67.164.251.99/32   3389   Allow   Inbound
+```
+
+Never `0.0.0.0/0`.
+
+**On the admin credential.** `az vm create` requires a value, so the driver
+generates a random 24-character bootstrap password, passes it once, and nulls it
+without ever printing it. Nothing in the harness writes an account password
+again. The operator sets their own at Card 1 and this session never sees it,
+never asks for it, and never calls `az vm user update` itself.
+
+### 5.1 Resources created, recorded now so teardown can be checked against them
+
+```
+cfv-179        Microsoft.Compute/virtualMachines
+cfv-179-osdisk Microsoft.Compute/disks
+cfv-179VMNic   Microsoft.Network/networkInterfaces
+cfv-179-pip    Microsoft.Network/publicIPAddresses
+cfv-179-nsg    Microsoft.Network/networkSecurityGroups
+```
+
+Five resources. `az vm delete` removes only the first, so teardown sweeps the
+other four explicitly, **NIC first** because it references the public IP and the
+NSG.
 
 ---
 
-## 6. Task accounting so far
+## 6. Sections 6 onward: NOT YET MEASURED
+
+Nothing has been installed. Every matrix row, every section, the wrapper phase
+and the uninstall branch are all owed and none of them is claimed in either
+direction.
+
+---
+
+## 7. Task accounting so far
 
 | Task | State |
 | --- | --- |
