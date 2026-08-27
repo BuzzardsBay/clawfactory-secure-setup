@@ -219,6 +219,39 @@ Every driver artifact default resolves to `Output\ClawFactory-Secure-Setup.exe`
 on the build machine or `C:\cfv\combined-setup.exe` on the box; none names a
 versioned filename except the archived JOB 3 validator. All **CURRENT**.
 
+### 2.5a A sixth class the job card's five did not name: stale VM-name defaults
+
+Found while reading the dispatcher rather than by the sweep, because a VM name is
+not a pin, a digest, a version, a host or an artifact path. It is a stale default
+of exactly the kind the job card's preamble is about — "stale defaults have cost a
+box in four consecutive runs" — so it is reported.
+
+```
+validation/interim-v120-job.ps1:31       $VmName = 'cfv-153'
+validation/interim-v120-validate.ps1:33  $VmName = 'cfv-153'
+validation/finish-and-park.ps1:27        $VmName = 'cfv-162'
+validation/job3-validate.ps1:56          $VmName = 'cfv-152'
+validation/diag/g4-probe.ps1:52          $VmName = 'cfv-165'
+scripts/azure-validate.ps1:47            $VmName = 'cfv-138'
+```
+
+**All six name boxes that no longer exist**, which the section 3 estate listing
+proves independently. **All six are therefore fail-safe rather than fail-dangerous**:
+an `az` call against a deleted VM errors, it does not quietly measure the wrong
+machine. That is the reason this is a reading hazard and not a ship-blocker.
+
+`interim-v120-job.ps1` is the one that matters, because it is the dispatcher this
+run drives every phase through. `-VmName` is passed explicitly on every invocation
+in this session.
+
+**Not fixed here, deliberately, and the reason is the same one v1.4.3 gave for
+`PIN.rootfs` and the forbidden driver:** changing an instrument this run is about
+to trust, mid-run, is the wrong order. Repointing them at `cfv-179` would also be
+the wrong fix — it makes them stale again the moment this box is torn down. The
+correct fix is to make `$VmName` mandatory, which is a behaviour change to six
+instruments and belongs in its own change, carded rather than smuggled into a
+validation run.
+
 ### 2.6 A finding the instrument's own scope would have missed, and the fix to both
 
 **The sweep as first written covered `.ps1` only.** `validation\` also holds two
