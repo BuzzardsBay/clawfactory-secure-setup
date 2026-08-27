@@ -1,6 +1,6 @@
 # CLOSE-OUT: v1.4.4 validation, BOX A
 
-**Status at the time of writing: IN PROGRESS — TASK 0 COMPLETE, NOT YET PROVISIONED.**
+**Status at the time of writing: IN PROGRESS — cfv-179 PROVISIONED AND STAGED, install not yet started.**
 Written incrementally so an interrupted session leaves an honest record rather
 than nothing. Sections carry their own state. Anything not measured says so.
 
