@@ -318,10 +318,45 @@ of them are scaffolding. Apache-2.0 in both repositories.
 
 ## Validation status
 
-*This section is completed when the v1.4.3 validation run closes. It is deliberately
-left unwritten rather than filled with the previous release's results: this release has
-not been installed on a clean machine at the time of writing, and saying otherwise
-would be exactly the class of claim the rest of this page exists to avoid.*
+**This release is not recommended for publication, and the reason is a defect found
+while validating it.**
+
+v1.4.3 was installed on a clean machine on 2026-08-27. Its own changes hold: every
+one of the 54 bundled files on the installed machine carries the bytes committed to
+the repository, the agent prompt reaches the sandbox with the expected content, and
+the background task that keeps the sandbox alive runs correctly. A clean install
+completes with every integrity pin matching.
+
+**Two defects were found that predate this release and that block it.**
+
+1. **The kill switch does not stop the agent runtime.** It unmounts your granted
+   folders, which does work, and it then reports that it stopped the gateway and
+   killed any running agent turn. It does neither. Both of its commands fail on a
+   quoting fault and the script reports success regardless. This has been true of
+   every release, and it means the guarantee described as "stop everything
+   immediately" above is currently **not true of the runtime**, only of the folder
+   access.
+2. **Switching model provider fails for every provider.** The script that does it
+   exits with an error before it changes anything. It fails safely, leaving the
+   firewall untouched, but the function does not work.
+
+Neither is a containment escape. The sandbox boundaries, the network allowlist and
+the file isolation were not implicated, and both failures leave the machine in a safe
+state. What is broken is the ability to stop the agent on demand and the ability to
+change provider.
+
+Validation was stopped when the second was found, so **the uninstall path and several
+matrix rows are unmeasured for this release** and are not claimed here.
+
+These notes are published for the release that fixes the above. Until then, treat the
+kill switch as covering folder access only.
+
+*How validation is done, so the statement above can be read properly: runs happen on
+clean cloud machines built from a stock Windows image, installed the way a customer
+installs. Every block assertion carries a positive control that must succeed in the
+same run, and a control that does not fire voids the result rather than producing a
+verdict. Both defects above were found by executing scripts that previous runs had
+only ever parsed.*
 
 How validation is done, so the eventual statement can be read properly: runs happen on
 clean cloud machines built from a stock Windows image, installed the way a customer

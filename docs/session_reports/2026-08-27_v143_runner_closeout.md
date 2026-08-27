@@ -10,21 +10,33 @@ honest record. Job 1's own close-out is
 
 | # | Job | State |
 | --- | --- | --- |
-| 1 | v1.4.3 full validation | **RUNNING.** TASK 0 complete. Box A provisioned and staging. Blocked on the operator for the first install |
+| 1 | v1.4.3 full validation | **CLOSED. Verdict NO.** Partial coverage; stopped on the second ship-blocker |
 | 2 | Release notes and failure catalogue | **DONE and committed.** Not published |
-| 3 | Tag and publish preparation | **NOT STARTED.** Gated on a YES from job 1 |
+| 3 | Tag and publish preparation | **NOT RUN, correctly.** Gated on a YES from job 1, which returned NO |
 
 ## 2. Which stop condition fired
 
-**None so far.** The runner is not stopped; it is waiting on the operator, which the
-runner explicitly says is not a stop condition: *"Do NOT stop the runner for: an
-operator RDP login, a by-hand check, or a dialog that needs clicking. Ping, wait,
-continue."*
+**Stop condition 1**, and **stop condition 5** on the way to it.
 
-## 3. Job 1's verdict
+Condition 5 fired first: *"You find a defect that changes the shape of the remaining
+work."* Finding that the Kill Switch does not stop anything changed the run from
+"validate toward a possible yes" into "enumerate everything one fix cycle has to
+cover", because any fix means a rebuild and **prior measurements do not transfer
+across a rebuild**. The run continued on that narrower basis, deliberately, and that
+choice is recorded in section 7 with what it bought.
 
-**Not yet available.** It will be quoted verbatim here from job 1's own close-out
-rather than from memory of the run, as the runner requires.
+Condition 1 then fired on the verdict itself: **NO**. Job 3 was not started.
+
+Note what did **not** fire: the operator RDP login and the by-hand steps are
+explicitly not stop conditions, and were handled with handoff cards.
+
+## 3. Job 1's verdict, quoted from its own close-out
+
+> **NO.**
+>
+> One sentence, and it contains no argued premise: **the Kill Switch, which
+> `SECURITY_FINDINGS.md` lists as a proven structural guarantee, does not stop the
+> gateway or kill the agent process, and tells the user that it did.**
 
 ---
 
@@ -156,6 +168,55 @@ not mine.
 
 ---
 
-## 7. What is waiting on the operator
+## 7. The judgement call after the first blocker, and what it bought
 
-*(Filled in with the live card as each handoff is reached. See section 8.)*
+When blocker 1 was confirmed, the verdict was already determined. Continuing to
+measure a binary that must be rebuilt has a specific and limited value: **it lets
+one fix cycle cover everything, instead of discovering a second defect after the
+next rebuild and spending another four boxes to find it.** The run continued on
+that basis and stopped short of the phases whose value depended on a possible yes.
+
+It bought three things:
+
+1. **Blocker 2**, `switch-provider.ps1` failing for every provider, which would
+   otherwise have been found after the v1.4.4 rebuild.
+2. **The root cause of both**, which is a property of the validation suite rather
+   than of the product: the suite tests bash payloads extracted from PowerShell
+   wrappers and has never executed the wrappers. Both blockers live in that gap.
+3. **The bound on blocker 2's class**, via an AST sweep across all ten shipped
+   scripts, which confines it to one file and four comment lines.
+
+It cost roughly forty minutes of one already-provisioned box.
+
+## 8. Resource ledger
+
+```
+az vm deallocate -g clawfactory-validation -n cfv-178   ->  exit 0
+Provisioning succeeded
+VM deallocated
+```
+
+**`cfv-178` is deallocated, not deleted.** Compute billing has stopped; the disk
+remains. That is deliberate rather than an omission: the box holds a complete
+v1.4.3 install with both defects reproducible on it, and deleting it before the
+operator has decided whether he wants anything else from it would throw away the
+only installed instance of this artifact. **Deleting it is a one-line call and is
+his to make.**
+
+`cfv-177` was swept in full earlier in the run and verified gone by re-read, not by
+exit code. The starting estate is otherwise unchanged: storage account, VNET, two
+baseline images.
+
+## 9. What is waiting on the operator
+
+**A decision, not a task.** Nothing is blocked on a keyboard step.
+
+1. **Whether to fix and cut v1.4.4.** The three blockers and one minor are listed
+   with file and line in section 14.7 of job 1's close-out. I did not start a fix:
+   the runner says to report what would flip the verdict and not to begin one.
+2. **Whether to delete `cfv-178`** or keep it for reproducing the defects.
+3. **Nothing about `#261`.** No recommendation was made for or against publishing
+   on it, by instruction.
+
+**No tag was created. Nothing was published.** Job 2's two documents are committed
+and unpublished, as instructed.
