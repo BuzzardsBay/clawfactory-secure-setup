@@ -1,8 +1,8 @@
 <#
 Produces a release-ready, signed ClawFactory installer:
-  1. Runs eight pre-build gates (SOUL, bundle, worktree, Studio, version,
-     persona, workspace SOUL, rootfs). Each fails the build on drift; none
-     auto-correct.
+  1. Runs nine pre-build gates (SOUL, bundle, interpolation, worktree, Studio,
+     version, persona, workspace SOUL, rootfs). Each fails the build on drift;
+     none auto-correct.
   2. Compiles ClawFactory-Secure-Setup.iss with Inno Setup (ISCC.exe)
   3. Enforces the second half of the VERSION gate, which cannot run any earlier:
      the compiled digest must not contradict a version already in
@@ -98,6 +98,119 @@ if ($notBundled.Count -gt 0) {
           ($notBundled -join ', ') + ". A build with this gap installs with missing security controls.")
 }
 Write-Host ("Bundle check OK: all {0} preflight resources are in [Files]." -f $required.Count)
+
+# --- Pre-build gate: no shipped script interpolates an UNDEFINED variable -----
+# v1.4.3 shipped a "Switch AI Provider" Start Menu item that could not work for
+# any provider. resources/switch-provider.ps1 sets Set-StrictMode -Version 3.0
+# and builds its firewall payload as an EXPANDABLE here-string; four occurrences
+# of $baseHosts inside that here-string's COMMENTS were not escaped, PowerShell
+# expanded them, the variable did not exist, and StrictMode turned that into a
+# terminating error before the script applied anything. The commit that
+# introduced them (3818bc0) was itself a security fix; its explanatory comments
+# are what broke the script.
+#
+# The class is not "a typo in switch-provider.ps1". It is: text that reads like
+# prose to a human is CODE to the parser once it is inside an expandable string.
+# That is invisible to review and invisible to a grep, because a regex cannot
+# tell an escaped `$name from a live one, nor a variable assigned elsewhere from
+# one never assigned at all. So this gate parses.
+#
+# WHY IT RUNS BEFORE THE WORKTREE GATE. This is a lint on source text, and a
+# lint that only ever sees committed bytes cannot be canaried without committing
+# the defect it is meant to catch. Running it first means a planted instance in
+# a dirty tree reaches it, which is how it was proved to fire at all.
+#
+# WHAT THIS GATE CANNOT CATCH, stated so its OK line is never read as more than
+# it is:
+#   * A variable assigned SOMEWHERE in the file but not yet assigned at the
+#     point of use. "Defined anywhere" is the test, not "defined by now".
+#   * A variable that a dot-sourced library defines. That direction is the
+#     false-POSITIVE risk, not a miss: such a variable would be reported here
+#     even though it resolves at runtime. There are none today.
+#   * A shell variable that is correctly escaped as `$x but is WRONG -- this
+#     gate checks that PowerShell will not eat it, not that bash wants it.
+#   * Anything outside the .iss [Files] set. The validation harness and the
+#     build scripts are not swept.
+#   * The other half of the same family: a bash payload carrying its own double
+#     quotes, which PowerShell 5.1 fails to escape when it builds a native
+#     command line. That is what made the kill switch inert from v1.0 to v1.4.4.
+#     It is a different shape and this gate does not look for it;
+#     resources/clawfactory-stop.ps1 refuses such a payload at runtime instead.
+#
+# Scope note: the defect is only FATAL under StrictMode, but in a file without
+# it the same shape silently interpolates an EMPTY string into a shell payload,
+# which is how a probe once turned `grep -q "$ip"` into `grep -q ""` and matched
+# everything. Both are defects, so all shipped scripts are swept and StrictMode
+# is reported per finding rather than used to filter.
+$AutoVars = @(
+    '_','PSItem','null','true','false','args','input','this','Matches','Error','LASTEXITCODE',
+    'PSScriptRoot','PSCommandPath','MyInvocation','PWD','HOME','PID','Host','ExecutionContext',
+    'StackTrace','PSBoundParameters','PSCmdlet','PSDefaultParameterValues','ErrorActionPreference',
+    'WarningPreference','VerbosePreference','DebugPreference','ProgressPreference',
+    'InformationPreference','ConfirmPreference','WhatIfPreference','OFS','ShellId','PSVersionTable',
+    'IsWindows','IsLinux','IsMacOS','PSEdition','PSCulture','PSUICulture','NestedPromptLevel',
+    'ConsoleFileName','PSHOME','PSSenderInfo','Sender','EventArgs','EventSubscriber','Event'
+)
+function Test-AstType($n, $t) { $n.GetType().Name -eq $t }
+
+$shippedPs1 = @()
+foreach ($line in (Get-Content -LiteralPath $issPath)) {
+    if ($line -match '^Source:\s*"([^"]+)"' -and $Matches[1] -match '\.ps1$') {
+        $shippedPs1 += (Join-Path $RepoRoot ($Matches[1] -replace '\\', '/'))
+    }
+}
+if ($shippedPs1.Count -eq 0) {
+    Fail ("could not read any .ps1 Source entries from the .iss [Files] section. The interpolation gate would " +
+          "pass vacuously, which is worse than no gate.")
+}
+
+$interpDefects = @()
+foreach ($psFile in $shippedPs1) {
+    $parseErrs = $null
+    $fileAst = [System.Management.Automation.Language.Parser]::ParseFile($psFile, [ref]$null, [ref]$parseErrs)
+    if ($parseErrs -and $parseErrs.Count -gt 0) {
+        Fail ("$psFile does not parse: line {0}: {1}. A shipped script that cannot be parsed cannot be shipped." -f
+              $parseErrs[0].Extent.StartLineNumber, $parseErrs[0].Message)
+    }
+    $isStrict = @($fileAst.FindAll({ param($n) (Test-AstType $n 'CommandAst') -and $n.GetCommandName() -eq 'Set-StrictMode' }, $true)).Count -gt 0
+
+    $defined = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($a in $fileAst.FindAll({ param($n) Test-AstType $n 'AssignmentStatementAst' }, $true)) {
+        foreach ($v in $a.Left.FindAll({ param($n) Test-AstType $n 'VariableExpressionAst' }, $true)) {
+            $null = $defined.Add($v.VariablePath.UserPath)
+        }
+    }
+    foreach ($a in $fileAst.FindAll({ param($n) Test-AstType $n 'ParameterAst' },       $true)) { $null = $defined.Add($a.Name.VariablePath.UserPath) }
+    foreach ($a in $fileAst.FindAll({ param($n) Test-AstType $n 'ForEachStatementAst' }, $true)) { $null = $defined.Add($a.Variable.VariablePath.UserPath) }
+    foreach ($c in $fileAst.FindAll({ param($n) Test-AstType $n 'CommandAst' }, $true)) {
+        if (@('Set-Variable','New-Variable') -contains $c.GetCommandName()) {
+            for ($i = 1; $i -lt $c.CommandElements.Count; $i++) {
+                $e = $c.CommandElements[$i]
+                if ((Test-AstType $e 'StringConstantExpressionAst') -and $e.Value -notmatch '^-') { $null = $defined.Add($e.Value); break }
+            }
+        }
+    }
+
+    foreach ($str in $fileAst.FindAll({ param($n) Test-AstType $n 'ExpandableStringExpressionAst' }, $true)) {
+        foreach ($nested in $str.NestedExpressions) {
+            foreach ($v in $nested.FindAll({ param($n) Test-AstType $n 'VariableExpressionAst' }, $true)) {
+                if ($v.VariablePath.IsDriveQualified) { continue }
+                $vname = $v.VariablePath.UserPath
+                if ($AutoVars -contains $vname)  { continue }
+                if ($defined.Contains($vname))   { continue }
+                $interpDefects += ("{0}:{1} `${2} inside a {3}{4}" -f
+                    ($psFile -replace [regex]::Escape($RepoRoot + '\'), '' -replace [regex]::Escape($RepoRoot + '/'), ''),
+                    $v.Extent.StartLineNumber, $vname, $str.StringConstantType,
+                    $(if ($isStrict) { ' (file sets StrictMode: this is FATAL at runtime)' } else { ' (no StrictMode: this silently interpolates an EMPTY string)' }))
+            }
+        }
+    }
+}
+if ($interpDefects.Count -gt 0) {
+    Fail ("UNDEFINED INTERPOLATION in shipped scripts. PowerShell expands these; they are not prose. " +
+          "Escape each as ``$name, or reword so no dollar sign appears -- " + ($interpDefects -join ' | '))
+}
+Write-Host ("Interpolation gate OK: {0} shipped .ps1 files parse, and none interpolates a variable the file never defines." -f $shippedPs1.Count)
 
 # --- Pre-build gate: the bundled bytes must BE the committed bytes ------------
 # The audit claim this product makes is that a stranger can read the repo that
