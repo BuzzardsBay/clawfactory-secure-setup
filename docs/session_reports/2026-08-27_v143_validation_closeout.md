@@ -500,3 +500,243 @@ Evidence retained **on the build machine only**, at
 of the repository alone cannot see them. The counts and the canary lines quoted
 above are therefore the committed record, and they are quoted in full for that
 reason rather than summarised.
+
+---
+
+## 7. TASK 4.2, section 14.9: the orchestrator prompt reaches the distro with CR=0. **PASS**
+
+Read inside the distro **as `clawuser`**, through the file-based WSL channel:
+
+```
+CHAN_SELFTEST_OK=True
+RC=0
+EXISTS=yes
+BYTES=4277
+CR=0
+SHA=f7f8163426790c05bbec090cc7efcfd83809a81531214fd26db68c6e4d12ec43
+LINES=65
+PLACEHOLDER_HITS=0
+OWNER=clawuser:clawuser MODE=644
+CTL_CR_COUNTER=1
+CTL_ABSENT=ok
+WHOAMI=clawuser UID=1000
+```
+
+**The delivered file is byte-identical to the committed source.** `SHA` equals the
+blob digest of `resources/orchestrator-prompt.md` at `de4da85` exactly.
+
+**The 65-byte claim is confirmed arithmetically and by measurement.** The file is
+65 lines, so a CRLF rendering is exactly 65 bytes larger: 4277 against 4342. The
+box delivers 4277. A v1.4.2 build, whose working copy of this file was CRLF, would
+have delivered 4342.
+
+Four controls, because "CR=0" from a broken reader looks identical to "CR=0" from a
+correct one:
+
+- `CHAN_SELFTEST_OK=True` — the channel passes a subject that must pass and fails
+  one that must fail. Without it, an absent result from a dead channel is
+  indistinguishable from a finding.
+- `CTL_CR_COUNTER=1` — the CR counter reports 1 on a file that genuinely holds one CR.
+- `CTL_ABSENT=ok` — a sibling path that cannot exist does not read as present.
+- `WHOAMI=clawuser UID=1000` — the read happened as the identity the item specifies,
+  not as root and not as SYSTEM.
+
+### 7.1 The prompt specifies a control that cannot exist, and a stronger one replaced it
+
+The run prompt says: *"Control: assert the file is non-empty and carries the
+substituted SOUL digest, so an absent or truncated file cannot read as a pass."*
+
+**There is no substituted SOUL digest in this file, and there should not be.**
+`PLACEHOLDER_HITS=0`: `orchestrator-prompt.md` contains no `{{SOUL_SHA256}}` token,
+so `bootstrap.ps1`'s substitution is a no-op for it. That is deliberate. The prompt
+itself says so at line 13: *"SOUL.md integrity is NOT self-enforced by this
+prompt"*, and explains that a prompt computing its own hash is advisory theatre
+while the real enforcement is a root-owned pin checked in code before every turn.
+The digest was removed from this file when that was fixed.
+
+So the specified control is unsatisfiable, and asserting it would have produced a
+FAIL against correct behaviour. **Replaced with a strictly stronger one:** the
+delivered file's full SHA-256 must equal the committed blob. "Carries a digest
+somewhere" is weaker than "is exactly these 4277 bytes", and the substitute also
+subsumes the non-empty and not-truncated requirements the original was reaching
+for.
+
+---
+
+## 8. TASK 4.3, section 14.10: the keepalive runs from its LF form. **PASS**, one part deferred
+
+```
+TASK_PRESENT=True
+TASK_STATE=Ready
+TASK_ACTION=wscript.exe "C:\Program Files\ClawFactory\resources\wsl-keepalive.vbs" Ubuntu clawuser
+TASK_LASTRESULT=0
+TASK_LASTRUN=08/27/2026 16:33:38
+CTL_FAKE_TASK_PRESENT=False
+WSL_PROCESSES=2
+WSCRIPT_PROCESSES=0
+VBS_BYTES=764 VBS_CR=0
+```
+
+The scheduled task exists, is Ready, and **has actually run, at exit code 0**. The
+`.vbs` on the box is `CR=0`, so this is the LF form executing rather than parsing.
+`WSL_PROCESSES=2` shows a session is held. `WSCRIPT_PROCESSES=0` is expected and
+documented: `wsl.exe` is reparented from `wscript`, which then exits.
+
+Control: the same query against a task name that cannot exist finds nothing, so
+`TASK_PRESENT=True` means the task rather than meaning the query answers anything.
+
+**Deferred, not passed:** *"no console window flashes at logon"* is a by-hand
+observation that only a human at a logon can make. It belongs to the reboot pass
+and is carded, not claimed here.
+
+---
+
+## 9. TASK 4.4, section 14.11: the Windows-side scripts execute from LF. **PART A PASS, PART B FOUND A DEFECT**
+
+CR census on the box first, so "it ran" is attributable to the LF form:
+
+```
+CR|smoke-test.ps1|bytes=20983|cr=0
+CR|clawfactory-stop.ps1|bytes=2581|cr=0
+CR|switch-provider.ps1|bytes=20141|cr=0
+CR|clawfactory-grants.ps1|bytes=54751|cr=0
+CR|launcher.ps1|bytes=11350|cr=0
+```
+
+### 9.1 Part A. **PASS**
+
+```
+SMOKE_EXIT=0
+Result: 19 pass, 0 fail, 0 skip
+
+LAUNCHER_DOTSOURCES_GRANTS=1
+GRANTS_DOTSOURCE_OK=True
+GRANTS_FUNCTIONS_DEFINED=43
+CTL_BAD_DOTSOURCE_OK=False_control_fired
+```
+
+`smoke-test.ps1` executes and its own summary reports 19 pass, 0 fail, 0 skip,
+including `Egress firewall clawfactory chain present in nft ruleset`, so the
+standing check-9 false-positive rule does not apply here. `clawfactory-grants.ps1`
+dot-sources the way `launcher.ps1` does it and defines 43 functions. The control
+fired: a deliberately malformed file refuses to dot-source, so
+`GRANTS_DOTSOURCE_OK=True` means the file is sound rather than meaning the try
+block cannot fail.
+
+**One instrument nit, stated rather than buried:** my own `[PASS]` line counter
+reported `SMOKE_PASS=0` because it matched the wrong shape. The authoritative
+figure above is the smoke test's own summary line, not my count.
+
+### 9.2 Part B. **THE KILL SWITCH DOES NOT STOP ANYTHING, AND REPORTS THAT IT DID**
+
+This is a product defect, it is a ship-blocker, and it was found by executing a
+script that until now had only ever been parsed.
+
+**What the product claims.** `SECURITY_FINDINGS.md` lists, in the **structural**
+table: *"Kill switch, so you can stop everything immediately | Terminates the real
+agent process | **Proven.**"* On the box, `clawfactory-stop.ps1` prints:
+
+```
+Done. The agent can no longer see your files, the gateway is stopped,
+and any running agent turn is killed.
+```
+
+**What is true.** Both of its WSL lines fail with a bash syntax error, and it exits
+0 anyway:
+
+```
+Stopping any running agent turn...
+/bin/bash: -c: line 1: syntax error near unexpected token `('
+/bin/bash: -c: line 1: `bash -lc "if pkill -u clawuser -f "[o]penclaw agent" 2>/dev/null;
+then echo "(killed running agent turn(s))"; else echo "(no running agent turns)"; fi"'
+Stopping OpenClaw gateway...
+/bin/bash: -c: line 1: syntax error near unexpected token `('
+/bin/bash: -c: line 1: `bash -lc "openclaw gateway stop 2>/dev/null || echo "(gateway not
+running)""'
+STOP_EXIT=0
+```
+
+Measured either side of it:
+
+```
+GATEWAY_BEFORE_STOP=up(200)
+STOP_EXIT=0
+GATEWAY_AFTER_STOP=up(200)
+```
+
+**Three controls decide that this is the product and not my harness.**
+
+```
+CONTROL A: wsl -u clawuser -- bash -lc "echo CONTROL_A_OK"    -> CONTROL_A_OK
+CONTROL B: the shipped line, verbatim                          -> same syntax error, CONTROL_B_EXIT=2
+CONTROL C: the same line with the inner double quotes removed  -> Stopped systemd service: openclaw-gateway.service
+                                                                  CONTROL_C_EXIT=0
+```
+
+and after control C:
+
+```
+STATUS=down
+openclaw processes owned by clawuser = 0
+```
+
+- **A** proves the invocation path works, so the failure is not how the job called it.
+- **B** proves the shipped line fails on its own, so the defect is in the shipped script.
+- **C** proves the gateway *can* be stopped this way and the repair is small: the
+  inner double quotes inside the single-quoted `bash -lc` argument do not survive
+  the pass through `wsl.exe`, which re-quotes with double quotes and terminates the
+  string early.
+
+**The cause is quoting, not line endings.** This is not a v1.4.3 regression. Both
+lines are byte-identical at `89f49db` (v1.4.2) and `de4da85` (v1.4.3), and
+`git log -S` puts the pattern in `d9b6d36`, the initial v1.0 release. **It has never
+worked, on any release.**
+
+**The part that does work.** The folder unmount half is pure PowerShell and ran
+correctly: `Unmounted 0 workspace folder(s)`. So the honest split is that the Kill
+Switch unmounts granted folders and does **not** kill the agent process or stop the
+gateway, while telling the user it did all three.
+
+### 9.3 The commit that created this replaced one inert kill with another
+
+`d6d63f3` is where these lines took their current form. Its own comment says the
+previous Docker-based kill *"NEVER matched anything ... So the kill switch claimed
+to kill agents but never did. Docker is now removed; that no-op is replaced with
+the truthful equivalent: kill the agent processes."*
+
+**The truthful equivalent is also a no-op**, for an unrelated reason, and has been
+since it was written. A defect of exactly the class the fix was written to remove
+was reintroduced by the fix, and nothing measured it because nothing had ever
+executed the script on a box. That is what section 14.11 exists for, and it found
+this on its first run.
+
+---
+
+## 10. TASK 4.5, section 14.6: the launcher against a gateway-down box. **VOID**
+
+Not a product result. The precondition could not be established: `14.6` requires a
+box whose gateway is **down**, and the only supported way to put it down is the Kill
+Switch, which does not work (9.2). The launcher therefore ran against a box whose
+gateway was still up:
+
+```
+GATEWAY_BEFORE_STOP=up(200)
+GATEWAY_AFTER_STOP=up(200)
+LAUNCHER_EXIT=0
+GATEWAY_AFTER_LAUNCH=up(200)
+LAUNCHER_LOG_STILL_ABSENT
+```
+
+`LAUNCHER_EXIT=0` and a live gateway afterwards would read as a pass and would mean
+nothing: the launcher's own `ALREADY_RUNNING` path produces exactly that. **A
+missing precondition is never a product verdict**, so this is VOID with a named
+reason rather than PASS.
+
+It is re-runnable cheaply now that control C has shown how to put the gateway down
+by hand, and it is re-run before any verdict is offered on 14.6.
+
+**A second finding, smaller and separate.** `C:\ProgramData\ClawFactory\logs\launcher.log`
+did not exist either before or after the launcher ran, so the launcher wrote no
+state line on this run. Whether that is because the `ALREADY_RUNNING` branch was
+taken and the log path differs from the one derived here, or because the log is
+never written, is **not yet established** and is not claimed either way.
