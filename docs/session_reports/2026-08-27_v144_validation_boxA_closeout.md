@@ -2114,3 +2114,134 @@ expected and documented: `wsl.exe` is reparented from `wscript`, which then exit
 **The by-hand half is section 13.2** — no console window flashed at logon, observed
 by the operator at a fresh post-reboot login. **Both halves are now measured, and
 this item has never been complete on any previous run.**
+
+---
+
+## 18. THE REMOVEALL UNINSTALL BRANCH. Everything removed but one running binary
+
+Run last, through the real dialog, by the operator. It destroys the install, which
+is why nothing is measured on this box afterwards.
+
+### 18.1 The dialog, quoted, because its copy is the thing being shipped
+
+```
+Also remove the Ubuntu Linux distro that ClawFactory created?
+
+ClawFactory is removed from this machine either way: the agent, its configuration
+and plugins, clawuser's home directory, the OpenClaw runtime, every ClawFactory
+service and firewall rule.
+
+YES also unregisters the Ubuntu distro and deletes its disk image (about 6 GB).
+Choose this unless something else on this machine uses that distro.
+
+NO leaves the now-empty Ubuntu distro registered, so anything else that shares it
+keeps working. You can install ClawFactory again later and it will reuse the distro.
+
+Your ClawChat conversation history is stored on Windows, under %APPDATA%\ClawChat,
+and neither choice deletes it.
+```
+
+**This copy is correct and honest**: it states what happens on both paths, names the
+disk cost, gives a decision rule, and discloses that conversation history survives
+either choice. **It renders with no mojibake**, because it uses ASCII punctuation —
+the same class of text as the `rename-agent.ps1` dialog, authored correctly. That
+contrast is the clearest available evidence that section 15's defect is an encoding
+accident rather than a house style.
+
+`YES` was chosen. Elapsed time: **about one minute**.
+
+### 18.2 The read-back. One residual, fully explained
+
+```
+LEFT C:\Program Files\ClawFactory  files=1
+   C:\Program Files\ClawFactory\ClawChat.exe
+GONE C:\ProgramData\ClawFactory
+SCHEDTASK_PRESENT=False
+FIREWALL_RULES_LEFT=0
+UNINSTALL_KEYS_LEFT=0
+DISTRO_VHDX_LEFT=0
+SHORTCUTS_LEFT=0
+CTL_CANNOT_EXIST=False        <- the path probe discriminates
+CTL_FAKE_PROC=0               <- the process probe discriminates
+```
+
+and from the operator's own session, which is the only context that can see a
+per-user distro registration:
+
+```
+C:\Users\clawadmin>wsl -l -v
+Windows Subsystem for Linux has no installed distributions.
+```
+
+**The distro is unregistered and its disk image is deleted.** The one-minute
+elapsed time was real work, not a skipped step: `DISTRO_VHDX_LEFT=0` over a
+recursive search of `C:\Users`.
+
+**Everything the dialog promised is gone**: the configuration directory, the
+scheduled task, every firewall rule, every uninstall registry key, every shortcut,
+and the distro.
+
+### 18.3 Why `ClawChat.exe` survived, confirmed from two independent directions
+
+```
+CLAWCHAT_RUNNING_NOW=1   PID=7116   START=08/28/2026 16:24:21
+CLAWCHAT_EXCLUSIVELY_LOCKABLE=False (something holds it)
+```
+
+The process start time **precedes the uninstall**, and the file cannot be opened
+exclusively, so it is still held. Independently, **the operator reported without
+being asked that the app was open when he clicked uninstall.**
+
+**Windows will not delete a running executable.** This is the operating system, not
+a flaw in the removal logic, and no amount of uninstaller code removes a file the
+kernel has mapped.
+
+### 18.4 Verdict, and the one thing worth carding
+
+**The removal itself is correct.** Every item the dialog names is gone; the single
+residual is a locked binary with an external cause, and **no orphaned shortcut
+points at it** (`SHORTCUTS_LEFT=0`), so the user is not left with an icon that
+launches a broken app.
+
+**The message is honest, and that is worth saying plainly given this release's
+history:**
+
+```
+ClawFactory Secure Setup uninstall complete.
+Some elements could not be removed. These can be removed manually.
+```
+
+**It under-claims rather than over-claims.** That is the exact opposite of the
+defect that made v1.4.3 a NO, where the kill switch printed a success banner over
+two commands that had failed. Here the product did nearly everything and told the
+user it had not done everything.
+
+**The gap, and it is a real one: it does not say WHICH elements.** A user is told
+"some elements" and left to guess. It also does not tell them the likely cause —
+that a ClawFactory app was running — or offer to close it first. Both are cheap:
+the uninstaller knows which deletes failed, and could name the file and suggest
+closing ClawChat and re-running.
+
+**Carded as a diagnosability and UX improvement, not as a defect in removal.**
+
+### 18.5 What this does and does NOT establish
+
+**Establishes:** the RemoveAll branch removes what it says it removes, on a clean
+v1.4.4 install, after a reboot and a full validation pass, with the distro
+unregistered and its image deleted.
+
+**Does NOT establish, and is explicitly not claimed:**
+
+* **The keep-Linux branch (`No`).** Untouched here. That is v1.4.2's change set,
+  it has never been measured on any release, and it is **box D's headline**.
+* **A reinstall after this uninstall completes.** Not attempted; also box D.
+* **The teardown log's `CLAWFACTORY_TEARDOWN_OK` marker and its `READBACK` line.**
+  Not retrieved — the box was torn down after this read-back and the log lives on
+  it. Owed.
+* **The fault-injected negative half** — that the uninstaller reports failure and
+  shows a dialog when the teardown genuinely cannot complete. Owed, box D.
+* **The 16-row structured RemoveAll phase.** What is recorded here is a read-back
+  of the resulting state, not `interim-v141-uninstall.ps1` executed under the phase
+  runner. **The rows are therefore evidence, not phase-runner verdicts**, and they
+  carry no registered controls beyond the two discrimination probes quoted above.
+  That distinction is stated rather than blurred.
