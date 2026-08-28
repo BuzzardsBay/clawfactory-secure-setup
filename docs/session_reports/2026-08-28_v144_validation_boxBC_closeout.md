@@ -566,6 +566,79 @@ the RDP login that starts each runner — auto-logon is deliberately not armed.
 **Box B is deleted before box C is provisioned**, so at most one VM bills at a time
 and the teardown of each is proven before the next exists.
 
+### 4.3 One decision taken before dispatch, so it is not argued into afterwards
+
+**`5d` is closed on box C, not box B, and phase 3 runs on box B, not box C.** They
+cannot both happen on one box, and the reason is worth stating rather than
+discovering:
+
+* The driver that seeds `5d`'s subject, `interim-v140-stagebox.ps1`, writes an SMTP
+  **sink** credential in the same run as the read-fetch seed — one call sets both,
+  deliberately, so the credential and the policy cannot drift apart.
+* A box carrying that credential reports `CREDENTIAL_PRESENT`, which is precisely
+  the state under which the TASK 0.2 fix is **not** exercised.
+
+So box B stays unconfigured and runs phase 3 (the credential-absent path, which is
+the fix's subject), and box C runs `stagebox` and then the four-item by-hand batch
+(the seeded path, which is `5d`'s subject). Nothing sends: the sink credential
+points at `127.0.0.1:2525` and no probe in either box's plan transmits. **Zero
+outbound email, and `-ExpectRealCredential` is not passed on either box.**
+
+---
+
+## 5. BOX B PROVISIONED AND STAGED. All three derivations agree
+
+```
+[11:23:55]   artifact verified: 6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1 (440610608 bytes), Authenticode Valid
+[11:23:57]   provider key present (value never printed)
+[11:23:57]   build machine public IP: 67.164.251.99
+[11:26:37] Provisioned.
+[11:26:40]   RDP rule confirmed by read-back: 67.164.251.99/32
+[11:26:42]   public IP: 20.98.84.133
+[11:26:43]   agent: Ready
+[11:38:41] Staged, digest re-verified ON THE BOX. OK staged; artifact=6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1 size=440610608
+[11:39:13]   WROTE wrapper=5200 runner=112 AutoAdminLogon=
+[exited with code 0]
+```
+
+**Derivation 1** by hand on the build machine, **derivation 2** through blob storage
+with the byte count confirmed at the service on upload, **derivation 3** re-hashed
+on the box after a 440 MB transfer. The job card's instruction was to stop if any
+differed. None did.
+
+`AutoAdminLogon=` is empty and was **asserted rather than set**. The driver arms no
+auto-logon, which is what makes the operator login the correct price of the
+PROMPT 15 credential rule rather than a defect to engineer around.
+
+**The RDP scope was verified twice, independently** — once by the driver's own
+read-back and once by a separate `az network nsg rule show` from this session:
+
+```
+67.164.251.99/32   3389   Allow   Inbound      NSG_EXIT=0
+ProvisioningState/succeeded, PowerState/running  VM_EXIT=0
+```
+
+Never `0.0.0.0/0`.
+
+**On the admin credential.** `az vm create` requires a value, so the driver
+generates a random 24-character bootstrap password, passes it once and nulls it
+without printing it. The operator set their own at Card 1. **This session never
+called `az vm user update`, never generated, printed or requested a password, and
+never saw one.**
+
+### 5.1 Resources created, recorded now so teardown can be checked against them
+
+```
+cfv-180         Microsoft.Compute/virtualMachines
+cfv-180-osdisk  Microsoft.Compute/disks
+cfv-180VMNic    Microsoft.Network/networkInterfaces
+cfv-180-pip     Microsoft.Network/publicIPAddresses
+cfv-180-nsg     Microsoft.Network/networkSecurityGroups
+```
+
+Five resources. `az vm delete` removes only the first, so teardown sweeps the other
+four explicitly, **NIC first**, because it references the public IP and the NSG.
+
 
 
 ---
