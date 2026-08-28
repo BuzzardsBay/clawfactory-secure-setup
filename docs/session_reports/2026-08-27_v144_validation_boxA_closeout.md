@@ -1,6 +1,6 @@
 # CLOSE-OUT: v1.4.4 validation, BOX A
 
-**Status: BOX A IN PROGRESS, day 2. cfv-179 RUNNING.** Rows 1,3,5,6,7,8,9,10,12,13 PASS; row 14 VOID; sections 14.8, 14.9 and 14.10-logon PASS. Row 11, WR.5/WR.6, 14.10-automated and RemoveAll still owed.
+**Status: BOX A IN PROGRESS, day 2. cfv-179 RUNNING.** Rows 1,3,5,6,7,8,9,10,11,12,13 PASS; row 14 VOID; sections 14.8, 14.9, 14.10-logon PASS. WR.5/WR.6 running; rename-agent, 14.10-automated and RemoveAll still owed.
 Written incrementally so an interrupted session leaves an honest record rather
 than nothing. Sections carry their own state. Anything not measured says so.
 
@@ -1796,3 +1796,98 @@ observation rather than by reading the invocation.
 The automated half of 14.10 — the scheduled task exists, is Ready, has run at exit
 0, the `.vbs` is CR=0 and a WSL session is held — is **still owed** and is a
 candidate for the same box before teardown.
+
+---
+
+## 14. MATRIX ROW 11: the ten by-hand Studio panel checks. **PASS**
+
+Run by the operator over RDP, with screenshots retained as the evidence. **Nine of
+ten checks PASS outright; `5d` records VOID with a named reason.** No product defect
+was found by any of the ten.
+
+| Check | Subject | Verdict |
+| --- | --- | --- |
+| 1a–1d | the software-sources card, its button, its count line, its paragraph | **PASS** |
+| 2a | the footnote, word for word | **PASS** |
+| 3a–3c | adding a destination | **PASS** |
+| 4a–4c | three malformed inputs refused | **PASS** |
+| 5a–5c | removing a destination | **PASS** |
+| 5d | one seeded entry must remain | **VOID**, see 14.2 |
+| 6a–6e | the home route and its header | **PASS** |
+| 7a–7b | the footer, both halves | **PASS** |
+| 8a–8f | the toggle, off and on, both messages | **PASS** |
+| 9a–9e | all seven not-in-this-release panels | **PASS** |
+| 10a–10c | both ways back to the home route | **PASS** |
+
+### 14.1 The three readings that carry the most weight
+
+**Check 1d and check 8b are the same claim from two different pieces of copy**, and
+until v1.4.1 they contradicted each other on the same screen three lines apart. Both
+now carry the honest version, quoted from the operator's screenshots:
+
+> paragraph (1d): *"It does not stop skill installation: the skill hub shares a
+> network address with ClawFactory's own site, which stays reachable and which this
+> switch does not cover."*
+
+> switch-off message (8b): *"Your agent can no longer fetch code from GitHub or npm.
+> **This does not stop skill installation**: the skill hub shares a network address
+> with ClawFactory's own site, which this switch does not cover. Its AI provider is
+> unaffected."*
+
+The old message said the switch **did** stop skill installation. That was measured
+false on cfv-169 by completing a real `openclaw skills install` with the switch off.
+**Check 1 could never have caught it, because check 1 only reads the paragraph.**
+Both are now correct and both were transcribed rather than judged.
+
+**Check 2a carries the clause that matters most:**
+
+> *"Matching is by network address rather than by name, so allowing a site also
+> allows anything else served from the same address."*
+
+The previous version omitted it and mentioned only the provider, **understating the
+residual in the direction that flatters the product**. It is present.
+
+**Check 10 closes a defect the operator himself reported twice.** Until v1.4.1 the
+lobster was a bare `<span>` and the title a plain `<h1>` with no Home entry in the
+nav, so once you left the home route there was no click path back. It went into the
+v1.3.5 close-out and was never carded; he hit it again by hand on cfv-174 while
+following this very file. **Both halves now work**: the lobster and the title text.
+
+### 14.2 `5d` is VOID, and the checklist is what is wrong
+
+Check 5d asserts that after removing `docs.python.org` **one entry remains**, seeded
+from root tooling before the operator starts, so the panel has a persisted entry to
+render at load rather than only one it just added itself.
+
+**No entry was seeded on this box.** The panel correctly reads
+`Nothing allowed yet, so your agent cannot read any website.`
+
+**This was caught BEFORE the check was handed to the operator**, by reading the
+checklist against the first screenshot rather than by trusting it. Had it been sent
+as written, it would have produced **a FAIL against correct behaviour** — the same
+shape as the `On. 28 network addresses` defect this file already carries a correction
+for.
+
+**The seeding step belongs to a driver that this run does not use.** `5d` is recorded
+VOID with that named reason, and the checklist is the thing that needs fixing:
+either the step becomes part of the phase that stages the box, or the check states
+its own precondition. **Carded, not patched mid-run.**
+
+The property `5d` exists to prove — that the panel renders a *persisted* entry at
+load, not merely one it added in the same session — **remains unmeasured on this
+box** and is owed.
+
+### 14.3 What the by-hand pass found that no automated phase could
+
+Nothing failed, and that is worth stating precisely rather than as a shrug. Four of
+these are unautomatable in principle:
+
+* **Check 9's absence assertion** — that none of the seven panels says `scaffold`,
+  `/api/`, `backend` or `unreachable`. A blank page would satisfy the absence
+  perfectly, which is why `9a`–`9d` are presence checks first and `9e` clicks a link
+  to prove the panels behind them are real. The operator's Workspace screenshot shows
+  a genuinely working panel with three populated sections, not another stub.
+* **Check 6g** — that the version string and the word `Templates` are visibly
+  separated rather than rendered as `v1.3.2Templates`. That is a pixel question.
+* **Check 10** — that a click path home exists at all.
+* **Section 14.10's logon half** — recorded in section 13.2.
