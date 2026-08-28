@@ -744,6 +744,86 @@ completes the phase at section 1. They run on the second pass, which carries
 `PG.3f` — see section 11, and see 1.2 for why that second pass needed a harness fix
 before it could be taken at all.
 
+---
+
+## 8. SECTION 14.11's CR CENSUS. **PASS, 15 of 15** — and it closes box A's owed item
+
+Box A proved the shipped Windows-side scripts **execute** (`WR.1/2/3/4/7/8/9`). It
+never counted their carriage returns. That count is now taken, per file, on the box.
+
+**The set was DISCOVERED, not asserted against a remembered list:**
+
+```
+DISCOVERED_COUNT=10
+  FOUND resources\bootstrap.ps1            16038 bytes
+  FOUND resources\clawfactory-grants.ps1   54751 bytes
+  FOUND resources\clawfactory-stop.ps1     10595 bytes
+  FOUND resources\launcher.ps1             11350 bytes
+  FOUND resources\post-install.ps1         13130 bytes
+  FOUND resources\rename-agent.ps1          1438 bytes
+  FOUND resources\smoke-test.ps1           20983 bytes
+  FOUND resources\switch-provider.ps1      21388 bytes
+  FOUND resources\uninstall.ps1            38423 bytes
+  FOUND setup.ps1                         214311 bytes
+```
+
+**The counter was calibrated on the box, in both directions, on real shipped bytes,
+before it counted anything:**
+
+```
+calibration sample: setup.ps1 (214311 bytes, CR=0 as shipped)
+PLANTED  expected=1  measured=1
+STRIPPED expected=0  measured=0
+CR.CTL   PASS
+```
+
+**The census:**
+
+```
+CR.resources\bootstrap.ps1            PASS   cr=0
+CR.resources\clawfactory-grants.ps1   PASS   cr=0
+CR.resources\clawfactory-stop.ps1     PASS   cr=0
+CR.resources\launcher.ps1             PASS   cr=0
+CR.resources\post-install.ps1         PASS   cr=0
+CR.resources\rename-agent.ps1         PASS   cr=0
+CR.resources\smoke-test.ps1           PASS   cr=0
+CR.resources\switch-provider.ps1      PASS   cr=0
+CR.resources\uninstall.ps1            PASS   cr=0
+CR.setup.ps1                          PASS   cr=0
+NONZERO_FILES=(none)
+
+ON_BOX_NOT_EXPECTED = (none)
+EXPECTED_NOT_ON_BOX = (none)
+CR_MISMATCH         = (none)
+BYTE_MISMATCH       = (none)
+
+CR.SET    PASS  the set of shipped .ps1 on the box is the set the repo bundles
+CR.HELD   PASS  every shipped script matches the repo CR count at this commit
+CR.BYTES  PASS  every shipped script matches the repo BYTE COUNT at this commit
+
+PASS=15 FAIL=0 VOID=0 INFO=0  (counted 15 of 15)
+controls fired=1/1; preconditions met=1/1
+```
+
+**Three things this establishes that are worth separating.**
+
+1. **The CR count itself is zero on all ten**, which is what section 14.11 asked
+   for. The repo pins `*.ps1 text eol=lf`, so any CR here would be a divergence
+   between shipped bytes and committed bytes — the exact class that had ten
+   bundled files silently CRLF as recently as v1.4.3.
+2. **`CR.SET` closes a question the census alone would not have.** A per-file CR
+   count over a set that quietly gained or lost a member reports a clean sweep of
+   the wrong set. Both directions are reported as separate counts because an extra
+   file and a missing file are different defects.
+3. **`CR.BYTES` corroborates section 14.8 per file rather than over a sample.** Box
+   A proved bundled bytes are committed bytes for the set it sampled; this compares
+   every one of the ten against the repo at the commit under test, and a byte
+   difference with an equal CR count would have meant the divergence was something
+   other than line endings.
+
+**The held copy was regenerated from `HEAD` at dispatch time, not reused from the
+dry-run file**, so what was compared is what is committed now.
+
 
 
 ---
