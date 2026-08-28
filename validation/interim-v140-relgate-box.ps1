@@ -236,6 +236,7 @@ function Sas([string]$name) {
 $uExe = Sas "combined-$VmName.exe"; $uP1 = Sas $Phase1Script
 $uRun = Sas 'interim-v120-runner.ps1'; $uCh = Sas 'interim-v120-wslchan.ps1'
 $uLib = Sas 'interim-v120-phaselib.ps1'; $uSt = Sas 'harness-selftest.ps1'
+$uPrior = if ($PriorExe) { Sas "prior-$VmName.exe" } else { '' }
 
 $stage = "`$ErrorActionPreference='Stop'; New-Item -ItemType Directory -Path C:\cfv\jobs -Force | Out-Null; New-Item -ItemType Directory -Path C:\cfv\wsl -Force | Out-Null; " +
          "Invoke-WebRequest -Uri '$uExe' -OutFile C:\cfv\combined-setup.exe -UseBasicParsing; " +
@@ -244,7 +245,13 @@ $stage = "`$ErrorActionPreference='Stop'; New-Item -ItemType Directory -Path C:\
          "Invoke-WebRequest -Uri '$uCh' -OutFile C:\cfv\interim-v120-wslchan.ps1 -UseBasicParsing; " +
          "Invoke-WebRequest -Uri '$uLib' -OutFile C:\cfv\interim-v120-phaselib.ps1 -UseBasicParsing; " +
          "Invoke-WebRequest -Uri '$uSt' -OutFile C:\cfv\harness-selftest.ps1 -UseBasicParsing; " +
-         $(if ($PriorExe) { "Invoke-WebRequest -Uri '$(Sas "prior-$VmName.exe")' -OutFile C:\cfv\prior-setup.exe -UseBasicParsing; " } else { '' }) +
+         # Hoisted into $uPrior above, matching what every other URL here already
+         # does, rather than inlined as $(Sas "prior-$VmName.exe"). Both forms were
+         # render-tested and BOTH are correct -- the inline one is not broken and
+         # this comment is not recording a defect. It is hoisted because one URL
+         # built differently from the other six is a reading hazard in a builder
+         # whose failure mode (cfv-149) was a silently malformed remote script.
+         $(if ($PriorExe) { "Invoke-WebRequest -Uri '$uPrior' -OutFile C:\cfv\prior-setup.exe -UseBasicParsing; " } else { '' }) +
          "`$h=(Get-FileHash C:\cfv\combined-setup.exe -Algorithm SHA256).Hash.ToLower(); " +
          "if (`$h -ne '$Sha256') { throw `"ARTIFACT HASH MISMATCH ON VM: `$h`" }; " +
          $(if ($PriorExe) {
