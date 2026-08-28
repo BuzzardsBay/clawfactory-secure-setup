@@ -1447,6 +1447,137 @@ PG.3e  PASS  block rules left=0; Windows-side reachable again=True;
 The rule being gone and the route working again are two different claims, and both
 are asserted. A probe that left this fault behind would brick the agent on the box.
 
+---
+
+## 17. `5d` CLOSED, AND THE BY-HAND PASS FOUND WHAT NO AUTOMATED ROW COULD
+
+`interim-v140-stagebox.ps1` seeded the subject first, **PASS 6 of 6**:
+
+```
+SB.1   PASS  SMTP sink credential written by the root tool, destination authorised with it
+SB.1b  PASS  The credential file is mode 600 root:root as measured on the box
+SB.2   PASS  Read-fetch allowlist carries the seeded destination outlook.office.com
+SB.3   PASS  Toolchain switch reads ON, with a nonzero live address count
+SB.4   PASS  Box state read back for the handover card
+
+CARD_TOOLCHAIN=ON addresses=25
+CARD_READFETCH=outlook.office.com
+CARD_SMTP=configured 127.0.0.1:2525 as clawfactory-validation
+READ_FETCH_COUNT=1
+```
+
+The handover card then carried `SEEDED READ-FETCH HOST: outlook.office.com`, which
+is the line the rewritten `5d` branches on.
+
+### 17.1 The six checks, as the operator read them
+
+| Step | Verdict | What was seen |
+| --- | --- | --- |
+| 1. add `docs.python.org` | **PASS** | green `Your agent can now read docs.python.org.`, row appears with a Remove button |
+| 2. `https://example.com` | **PASS** | refused, red, not added |
+| 3. `*.example.com` | **PASS** | refused, red, not added |
+| 4. `example.com:8443` | **PASS** | refused, red, not added |
+| 5. remove `docs.python.org` | **PASS** | `docs.python.org is no longer reachable.`, row gone |
+| 6. **`5d`** | **PASS** | `outlook.office.com` still listed, `allowed 8/28/2026` |
+
+The two refusal messages, verbatim:
+
+```
+https://example.com  and  example.com:8443
+   "Enter the site name only, with no https:// in front, no port and no page path.
+    For example: docs.python.org"
+
+*.example.com
+   "Wildcards are not accepted. Name each site you want to allow."
+```
+
+**Better than the check required, and worth recording as such.** Three malformed
+shapes produce two messages, each naming the actual problem, rather than one
+catch-all. A single generic refusal would have passed check 4 identically.
+
+### 17.2 `5d` is CLOSED, and what it actually establishes
+
+**`outlook.office.com` was written by root tooling BEFORE Studio was opened**, and
+the panel showed it from the operator's very first screenshot onward — before any
+entry had been added in-session. That is the property `5d` exists to prove and
+that box A recorded as unmeasured: **the panel renders a PERSISTED entry at load,
+not merely one it added itself moments earlier.**
+
+The distinction is not pedantic. A panel that only ever displays what it just
+wrote would pass checks 1, 3 and 5 perfectly while being unable to show a user
+their own saved configuration after a restart.
+
+On cfv-179 this check was sent describing an entry no driver on that run had
+placed, and **would have produced a FAIL against correct behaviour.** Both halves
+of the TASK 0.1 fix are now exercised: the seed makes the property measurable, and
+the rewritten precondition means a future unseeded box records VOID rather than a
+false FAIL.
+
+### 17.3 One reading that is NOT a defect, named so nobody re-opens it
+
+The panel reads `On. 26 network addresses reachable.` while `stagebox` had
+reported 25 minutes earlier. **That is the documented drift, not a discrepancy.**
+The count is re-resolved from DNS and moves between refreshes, which is exactly why
+the checklist was changed after the v1.4.0 run to assert a NONZERO count and the
+unit wording rather than a number. Recorded because a reader comparing two
+transcripts will otherwise find it and wonder.
+
+### 17.4 A false product finding I nearly filed, and the two artefacts behind it
+
+Before handing the checks over, I checked Studio was actually installed rather than
+sending the operator to a missing app. The first reading looked alarming:
+
+```
+absent  C:\Users\clawadmin\AppData\Local\Programs\clawfactory-studio
+absent  C:\Program Files\clawfactory-studio
+SHORTCUT_TARGET=C:\Windows\system32\config\systemprofile\AppData\Local\Programs\ClawFactory Studio\ClawFactory Studio.exe
+TARGET_EXISTS=False
+(no clawfactory-studio directory found anywhere)
+```
+
+Read literally: *Studio is not installed and its Start Menu shortcut points into
+the SYSTEM profile at a path that does not exist.* On a box whose job includes
+proving Studio works, that is a ship-blocker.
+
+**It is entirely my instrument, twice over.**
+
+1. **Wrong identifier shape.** I filtered for a directory named
+   `clawfactory-studio`; the product installs **`ClawFactory Studio`, with
+   spaces** — as `interim-v120-phase1.ps1:84` records in plain sight. The
+   "(none found)" measured my filter, not the box.
+2. **Wrong reading context.** `run-command` executes as SYSTEM, and a `.lnk`
+   target stored with `%LOCALAPPDATA%` expands **in the reading process's
+   context**. So SYSTEM's profile path is what a SYSTEM-context read of that
+   shortcut necessarily produces. The tell was in the same output all along: the
+   same shortcut's `WorkingDirectory` read as `C:\Users\clawadmin\...` because it
+   is stored literally. **One `.lnk`, two fields, two different profiles** — that
+   is an expansion artefact, not a product state. *(INFERRED as to mechanism; the
+   two-field disagreement and SYSTEM's known profile path are the evidence.)*
+
+Re-measured against the real names, and name-agnostically so it could not miss for
+a third reason:
+
+```
+C:\Users\clawadmin\AppData\Local\Programs\ClawFactory Studio
+    EXE_EXISTS=True   EXE_BYTES=225597208
+    ASAR_EXISTS=True  ASAR_BYTES=487784
+    ASAR_SHA256=a64a118f7ae748059b482589d2c124d082cc42dbf9d3239ba615079982d2a49e
+name-agnostic sweep for "ClawFactory Studio.exe": exactly ONE, in clawadmin's profile
+```
+
+**Studio is installed exactly where it belongs, and its `app.asar` equals
+`PIN.studioAsar` to the byte** — the same digest box B's `PIN.studio.asar` matched.
+Inno's own log agrees and always did:
+
+```
+20:19:34  Studio: launching per-user installer as the ORIGINAL (de-elevated) user
+20:20:09  Studio: per-user install completed (exit 0). Landed in the original user's profile.
+```
+
+**Zero product defects here.** This is the fifth instrument defect of the session
+and the closest any came to entering the record as a product finding — stopped
+only by refusing to file a defect off a single reading.
+
 
 
 ---
