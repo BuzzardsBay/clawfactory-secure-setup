@@ -824,6 +824,91 @@ controls fired=1/1; preconditions met=1/1
 **The held copy was regenerated from `HEAD` at dispatch time, not reused from the
 dry-run file**, so what was compared is what is committed now.
 
+---
+
+## 9. `#261`: MY FIRST READING IS RETRACTED, AND CLAUSE 1 IS WHY IT WAS CAUGHT
+
+### 9.1 Revision 1 measured 1 of 8 hosts and reported a clean PASS
+
+```
+PASS=6 FAIL=0 VOID=0 INFO=2  (counted 8 of 8 recorded rows)
+PHASE VERDICT: PASS. Every positive control fired and every precondition was met.
+```
+
+**That verdict is withdrawn.** It is arithmetically true and substantively
+worthless: the phase probed **one** toolchain host out of eight.
+
+The cause is a shape assumption one level below the identifier. The probe
+discovered the right FILE — `/etc/clawfactory/toolchain-hosts.seed`, quoted from
+`setup.ps1:1721` — and then assumed its CONTENT was one host per line. It is not:
+
+```
+setup.ps1:1721   printf '%s\n' "$TOOLCHAIN_HOSTS" > /etc/clawfactory/toolchain-hosts.seed
+```
+
+The variable is **quoted**, so all eight hostnames land on a single
+space-separated line. Three lines above, in the same block, `printf '%s\n'
+$ALLOWED_IPS` is **unquoted** and does give one per line. Two idioms, three lines
+apart, opposite results. A parser taking `(\S+)` off each line kept
+`api.clawhub.ai` and dropped seven hosts in silence.
+
+### 9.2 What caught it, precisely, because that is the transferable part
+
+**The probe printed the raw content it discovered.** So the transcript carried, on
+adjacent lines:
+
+```
+TC_HOST api.clawhub.ai api.github.com clawhub.ai codeload.github.com github.com objects.githubusercontent.com raw.githubusercontent.com registry.npmjs.org
+DISCOVERED_TOOLCHAIN_HOSTS  = api.clawhub.ai
+```
+
+**The defect is visible only because both lines are there.** Every summary number
+in that run was internally consistent — 8 of 8 rows counted, 2 of 2 controls fired,
+2 of 2 preconditions met, `HOSTS_MEASURED=3 of 3 requested` — and every one of them
+was consistent with the wrong set. Nothing but the raw print distinguished
+"measured all eight" from "measured one".
+
+**This is clause 1 earning its place, and it also sharpens it.** The clause as
+written says to discover the *identifier*. This defect was one level down: the
+identifier was right and the *shape of its content* was assumed. The general form
+is **discover the value, not just the name, and print what you found** — an
+enumeration derived from a file must show the file.
+
+It is also, exactly, the project's characteristic defect reproduced inside the tool
+built to detect it: *a check that produced a verdict without measuring its actual
+subject.* Third time this session, all three in my instruments, none in the product.
+
+### 9.3 The fix, and its dry-run
+
+Split on whitespace, which handles both shapes. Dry-run against a rig reproducing
+the real cfv-180 content verbatim:
+
+```
+DISCOVERED_TOOLCHAIN_HOSTS  = api.clawhub.ai api.github.com clawhub.ai
+                              codeload.github.com github.com
+                              objects.githubusercontent.com
+                              raw.githubusercontent.com registry.npmjs.org
+DISCOVERED_READFETCH_HOSTS  = docs.python.org outlook.office.com
+HOSTS_MEASURED=12 of 12 requested
+```
+
+Eight toolchain hosts and both read-fetch shapes parsed.
+
+### 9.4 What revision 1 does establish, kept because it is real
+
+Two readings from that run stand on their own and are not affected by the
+undercount, because they are per-host measurements that were actually taken:
+
+```
+ATT api.anthropic.com  ok=12 n=12   ALWAYS        <- control, must connect
+ATT example.org        ok=0  n=12   NEVER         <- control, must not
+ATT api.clawhub.ai     ok=11 n=12   INTERMITTENT
+```
+
+**The controls discriminate in both directions on this box**, which is what makes
+any count here meaningful, and `api.clawhub.ai` at **11 of 12** is a genuine
+`#261`-class sample. The full-set reading follows in section 10.
+
 
 
 ---
