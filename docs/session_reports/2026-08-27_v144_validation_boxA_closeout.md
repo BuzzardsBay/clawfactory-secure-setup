@@ -1,6 +1,6 @@
 # CLOSE-OUT: v1.4.4 validation, BOX A
 
-**Status: BOX A IN PROGRESS, day 2. cfv-179 RUNNING.** Rows 1,3,5,6,7,8,9,10,11,12,13 PASS; row 14 VOID; sections 14.8, 14.9, 14.10-logon PASS. WR.5/WR.6 running; rename-agent, 14.10-automated and RemoveAll still owed.
+**Status: BOX A NEARLY COMPLETE, day 2. cfv-179 RUNNING.** Rows 1,3,5-13 PASS; row 14 VOID; sections 14.6, 14.8, 14.9, 14.10, 14.11 PASS; TASK 2 complete. ONE PRODUCT DEFECT FOUND (encoding, cosmetic). RemoveAll uninstall still owed.
 Written incrementally so an interrupted session leaves an honest record rather
 than nothing. Sections carry their own state. Anything not measured says so.
 
@@ -1891,3 +1891,226 @@ these are unautomatable in principle:
   separated rather than rendered as `v1.3.2Templates`. That is a pixel question.
 * **Check 10** — that a click path home exists at all.
 * **Section 14.10's logon half** — recorded in section 13.2.
+
+---
+
+## 15. A REAL PRODUCT DEFECT, found by a human looking at a screen
+
+**This is the only product defect box A found, and no automated phase in this
+suite could have found it.** It was found by the operator reading the
+`rename-agent.ps1` dialog during the row 11 by-hand pass.
+
+### 15.1 What the customer sees
+
+The dialog renders as:
+
+```
+ClawFactory a-EUR" Rename Your Assistant                       <- title bar
+ClawFactory ships four role-based agents a-EUR" Orchestrator,
+Scout, Builder, Publisher a-EUR" that work together as a "skill factory."
+A single-agent installer variant a-EUR" which fully supports
+personal-assistant renaming a-EUR" is planned for a future release.
+```
+
+(The mojibake is transcribed here in ASCII; the operator's screenshot holds the
+literal bytes.) Every em dash is replaced by three garbage characters, in a
+dialog whose entire purpose is to explain a product decision to a customer.
+
+### 15.2 Root cause, measured rather than guessed
+
+```
+resources\rename-agent.ps1
+  FIRST_3_BYTES=91,67,109
+  HAS_UTF8_BOM=False
+  UTF8_EMDASH_SEQUENCES=7
+  MOJIBAKE_OCCURRENCES_WHEN_READ_AS_ANSI=7
+```
+
+The file is **UTF-8 without a BOM**. **Windows PowerShell 5.1 decodes a BOM-less
+`.ps1` as the ANSI codepage**, so the three UTF-8 bytes of an em dash (`E2 80 94`)
+are read as three separate Windows-1252 characters. The count matches exactly: 7
+sequences in the file, 7 mojibake occurrences when decoded the way PowerShell
+actually decodes it.
+
+**This is NOT a delivery defect and section 14.8 is not contradicted.** The file
+on the box is byte-identical to its committed blob — 14.8 proved that, and it is
+still true. **The bytes are delivered perfectly; the file is authored in an
+encoding its own interpreter does not read.**
+
+### 15.3 Scope: a class across five shipped scripts, and which occurrences a user sees
+
+The instance was swept as a class rather than patched as a one-off:
+
+| File | BOM | total | in code/strings | in comments |
+| --- | --- | --- | --- | --- |
+| `rename-agent.ps1` | **no** | 7 | **5** (lines 21, 25, 29) | 2 |
+| `bootstrap.ps1` | **no** | 6 | **2** (lines 128, 226) | 4 |
+| `launcher.ps1` | **no** | 4 | 0 | 4 |
+| `post-install.ps1` | **no** | 3 | 0 | 3 |
+| `setup.ps1` | **no** | 1 | 0 | 1 |
+
+**Seven user-visible occurrences across two files.** The distinction matters and
+is measured per occurrence rather than asserted per file: a mojibake in a comment
+is invisible to the customer and is tidiness; one in a displayed string is a
+defect the customer reads.
+
+The two in `bootstrap.ps1` are both user-visible and were checked individually
+rather than assumed:
+
+* **line 128** sits inside the placeholder `agent.md` body that is written into
+  the distro for the three stub agents, so the mojibake lands in a prompt file.
+* **line 226** is a `Write-BootstrapLog WARN` line, so it reaches the console and
+  the install log.
+
+`launcher.ps1`, `post-install.ps1` and `setup.ps1` carry the same latent hazard in
+comments only. **They are not customer-visible today**, and they are one edit away
+from becoming so.
+
+### 15.4 Severity, stated plainly
+
+**Cosmetic, not a security or containment defect.** Nothing about the sandbox, the
+firewall, the guards or the gateway is implicated. The dialog's *meaning* survives;
+it just looks broken.
+
+**It is nonetheless a shipping defect in a product whose entire pitch is that it
+tells you the truth carefully.** A customer's first impression of a considered
+explanation is that the software cannot render a dash.
+
+### 15.5 The fix, and the gate that should have caught it
+
+The fix is to save the affected files as **UTF-8 with BOM**, which PowerShell 5.1
+reads correctly, or to avoid non-ASCII punctuation in shipped scripts entirely.
+
+**The build has nine gates and none of them looks at encoding.** The interpolation
+gate added in v1.4.4 parses every shipped `.ps1` with the PowerShell parser — it
+would be the natural home for a tenth check: *no shipped `.ps1` may contain a
+non-ASCII byte unless it carries a UTF-8 BOM.* That is a byte-level assertion,
+cheap, and canary-able in the same shape as the existing gates.
+
+**Carded, not fixed here.** Fixing shipped bytes mid-validation would invalidate
+every measurement taken against this artifact, including section 14.8's 54 of 54.
+
+### 15.6 The defect reproduced inside the instrument investigating it
+
+Recorded because it is the sharpest available demonstration of the failure mode.
+
+The first version of the scope-analysis script searched for the mojibake by
+writing the literal characters into a `.ps1`. That script was itself saved without
+a BOM, PowerShell re-mangled its search string, and it died with a parse error
+before measuring anything. **The bug corrupted the tool built to measure the bug.**
+
+The rewrite contains no non-ASCII literal at all and works on raw bytes.
+
+---
+
+## 16. TASK 2.3, 2.4, 2.5: the provider switch. Proven, with one assertion VOID rather than FAIL
+
+```
+PASS=16 FAIL=1 VOID=0 INFO=2  (counted 19 of 19 recorded rows)
+positive controls registered=6 fired=6
+preconditions declared=1 met=1
+PHASE VERDICT: FAIL. Failing checks: WR.5
+```
+
+### 16.1 What the run actually shows
+
+`switch-provider.ps1` **completed**:
+
+```
+Switched to ollama. Gateway restarted automatically; switch is live.
+exit=0   strictmode-death=False
+WR.5 firewall after:  FW_TABLE=1  FW_ALLOWED_V4=30  FW_TOOLCHAIN_V4=27
+                      FW_SEED_HOSTS=9  FW_CTL_FAKESET=ok_fake_set_not_found
+```
+
+* **`strictmode-death=False`** — the v1.4.3 ship-blocker is fixed on a clean
+  install. That script died on four unescaped `$baseHosts` in comments, for every
+  provider, before applying anything.
+* **The firewall change landed**, and `FW_TOOLCHAIN_V4=27` is untouched — the
+  precise property commit `3818bc0` exists to protect.
+* **The reader is controlled**: a set that cannot exist is not found.
+
+### 16.2 Why `WR.5`'s FAIL is an unobservable assertion, and the reasoning is not an excuse
+
+`WR.5` failed on one sub-assertion: `guard-ran=False`.
+
+**The v1.4.4 close-out predicted exactly this, before this run existed.** Section
+4A.2 of that document records that `Invoke-WslBashBlock` assigns the WSL call to
+`$null`, discarding the payload's **stdout**; the toolchain guard echoes its
+*confirmation* to stdout and its *FATAL* to stderr with `>&2`. **So the guard can
+report that it stopped something and cannot report that it checked.**
+
+`guard-ran=False` is therefore consistent with both "the guard ran and passed
+silently" and "the guard never ran". **An assertion that cannot discriminate
+between those two is not a FAIL, it is a VOID**, and recording it as a FAIL
+attributes an instrument limitation to the product.
+
+**The discriminating evidence is `WR.6`, and it PASSED:**
+
+```
+WR.6  PASS  the fail-closed toolchain guard refuses to write a toolchain host
+            into the unrevocable allowlist
+```
+
+The guard demonstrably exists, is wired, and refuses when it should. That is a
+separate invocation with an injected fault, and it is the row that carries the
+claim.
+
+**Stated so it cannot be read as explaining away a failure:** if `WR.6` had also
+failed, `WR.5` would stand as a product FAIL and this section would say so.
+
+### 16.3 The three TASK 2 items this settles
+
+| Item | Verdict | Evidence |
+| --- | --- | --- |
+| **2.3** switch-provider completes, applies its firewall change, leaves the toolchain set untouched | **PASS** | exit=0, no StrictMode death, `FW_TOOLCHAIN_V4=27` either side, reader controlled |
+| **2.4** the fail-closed toolchain guard refuses | **PASS** | `WR.6` |
+| **2.5** the Ollama honesty line | **PASS** | `WR.5b`, and it proved itself on a real failure rather than a rigged one |
+
+**2.5 is worth quoting**, because Ollama genuinely could not install on this box
+and the script told the truth about it:
+
+```
+bash: line 1: ollama: command not found
+WARNING: Ollama is NOT installed in the sandbox, so the agent will have no model
+to talk to. The install step above failed; the firewall change below still
+applies. Install Ollama and run this script again.
+```
+
+v1.4.3 printed `[x] Ollama running with model llama3.1:8b` at exactly that point.
+
+### 16.4 A harness finding, carded
+
+`WR.5` should record VOID with a named reason rather than FAIL, because its
+`guard-ran` assertion is unobservable by construction. Two candidate fixes, and
+the second is better: stop discarding the payload's stdout in
+`Invoke-WslBashBlock`, so the guard's confirmation becomes observable and the
+assertion becomes real. That closes the diagnosability gap the v1.4.4 session
+carded rather than working around it.
+
+---
+
+## 17. Section 14.10 COMPLETE: the keepalive, both halves
+
+```
+TASK_PRESENT=True  TASK_STATE=Ready  TASK_LASTRESULT=0
+TASK_LASTRUN=08/28/2026 16:29:27
+TASK_ACTION=wscript.exe "C:\Program Files\ClawFactory\resources\wsl-keepalive.vbs" Ubuntu clawuser
+CTL_FAKE_TASK_PRESENT=False
+VBS_BYTES=764 VBS_CR=0
+WSL_PROCESSES=6
+WSCRIPT_PROCESSES=0
+```
+
+**PASS.** The scheduled task exists, is Ready, and **has actually run at exit code
+0 after the reboot** — the timestamp is post-restart. The `.vbs` on the box is
+`CR=0`, so the **LF form is what executes** rather than merely parses.
+`WSL_PROCESSES=6` shows a session is genuinely held. `WSCRIPT_PROCESSES=0` is
+expected and documented: `wsl.exe` is reparented from `wscript`, which then exits.
+
+**Control:** the same query against a task name that cannot exist finds nothing, so
+`TASK_PRESENT=True` means the task rather than meaning the query answers anything.
+
+**The by-hand half is section 13.2** — no console window flashed at logon, observed
+by the operator at a fresh post-reboot login. **Both halves are now measured, and
+this item has never been complete on any previous run.**
