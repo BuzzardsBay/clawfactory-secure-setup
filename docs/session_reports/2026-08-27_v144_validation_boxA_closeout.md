@@ -1,6 +1,6 @@
 # CLOSE-OUT: v1.4.4 validation, BOX A
 
-**Status: BOX A IN PROGRESS, day 2. cfv-179 RUNNING.** Rows 1,3,5,6,7,8,9,12,13 PASS; row 14 VOID; sections 14.8 and 14.9 PASS. Rows 10, 11, WR.5/WR.6, 14.10 and RemoveAll still owed.
+**Status: BOX A IN PROGRESS, day 2. cfv-179 RUNNING.** Rows 1,3,5,6,7,8,9,10,12,13 PASS; row 14 VOID; sections 14.8, 14.9 and 14.10-logon PASS. Row 11, WR.5/WR.6, 14.10-automated and RemoveAll still owed.
 Written incrementally so an interrupted session leaves an honest record rather
 than nothing. Sections carry their own state. Anything not measured says so.
 
@@ -1721,3 +1721,78 @@ Fixed by naming the delivered path directly.
 a header plus content — where the SHA-256 of the content was needed. It would have
 mismatched all 54 rows while looking authoritative. Caught by reading the code
 rather than by running it.
+
+---
+
+## 13. MATRIX ROW 10: the reboot pass. **PASS**, with two credential rows VOID
+
+Row 10 has two legs and both ran after a real Windows reboot.
+
+**Leg 1, phase 4 structural, `-PostReboot`:**
+
+```
+PASS=5 FAIL=0 VOID=2 INFO=0  (counted 7 of 7 recorded rows)
+S.1.POSTREBOOT      PASS  No route to SMTP for uid 1000 at any destination
+S.1ctlA.POSTREBOOT  PASS  CONTROL (must succeed): allowlisted 443 connects
+S.1ctlB.POSTREBOOT  PASS  CONTROL (must fail): non-allowlisted 443 blocked
+S.1ctlC.POSTREBOOT  PASS  CONTROL (must succeed): the probe can observe a real listener
+S.4.POSTREBOOT      VOID  Credential unreadable by the agent uid
+S.4leak.POSTREBOOT  VOID  Credential value absent from logs, receipts, errors, process listing
+```
+
+**The structural claim survives a real reboot**, measured consumer-side with
+calibration in both directions in the same run.
+
+**The two VOIDs are the same absent-credential precondition as row 14**, and this
+is now the third place it has surfaced: `G2.10`, row 14, and `S.4`. **One cause,
+three symptoms**, and box D closes all three by installing with a credential
+configured.
+
+**Leg 2, toolchain `-PostReboot`:**
+
+```
+PASS=30 FAIL=0 VOID=0 INFO=0  (counted 30 of 30 recorded rows)
+positive controls registered=7 fired=7
+preconditions declared=1 met=1
+PHASE VERDICT: PASS.
+```
+
+**A clean sweep after a reboot.** The egress firewall, the toolchain toggle, the
+five-hourly refresh behaviour, the tripwire and the agent's inability to change its
+own switch all hold across a real Windows restart.
+
+### 13.1 `TC.1c` passed after the reboot, and it still does not retire `#261`
+
+```
+TC.1c.POSTREBOOT  PASS  With the switch ON, the software sources are reachable for uid 1000
+                        github and npm reachable=True
+```
+
+This row **FAILed on the v1.4.0 baseline** and is the `#261` intermittency residual,
+previously measured at 2 of 6 attempts after a reboot and 5 of 12 before one.
+
+**It passed here. That is one sample.** `#261` is a claim about *intermittency*
+against services answering from a rotating address pool while the firewall holds a
+resolved snapshot. One PASS and one FAIL are both consistent with the residual as
+documented. **`#261` stays open**, and closing it needs a repeated-attempt
+measurement, not another single reading.
+
+The agent also completed a real turn after the reboot, returning `TOOLCHAINONOK`
+with real token usage — a third independent observation that the 22:52:12
+`gate_error` was transient.
+
+### 13.2 Section 14.10, the logon half: **PASS, observed by a human**
+
+> **Does a console window flash open and disappear at logon?** — **No.**
+
+Reported by the operator at a fresh post-reboot logon.
+
+**This is the first time this assertion has ever been taken.** It was deferred in
+v1.4.3 and in every earlier run, because it can only be observed by a person at the
+moment of login and no run had a human watching for it. `wsl-keepalive.vbs` runs
+through `wscript` precisely so it is silent, and it is now confirmed silent by
+observation rather than by reading the invocation.
+
+The automated half of 14.10 — the scheduled task exists, is Ready, has run at exit
+0, the `.vbs` is CR=0 and a WSL session is held — is **still owed** and is a
+candidate for the same box before teardown.
