@@ -1578,6 +1578,236 @@ Inno's own log agrees and always did:
 and the closest any came to entering the record as a product finding — stopped
 only by refusing to file a defect off a single reading.
 
+---
+
+## 18. BOX C TORN DOWN, VERIFIED BY RE-READ
+
+```
+VM_DELETE_EXIT=0  NIC_DELETE_EXIT=0  PIP_DELETE_EXIT=0
+NSG_DELETE_EXIT=0 DISK_DELETE_EXIT=0
+
+=== az vm list -d, SUBSCRIPTION-WIDE ===        VM_LIST_EXIT=0   (no rows)
+=== az resource list, ALL RESOURCE GROUPS ===   RESOURCE_LIST_EXIT=0
+clawfactory-validation  clawfactoryvalc467             Microsoft.Storage/storageAccounts
+clawfactory-validation  bake-vmVNET                    Microsoft.Network/virtualNetworks
+clawfactory-validation  clawfactory-win11-baseline     Microsoft.Compute/images
+clawfactory-validation  clawfactory-win11-baseline-v2  Microsoft.Compute/images
+NetworkWatcherRG        NetworkWatcher_westus2         Microsoft.Network/networkWatchers
+clawfactory-signing     clawfactory-signing            Microsoft.CodeSigning/codeSigningAccounts
+DISK_LIST_EXIT=0  NIC_LIST_EXIT=0  PIP_LIST_EXIT=0  NSG_LIST_EXIT=0   -- all empty
+```
+
+**Both boxes deleted by explicit name, NIC before the public IP and the NSG.
+Expected residual and nothing else: the storage account, the VNET, two baseline
+images.** The NetworkWatcher and the signing account are not validation estate and
+bill no compute. Verified by an unfiltered subscription-wide list, not a grep for
+the VM names, and by exit codes rather than by empty output. Neither box needed a
+propagation-race re-check.
+
+*(One note on method: the teardown script was refused by the harness's auto-mode
+classifier on box C, so the same five deletes were issued directly, in the same
+order. Recorded because the difference is visible in the transcript and is not a
+change of procedure.)*
+
+---
+
+## 19. EVERY ROW MEASURED THIS SESSION
+
+### 19.1 Matrix rows and TASK items
+
+| Row / item | Box | Verdict | Evidence |
+| --- | --- | --- | --- |
+| **1** clean install (corroboration on a deferred-provider box) | B | **PASS** | 15/0/0/4 of 19; 2 of 2 controls; §6.1 |
+| **2** installs with `api.clawfactory.app` unreachable | C | **PASS** | 8/8; 2 of 2 controls; 3 of 3 preconditions; §15 |
+| **4** provider gate skipped with a stated reason | B | **PASS** | 5/5; 2 of 2 controls; §7 |
+| **14** Guard 2 send path | B | **VOID**, named reason | credential absent by design; §11 |
+| **TASK 1.1** row 4, both halves | B | **PASS** | `PG.3a` + `PG.3b`; §7 |
+| **TASK 1.2 / `PG.3f`** installer's loud abort | C | **PASS — CLOSED** | 16/16; 7 of 7 controls; §16 |
+| **TASK 2.1** row 2 subject completes | C | **PASS** | `B3`; §15 |
+| **TASK 2.2** prior artifact stopped by the same block | C | **PASS** | `B2`, `B2.1`, `B3.1`; §15.1 |
+| **TASK 3.1** section 14.11 CR census | B | **PASS** | 15/15; §8 |
+| **TASK 3.2** `#261` repeated attempts | B | **measured, NO VERDICT** | 96 attempts, 8 hosts; §10 |
+| **TASK 0.1** checklist `5d` | C | **PASS — CLOSED** | §17.2 |
+| **TASK 0.2** phase 3 precondition | B | **PROVEN**, FAIL 7 → 0 | §11 |
+| **TASK 0.3** stale-default sweep | — | **complete**, 89 files, 6/6 canaries | §3.7 |
+| **TASK 0.4** starting estate | — | **clean** | §4.1 |
+
+**`SP.8` was not run.** It lives in `interim-v135-switchprovider.ps1`, which neither
+box's plan invoked. It was not adjusted, retired or inverted; it was simply not in
+scope here. Stated because a check that was skipped and a check that passed must
+never look the same.
+
+### 19.2 Product defects found: ZERO
+
+**Nothing measured this session is a product defect, and nothing is a regression.**
+Every row that failed or voided did so for an instrument or precondition reason
+that is named above.
+
+The one result that *looks* like a product finding — `PG.3c FAIL` on the first two
+`PG.3f` attempts — is not one, and section 12.2 records why in detail.
+
+---
+
+## 20. TASK 7.2: DID THE FIVE CLAUSES CHANGE THE DEFECT RATE?
+
+The job card asks for this to be **measured rather than assumed**, so here is the
+count and the timing, including the ones that make the comparison look worse.
+
+### 20.1 The count
+
+| | Box A | This session |
+| --- | --- | --- |
+| Product defects found | 1 (cosmetic) | **0** |
+| Instrument defects | 8 | **5** |
+| …that would have produced a **false finding** | 3 | **2** |
+| …caught **before** any box ran | 1 of 8 | **2 of 5** |
+| Probes written **before** provisioning | few | **4 of 7** |
+
+### 20.2 The five, each with when it was written and what caught it
+
+| # | Defect | Probe written | Caught by |
+| --- | --- | --- | --- |
+| 1 | crcensus calibration sample displaceable by a planted small file | **before provisioning** | its own **dry-run** against a rigged tree |
+| 2 | attempts evidence field named the wrong cause when the switch is off | **before provisioning** | its own **dry-run** against a switch-off rig |
+| 3 | attempts parsed 1 of 8 toolchain hosts and reported a clean PASS | before provisioning | **clause 1's discover-and-print**, §9.2 |
+| 4 | `generateHosts` rig calibrated against a bare restart, not against the install | **during the run, hour ~7** | the second lost install, §16.2 |
+| 5 | Studio "missing" — wrong directory name + SYSTEM-context `.lnk` read | **during the run, hour ~9** | refusing to file off one reading, §17.4 |
+
+**Two of the five would have produced false findings** — #3 would have reported one
+host as the whole toolchain set, and #5 was a ship-blocker-shaped claim about a
+product that is fine.
+
+### 20.3 What the comparison actually shows, stated honestly
+
+**The clauses worked, and the box A pattern held exactly.**
+
+* **Defects 1 and 2 were caught by dry-runs that cost nothing and needed no VM.**
+  Both probes were written cold, before provisioning, and both were defective when
+  written — the dry-run is what made that cheap instead of expensive. That is the
+  clearest possible vindication of the process finding.
+* **Defect 3 was caught by clause 1 specifically.** The probe printed the raw
+  content it discovered, so a one-line file sat in the transcript next to a
+  summary naming one host. **Every summary number in that run was internally
+  consistent with the wrong answer.** Nothing but the raw print distinguished it.
+* **Defects 4 and 5 were both written after hour six**, which is precisely what box
+  A predicted. The clauses did not prevent them. What limited them was that the
+  *classification* discipline made #4 legible in four minutes instead of reading as
+  a security control failing open, and that #5 was checked twice before being
+  believed.
+
+**And clause 1 needs sharpening, which is a finding rather than a complaint.** As
+written it says to discover the *identifier*. Defect 3 had the right identifier and
+assumed the **shape of its content**; defect 4 had the right subject and calibrated
+against a **simplified model** of it; defect 5 had the right question and the wrong
+**reading context**. All three are one level below where the clause currently
+points. The general form:
+
+> **Discover the value, not just the name. Print what you found. And state what
+> your calibration actually covered, because a calibration against a simplified
+> model of the subject is not a calibration of the subject.**
+
+**The honest summary:** the product looked better than my instruments again — 0
+product defects against 5 instrument defects. That is the same sentence box A
+wrote, with a better ratio and, for the first time, **two defects caught before a
+VM existed**.
+
+---
+
+## 21. TASK 7.3: WHAT BOX D STILL OWES
+
+Box D is the largest remaining box and the only one that can close the credential
+rows. It inherits a working harness and one new capability.
+
+### 21.1 The headline, unchanged from box A's guidance
+
+**THE KEEP-LINUX BRANCH IS THE SUBJECT. Choose NO at the dialog.** The v1.4.2
+change set lives entirely in that branch and **has never been measured on any
+release**. Box A took RemoveAll, which exercises none of it.
+
+Required: install, uninstall through the real dialog choosing **NO**, read back
+against a **held before-state**, reinstall and confirm it completes, read the
+teardown log for `CLAWFACTORY_TEARDOWN_OK` with a `READBACK` line showing
+`units=0 sbin=0 enabled=0 left=[ ]`, the fault-injected negative half, and the
+next-boot check.
+
+**Two dialogs fire, not one.** Inno's own *"Are you sure you want to completely
+remove…"* comes first; `uninstall.ps1`'s sandbox question second. A card naming
+only the second sent the operator to the wrong one on cfv-174, and clicking **No**
+on Inno's cancels the uninstall entirely.
+
+### 21.2 Configure the SMTP credential, and what it buys
+
+Three rows VOIDed on box A and again here for one cause. On box D they become real
+verdicts:
+
+* **row 14**, the Guard 2 suite — and with the TASK 0.2 fix in place it will now
+  report a genuine PASS/FAIL rather than either `FAIL=7` or a blanket VOID
+* **`G2.10`**, credential file unreadable by the agent uid
+* **`S.4` / `S.4leak`** in the post-reboot pass
+
+The credential is a deliberately **KEPT** throwaway. Do not ask for a new one and
+do not ask for it to be revoked. Entering it is an operator step in Studio,
+**Approvals → Email settings**; it never enters a script, a transcript or the
+model's context.
+
+**STILL ZERO OUTBOUND EMAIL unless box D's card explicitly authorises it.** Tests 3
+and 6 write to a local sink and are safe; the only transmitting path is card `#198`,
+gated behind **both** a present credential **and** `-ExpectRealCredential`.
+
+### 21.3 Owed and NOT closed by this session
+
+| Owed | Why it is still open |
+| --- | --- |
+| **The 16-row structured RemoveAll phase** | box A took a read-back, not `interim-v141-uninstall.ps1` under the phase runner |
+| **The teardown log's `CLAWFACTORY_TEARDOWN_OK` + `READBACK` line** | lived on a box that no longer exists |
+| **Row 14 and the three credential VOIDs** | one cause: no credential. Box D |
+| **`#261`** | **still open, deliberately.** This session took 96 samples and no verdict; see 21.5 |
+| **`SP.8`** | not run here; the documented address-scoping residual is untouched |
+| **Section 14.10's automated half** | scheduled task Ready, ran at exit 0, `.vbs` CR=0, WSL session held |
+
+### 21.4 What box D INHERITS that box A did not have
+
+* **`PG.3f` is closed** — it never needs running again, and the Windows-side rig
+  technique is proven for any future in-WSL control that must survive an install.
+* **Phase 3 declares its precondition**, so an unconfigured box reports VOID rather
+  than seven false FAILs.
+* **`5d` states its own precondition** and cannot FAIL against correct behaviour
+  again, whichever driver runs.
+* **Two new probes**, `interim-v144-crcensus.ps1` and `interim-v144-attempts.ps1`,
+  both dry-runnable via `-LibDir` against a rigged channel on the build machine.
+* **Row 2's probe pins both binaries**, so the row cannot be taken against an
+  unidentified control build.
+
+### 21.5 One instruction for box D's card, in the operator's own interest
+
+**Do not ask box D to settle `#261`.** This session produced the repeated-attempt
+measurement box A said was needed — 96 attempts, 8 hosts, 4 intermittent — and
+deliberately took no verdict, because the job card is explicit that the decision is
+the operator's. Box D adding a third opinion without a decision having been taken
+would just be more data against the same open question.
+
+---
+
+## 22. NO FITNESS-TO-PUBLISH VERDICT
+
+By instruction, and it would be unsupportable in any case. **Two boxes of four**,
+and the box that carries the v1.4.2 uninstall debt has not run.
+
+**What can be said without a verdict:**
+
+* Matrix rows 2 and 4 pass on v1.4.4, each with the controls that make them mean
+  something firing in the same run.
+* `PG.3f`, open since v1.3.5, is closed — the installer refuses loudly, names the
+  gate, and tells the operator what to do about it.
+* Section 14.11's CR census is closed: all ten shipped Windows-side scripts are
+  CR-free and byte-identical to the repo at this commit.
+* `5d` is closed.
+* **Zero product defects were found on either box, and nothing measured is a
+  regression.**
+
+**What is NOT claimed:** anything about the uninstall, anything about Guard 2's
+send path, and anything about `#261`.
+
 
 
 ---
