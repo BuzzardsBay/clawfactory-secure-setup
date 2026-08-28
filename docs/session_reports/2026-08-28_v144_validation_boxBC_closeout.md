@@ -909,6 +909,67 @@ ATT api.clawhub.ai     ok=11 n=12   INTERMITTENT
 any count here meaningful, and `api.clawhub.ai` at **11 of 12** is a genuine
 `#261`-class sample. The full-set reading follows in section 10.
 
+---
+
+## 10. `#261`: THE MEASUREMENT. 96 attempts across 8 toolchain hosts. **NO VERDICT**
+
+Ten hosts, twelve attempts each, as uid 1000, switch confirmed ON.
+
+```
+TOOLCHAIN_SWITCH_ENABLED = True
+HOSTS_MEASURED=10 of 10 requested
+PASS=13 FAIL=0 VOID=0 INFO=9  (counted 22 of 22 recorded rows)
+controls fired=2/2; preconditions met=2/2
+PHASE VERDICT: PASS
+```
+
+### 10.1 The raw counts
+
+| Host | Class | Connected | State |
+| --- | --- | --- | --- |
+| `api.anthropic.com` | **CONTROL, must connect** | **12 / 12** | ALWAYS |
+| `example.org` | **CONTROL, must not** | **0 / 12** | NEVER |
+| `clawhub.ai` | toolchain | 12 / 12 | ALWAYS |
+| `objects.githubusercontent.com` | toolchain | 12 / 12 | ALWAYS |
+| `raw.githubusercontent.com` | toolchain | 12 / 12 | ALWAYS |
+| `registry.npmjs.org` | toolchain | 12 / 12 | ALWAYS |
+| `codeload.github.com` | toolchain | 10 / 12 | **INTERMITTENT** |
+| `api.clawhub.ai` | toolchain | 9 / 12 | **INTERMITTENT** |
+| `github.com` | toolchain | 7 / 12 | **INTERMITTENT** |
+| `api.github.com` | toolchain | 6 / 12 | **INTERMITTENT** |
+
+**Both controls fired in the same run**, which is what makes every other number on
+this table mean something: the probe demonstrably can connect and can be refused,
+so a shortfall is neither a dead network nor a probe that always says yes.
+
+### 10.2 The two questions, kept on separate rows
+
+**`AT.EXISTS` — PASS for all eight toolchain hosts.** Every one answered at least
+once, so the boot/refresh path built a working route to each. That is card `#276`
+territory and `#276` is closed; this is a corroboration of it on a
+`-Provider later` box, which is a variant it had not been measured on.
+
+**`AT.ALWAYS` — recorded INFO, raw counts only, for all eight.** Four of eight
+answered on every attempt; four did not. **This session records no verdict on
+`#261`, proposes no fix and makes no recommendation about it.** The job card is
+explicit that this is the operator's call and he has it.
+
+### 10.3 What the sample adds to the two readings box A had
+
+Box A had one PASS before a reboot and one after — two single-shot readings, of
+which the second was of one host. This run contributes **96 attempts across eight
+distinct hosts**, and one incidental cross-check worth naming: `api.clawhub.ai`
+returned **11/12 in revision 1 and 9/12 in revision 2**, minutes apart on the same
+box with nothing changed between them. Two different counts for the same host in
+one session is itself a direct observation of the variability `#261` describes,
+independent of any single number in the table.
+
+**Stated as INFERRED, because it is argued rather than measured:** the split — four
+hosts at 12/12 and four below — is *consistent with* the documented mechanism, a
+firewall holding a resolved address snapshot while a service answers from a
+rotating pool. Nothing in this run measures the pool itself, so that is an
+interpretation offered to the operator, not a finding.
+
 
 
 ---
