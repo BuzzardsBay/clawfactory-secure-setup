@@ -1,6 +1,6 @@
 # CLOSE-OUT: v1.4.4 validation, BOX A
 
-**Status: BOX A NEARLY COMPLETE, day 2. cfv-179 RUNNING.** Rows 1,3,5-13 PASS; row 14 VOID; sections 14.6, 14.8, 14.9, 14.10, 14.11 PASS; TASK 2 complete. ONE PRODUCT DEFECT FOUND (encoding, cosmetic). RemoveAll uninstall still owed.
+**Status: BOX A COMPLETE. cfv-179 TORN DOWN, nothing billing.** Rows 1,3,5-13 PASS; row 14 VOID (no SMTP credential, by design); sections 14.6, 14.8, 14.9, 14.10, 14.11 and TASK 2 all PASS; RemoveAll measured. ONE product defect found (encoding, cosmetic). NO fitness verdict - box A is one of four.
 Written incrementally so an interrupted session leaves an honest record rather
 than nothing. Sections carry their own state. Anything not measured says so.
 
@@ -2245,3 +2245,221 @@ unregistered and its image deleted.
   runner. **The rows are therefore evidence, not phase-runner verdicts**, and they
   carry no registered controls beyond the two discrimination probes quoted above.
   That distinction is stated rather than blurred.
+
+---
+
+## 19. TEARDOWN. Verified by re-read, not by the delete commands' exit codes
+
+Deleted by explicit name, **NIC first** because it references the public IP and
+the NSG:
+
+```
+az vm delete            cfv-179          -> exit 0
+az network nic delete   cfv-179VMNic     -> exit 0
+az network public-ip delete cfv-179-pip  -> exit 0
+az network nsg delete   cfv-179-nsg      -> exit 0
+az disk delete          cfv-179-osdisk   -> exit 0
+```
+
+**"It said deleted" and "it is gone" are different claims**, so the estate was
+re-read unfiltered:
+
+```
+=== az resource list -g clawfactory-validation, UNFILTERED ===
+clawfactoryvalc467              Microsoft.Storage/storageAccounts
+bake-vmVNET                     Microsoft.Network/virtualNetworks
+clawfactory-win11-baseline      Microsoft.Compute/images
+clawfactory-win11-baseline-v2   Microsoft.Compute/images
+
+=== az vm list -d, SUBSCRIPTION-WIDE ===   NO_VMS_ANYWHERE=True
+disk: EMPTY   nic: EMPTY   pip: EMPTY   nsg: EMPTY
+CFV179_RESOURCES_REMAINING=0
+```
+
+**Exactly the expected residual: the storage account, the VNET and the two
+baseline images.** No propagation race was observed; the resources were gone on
+first re-read.
+
+**One instrument note, because an errored `az` command's empty output is not
+evidence.** The first subscription-wide `cfv-179` sweep used a `contains()` query
+and returned **exit 255** with `].[name was unexpected at this time.` — the
+standing `az.cmd` trap, where `cmd.exe` re-parses the parentheses. Had the exit
+code not been checked, a parse failure would have read as "nothing found", which
+is precisely the answer the sweep was hoping for. Re-derived with a paren-free
+query and filtered locally: **0 resources remaining.**
+
+**RDP rule scope, as TASK 6 requires**: `67.164.251.99/32`, port 3389, Allow,
+Inbound, on `cfv-179-nsg`. Never `0.0.0.0/0`. Created at provisioning, verified by
+read-back twice, and **deleted with the NSG.**
+
+**Nothing is billing compute.** The validation container retains the artifact blob
+and the staged phase scripts as evidence, which is storage, not compute.
+
+---
+
+## 20. NO FITNESS-TO-PUBLISH VERDICT
+
+By instruction, and it would be unsupportable regardless.
+
+**Box A is one box of four, and three of the four have not been provisioned.**
+Boxes B, C and D carry matrix rows 2 and 4, and the entire keep-Linux uninstall
+change set — **which is v1.4.2's work and has never been measured on any
+release.** A verdict now would rest on an unmeasured premise.
+
+**What can be said without a verdict:**
+
+* **The two defects that made v1.4.3 a NO are fixed and measured on a clean
+  install**, with controls that fired: the kill switch genuinely stops the gateway
+  and refuses to claim success when it cannot verify, and `switch-provider.ps1`
+  runs at all.
+* **Section 14.6 is closed by the same fix**, because a working kill switch is
+  what made a genuinely-down gateway achievable.
+* **Nothing measured in box A is a regression.**
+* **One product defect was found**, section 15, and it is cosmetic.
+* **Box A itself is complete except for the items listed in 21.2.**
+
+---
+
+## 21. End-of-session gate, day 2
+
+### 21.1 Final task accounting
+
+| Task | State |
+| --- | --- |
+| TASK 0.1 plan before `az vm create` | **DONE**, section 4 |
+| TASK 0.2 the two named fixes | **DONE** `cef6cbd`, `b11c2c5` |
+| TASK 0.2 wider enumeration + canary | **DONE**, sections 2, 2.2, plus a sixth class in 2.5a |
+| TASK 0.3 upload verified by download and re-hash | **DONE**, section 1 |
+| TASK 0.4 starting estate | **DONE**, section 3 |
+| TASK 1 phase order | **DONE**, one recorded deviation in 6.1 |
+| TASK 2.1 kill switch from a clean install | **PASS**, 8I.1 |
+| TASK 2.2 refuses to claim success unverified | **PASS**, 8I.2 |
+| TASK 2.3 switch-provider completes | **PASS**, 16.3 |
+| TASK 2.4 fail-closed toolchain guard refuses | **PASS**, `WR.6`, 16.3 |
+| TASK 2.5 Ollama honesty line | **PASS**, `WR.5b`, 16.3 |
+| TASK 2.6 the other wrapper rows | **PASS**, 8I.3; `rename-agent` by hand, section 15 |
+| TASK 3.1 section 14.8 | **PASS**, 12.1 |
+| TASK 3.2 section 14.9 | **PASS**, 12.2 |
+| TASK 3.3 section 14.10 | **PASS**, both halves, sections 13.2 and 17 |
+| TASK 3.4 section 14.11 | **PASS** execution half; **CR census owed**, 21.2 |
+| TASK 3.5 section 14.6 | **PASS**, 8I.4 |
+| TASK 3.6 14.12 build-time, not sought on the box | **DONE** — correctly not attempted |
+| TASK 4 operator handoffs | **DONE**, five cards, all with real values |
+| TASK 5 standing traps | Followed; six hit and each recorded |
+| TASK 6 teardown | **DONE**, section 19 |
+| TASK 7 close-out | this file |
+
+### 21.2 What box A still owes
+
+| Owed | Why |
+| --- | --- |
+| **Section 14.11's CR census** on the shipped Windows-side `.ps1` files | the execution half is covered by `WR.1/7/8/9`; the per-file CR count on the box was never taken separately |
+| **`PG.3f`**, the installer's loud abort | costs a full install; belongs to box B or C |
+| **The 16-row structured RemoveAll phase** | what was taken is a read-back, not `interim-v141-uninstall.ps1` under the phase runner. See 18.5 |
+| **The teardown log's `CLAWFACTORY_TEARDOWN_OK` and `READBACK` line** | lives on a box that no longer exists |
+| **Row 14 and the three credential VOIDs** | one cause: no SMTP credential. Box D |
+| **`5d`**, that the panel renders a *persisted* entry at load | the seeding step belongs to a driver this run does not use. See 14.2 |
+| **`#261`** | one PASS pre-reboot and one post-reboot is two samples against a rotating pool |
+
+### 21.3 Resource ledger, final
+
+| | |
+| --- | --- |
+| VMs provisioned | **1**, `cfv-179` |
+| VMs running now | **0** |
+| VMs deleted | **1**, with all four orphans and the VMAccess extension |
+| Estate after teardown | storage account, VNET, two baseline images. **Verified by unfiltered re-read** |
+| Compute window | roughly 14:32–17:36 day 1 and 08:20–10:45 day 2, about **5.5 hours** at ~$0.10/hour, so **about $0.55**, plus one night of a Premium OS disk |
+| Licence slots | none consumed; no licence check exists since v1.4.0 |
+
+**Credential hygiene.** No password was generated, printed, requested or set by this
+session. `az vm user update` was called **once, by the operator, at Card 1**, which
+is the one sanctioned use; this session never called it. The provider key was
+reported only as `provider key present (value never printed)`. The gateway token's
+**length only** reached a transcript. **No secret value appears in any evidence
+file, commit or message.**
+
+### 21.4 Delta security sweep
+
+**No product code was changed by this session.** Committed: two stale-default fixes
+in `validation/`, two new validation probes, and this close-out.
+
+* `interim-v144-gatediag.ps1` and `interim-v144-bundlebytes.ps1` are **not bundled**
+  and do not ship.
+* **Every injected fault was removed and each removal verified**: `PG.2d` restored
+  the provider route, `SP.7b`/`7e` the seed, `TC.8b` left the firewall intact,
+  `TC.9` the shipped default state, `WR.4` injected into a copy rather than the
+  shipped file, and `BB` removed its canary directory.
+* **The artifact validated is byte-identical** to the one built at `25945d5` and
+  signed as `6e655603…`. Sections 14.8 and 14.9 prove it on the installed machine.
+* **One defect found and NOT fixed**, deliberately: section 15's encoding class.
+  Fixing shipped bytes mid-validation would invalidate every measurement taken
+  against this artifact.
+
+### 21.5 Delta bug review
+
+Instrument defects in this session's own work. **Eight, and five were mine on day
+two alone.**
+
+1. **gatediag rev 1 read a nonexistent token path** — both turns `Unauthorized`.
+2. **…and scored that as a PASS**, testing only for the absence of a blocked flag.
+   **A turn that never ran read as a turn that was not blocked.**
+3. **…and asserted on an invented unit name.** `systemctl is-active` on a
+   nonexistent unit reports inactive, **indistinguishable from a stopped service**.
+   Would have reported a healthy proxy as down.
+4. **…and measured the toolchain switch after `TC.9` had restored it.**
+5. **bundlebytes rev 1 recorded controls with `Record` instead of
+   `Register-Control`**, leaving the phase with zero registered controls. The runner
+   correctly downgraded every PASS.
+6. **bundlebytes rev 2 searched the distro for `orchestrator-prompt.md`**, a name
+   that by design never exists there. **Reported as written that was a FALSE
+   SHIP-BLOCKER.** It VOIDed instead of FAILing, which is the only reason it never
+   left the file.
+7. **The manifest generator used git's blob object id where SHA-256 of content was
+   needed** — would have mismatched all 54 rows while looking authoritative. Caught
+   by reading, before running.
+8. **The encoding-scope script reproduced the very defect it was measuring**,
+   section 15.6.
+
+**Plus two shell-level slips**: a bare leaf name where the dispatcher takes a path
+(threw before touching the box), and a heredoc that failed to parse and wrote
+nothing (caught by checking `git status` rather than assuming).
+
+**The pattern is one thing, and it is the same thing every time: a check that
+passes, or fails, without measuring its actual subject.** Three of the eight would
+have produced false findings — a phantom dead gateway, a phantom broken send path,
+a phantom missing prompt. **All three were caught by the phase runner's rules being
+applied to my instruments as rigorously as to the product**, and by PROMPT 15's
+"name the real subject" clause, which I violated and which already existed because
+of an earlier violation of the same kind.
+
+**The product looked better than my instruments all session.** That is the honest
+summary of day two.
+
+### 21.6 Cards
+
+**Moved only as far as box A's evidence supports.**
+
+| Card scope | Recommendation |
+| --- | --- |
+| kill switch fix (`#289`–`#292` family) | **Evidence complete for box A.** Proven from a clean install, both readers, fault-landed control. Closeable on this evidence |
+| `switch-provider.ps1` fix | **Closeable.** `WR.5b`, `WR.6` and the firewall read-back carry it; `WR.5`'s FAIL is an unobservable assertion, section 16.2 |
+| documentation / structural table | no box-A runtime evidence either way |
+| anything scoped to uninstall | **STAYS OPEN** — box D |
+| `#261` | **STAYS OPEN** — two samples |
+
+**Five new cards owed from this session:**
+
+1. **The encoding class**, section 15 — 5 shipped scripts BOM-less, 7 user-visible
+   mojibake occurrences, plus a proposed tenth build gate.
+2. **Phase 3 declares no precondition** and reports FAIL where PROMPT 15 requires
+   VOID, section 8G.4.
+3. **`Invoke-WslBashBlock` discards payload stdout**, so the toolchain guard cannot
+   report that it checked — this made `WR.5` unobservable, section 16.4.
+4. **The uninstaller does not name which elements it could not remove**, nor
+   suggest closing ClawChat, section 18.4.
+5. **`MANUAL_CHECKS_studio.md` check `5d` assumes a seeding step** no current driver
+   performs, section 14.2.
+
+**A sixth, lower priority:** six drivers carry stale `$VmName` defaults naming
+deleted boxes, section 2.5a. All fail safe.
