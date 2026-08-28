@@ -1260,6 +1260,193 @@ This costs nothing beyond the OS disk and adds **no operator step that was not
 already required**: restarting a deallocated box needs an RDP login to start the
 runner, and that login is Card 2 step 3 either way.
 
+On restart, the public IP, the RDP rule and this machine's own address were all
+**re-read rather than carried forward**. The IP was unchanged (`Static`/`Standard`
+SKU), the rule still read `67.164.251.99/32`, and the build machine's live address
+read `67.164.251.99` — so the /32 was checked against reality rather than against
+what it had been earlier.
+
+---
+
+## 15. MATRIX ROW 2: v1.4.4 installs with `api.clawfactory.app` unreachable. **PASS**
+
+```
+B0      PASS  PRECONDITION: api.clawfactory.app resolves, so there is something to block
+B1      PASS  POSITIVE CONTROL: the block is real and specific
+B2.0    PASS  PRECONDITION: the v1.1.1 control binary is staged AND is the binary it is named as
+B2      PASS  POSITIVE CONTROL: the block WOULD have stopped the old licence-carrying build
+B2.1    PASS  v1.1.1 left the box clean for the subject install
+B3.PRE  PASS  PRECONDITION: the subject binary is the artifact this run is validating
+B3      PASS  ROW 2: the subject artifact installs to completion with api.clawfactory.app unreachable
+B3.1    PASS  the block was still in force when the install finished
+
+PASS=8 FAIL=0 VOID=0 INFO=0  (counted 8 of 8 recorded rows)
+positive controls registered=2 fired=2
+preconditions declared=3 met=3
+PHASE VERDICT: PASS
+```
+
+### 15.1 Both halves, minutes apart, on one machine
+
+```
+20:05:15  subject api.clawfactory.app -> 69.46.46.108
+20:05:15  control openclaw.ai        -> 216.150.1.1
+20:05:25  outbound block installed for 1 address(es)
+20:05:28  after the block: api.clawfactory.app reachable=False ; openclaw.ai reachable=True
+
+20:05:49  v1.1.1 returned after 7s
+            PRIOR> License activation failed under /SILENT - missing or invalid /LICENSE= argument.
+            PRIOR> Got EAbort exception.
+          v1.1.1 log says licence activation failed : True
+          v1.1.1 left an install behind             : False
+
+20:20:10  subject installer returned after 14 min
+20:20:11  install-result.txt: INSTALLER_DONE=success
+          subject reachable after install=False
+```
+
+**The old licence-carrying build dies in seven seconds where v1.4.4 completes in
+fourteen minutes, under the identical block, on the same box.** That is a
+behaviour change measured on one machine rather than argued from source, which is
+the entire point of carrying a second binary.
+
+### 15.2 The three properties that make the row mean something, each separately asserted
+
+1. **The block is real AND specific** (`B1`). Both halves are required: a subject
+   that is merely unreachable proves nothing if everything is unreachable. The
+   control host stayed reachable throughout.
+2. **The old build installed NOTHING** (`B2.1`). It aborts inside
+   `InitializeWizard`, before a file is copied, so it cannot have poisoned the
+   subject install that followed it.
+3. **The block was STILL IN FORCE when the subject finished** (`B3.1`). A block
+   that lapsed part-way would silently turn row 2 into an ordinary install that
+   looks like a pass.
+
+### 15.3 A residual I looked for and measured away rather than leaving as a caveat
+
+The block covers the addresses resolved at block time. If the licence host sat
+behind a rotating pool, blocking one address could leave others reachable and
+`B1`/`B3.1` could both pass while the host was really still available by another
+route. Measured on the box:
+
+```
+RESOLVES_NOW=69.46.46.108   ADDRESS_COUNT_NOW=1
+SUBJECT_REACHABLE_NOW=False   CONTROL_REACHABLE_NOW=True
+```
+
+**One address, the same one, and the subject verified unreachable three separate
+times across roughly fifteen minutes** — before the install, immediately after it,
+and again afterwards from a third independent read.
+
+### 15.4 Both binaries were identified before either was trusted
+
+This is the TASK 0 change from section 3.4 doing its job, and it had never been
+done on any previous run of this row:
+
+```
+prior artifact on the box: sha256=67619df7…719a9 bytes=440525520
+prior artifact expected  : sha256=67619df7…719a9 bytes=440525520
+subject artifact on the box: sha256=6e655603…eb4d1 bytes=440610608
+subject artifact expected  : sha256=6e655603…eb4d1 bytes=440610608
+```
+
+Row 2's whole argument collapses if either binary is not what it is named as, and
+until this run neither was checked on the box.
+
+---
+
+## 16. `PG.3f` IS CLOSED. **The installer's loud abort is observed for the first time**
+
+Third attempt, and the one that worked. `PASS=16 FAIL=0 VOID=0` of 16 rows, **7 of
+7 positive controls fired, 2 of 2 preconditions met.**
+
+```
+20:49:41  api.anthropic.com resolves Windows-side to: 160.79.104.10
+20:49:43  level-2 block rules created: 1 for 1 address(es)
+          the gate's OWN extracted probe body, as clawuser, under the rig:
+            [provider-route] FAILED after 3 attempts as uid 1000     PROBE_RC=1
+20:59:43  LEVEL2_STATE=GATE_ABORT
+20:59:42  INSTALLER_DONE=failure reason=Provider-route gate FAILED: clawuser (uid 1000)
+          could not open a TCP connection to api.anthropic.com:443 after three attempts,
+          and this check runs after every firewall write in the install. The agent cannot
+          reach its model, so the install is refused rather than completing into a bricked
+          product. Causes, in the order worth checking: an egress restriction outside WSL
+          such as a corporate proxy or network policy; no internet on this machine; or DNS
+          not resolving inside the distro. Diagnose with: wsl -d Ubuntu -u clawuser --
+          bash -lc 'getent ahostsv4 api.anthropic.com; timeout 10 bash -c
+          "exec 3<>/dev/tcp/api.anthropic.com/443"; echo rc=$?'. If the provider is
+          deliberately unreachable on this machine, install with the provider deferred
+          instead, which skips this gate by design.
+20:59:45  PG.3c PASS   PG.3d PASS   PG.3e PASS
+```
+
+**The installer refused rather than completing, and the refusal names the gate.**
+`PG.3c` requires that specifically, so an operator reading the log knows what to
+fix — and the shipped message goes further than the row demands: it states the
+consequence, lists causes in the order worth checking, gives a copy-paste
+diagnostic, and names the deferred-provider install as the supported workaround.
+
+### 16.1 What made the third attempt different, stated as a method rather than luck
+
+**The fault is verified against the gate's own probe body, as `clawuser`,
+immediately before the install starts.** Attempts one and two each fired a
+fault-landed control on a rig that was genuinely real at injection time and gone by
+the time the gate ran nine minutes later. `PG.3.CTL` now requires the *gate's own
+measurement* to fail under the rig, which closes exactly that gap.
+
+### 16.2 Three erasure mechanisms, and it took two lost installs to find them all
+
+| # | Mechanism | Erases | Found |
+| --- | --- | --- | --- |
+| 1 | `Step-ConfigureWslConf` (Step 3) overwrites `/etc/wsl.conf` **wholesale** from a here-string carrying no `generateHosts` (`setup.ps1:1229-1247`) | a `generateHosts=false` rig | cfv-181, attempt 2 |
+| 2 | `Step-RestartWsl` (Step 4) runs `wsl --shutdown`; WSL then regenerates `/etc/hosts` | an `/etc/hosts` rig | cfv-180, attempt 1 |
+| 3 | `Step-EgressFirewall` rewrites the nftables ruleset | a rigged firewall rule | known since the probe was written |
+
+**Mechanism 3 was documented in this probe's own header from the start**, as the
+reason a firewall rig was rejected in favour of `/etc/hosts`. The author checked
+one erasure mechanism and stopped; two more were waiting.
+
+**My attempt-two failure is the sharper lesson and it is mine, not the product's.**
+The fix for (2) was calibrated against a bare `wsl --shutdown` — and the install
+does not merely restart the distro, it rewrites `wsl.conf` and *then* restarts.
+**I calibrated against a simplified model of the subject instead of the subject.**
+That is the same defect class as measuring the wrong subject outright, arriving
+through the door marked "I calibrated this time".
+
+### 16.3 The viability of the Windows-side rig was measured before an install was spent on it
+
+`interim-v144-winrigcal.ps1`, one minute, on the box:
+
+```
+WC.CTL0  PASS  the gate probe SUCCEEDS before the rig, in this same run   PROBE_RC=0
+WC.CTL1  PASS  THE FAULT LANDED on the Windows side                       BLOCKED
+WC.1     PASS  a Windows-side outbound block stops the in-WSL gate probe
+               WINRIG_STATE=REACHES_WSL
+               "[provider-route] FAILED after 3 attempts as uid 1000"
+               "DNS resolved api.anthropic.com to [160.79.104.10] but the TCP
+                connect to 443 did not complete"
+WC.2     PASS  fault removed, route works again from BOTH Windows and the distro
+
+PASS=6 FAIL=0 VOID=0  (6 of 6)
+```
+
+**This was genuinely open.** WSL2 egress leaves through a virtual adapter, and box
+A's v1.4.0 notes record `pktmon` seeing zero packets from an install for exactly
+that reason. Writing "use a Windows-side rig" into a card without running it would
+have handed the next session a recipe that had never worked. The measurement shows
+DNS still resolves and the **TCP connect** is what fails — which is precisely the
+layer the gate tests.
+
+### 16.4 The fault was removed and the removal read back from both sides
+
+```
+PG.3e  PASS  block rules left=0; Windows-side reachable again=True;
+             the gate's own probe as clawuser rc=0 again=True
+```
+
+The rule being gone and the route working again are two different claims, and both
+are asserted. A probe that left this fault behind would brick the agent on the box.
+
 
 
 ---
