@@ -700,6 +700,50 @@ are the same four INFO rows box A recorded, for the same reasons.
 the transcript on all three summary numbers — two independent channels, compared
 rather than one trusted.
 
+---
+
+## 7. MATRIX ROW 4: the provider gate is skipped with a stated reason, and the install still completes. **PASS**
+
+**TASK 1.1 requires both halves, and the reason it does is worth restating: a gate
+that silently does nothing when its subject is absent is indistinguishable from a
+gate that is broken.** Both halves are recorded separately.
+
+```
+PG.CHAN    PASS  POSITIVE CONTROL: the file-based WSL channel discriminates
+                 SUBJECT_MARKER=0 | CONTROL_RC=1 | EXPAND=expanded-ok
+PG.1.PRE   PASS  PRECONDITION: the install log is present and readable
+PG.1.SRCH  PASS  POSITIVE CONTROL: search target is searchable (the install log)
+PG.3a      PASS  TEST 3: with the provider deferred, the gate is SKIPPED and says so
+PG.3b      PASS  TEST 3: the deferred install still completed
+
+PASS=5 FAIL=0 VOID=0 INFO=0  (counted 5 of 5 recorded rows)
+positive controls registered=2 fired=2
+preconditions declared=1 met=1
+PHASE VERDICT: PASS
+```
+
+**`PG.3a` is the half that matters and it is an assertion on the product's own
+words, not on silence.** It requires the install log to carry, verbatim:
+
+```
+Provider-route gate SKIPPED, reason: provider deferred
+```
+
+which `setup.ps1:3225` writes as *"Step 15h: Provider-route gate SKIPPED, reason:
+provider deferred (-Provider later). There is no provider to reach yet; the route is
+proven when a provider is chosen."* A skip that happened without saying so would
+FAIL this row, which is precisely the "silently does nothing" case.
+
+**`PG.1.SRCH` is why the row above means anything.** Before searching the log for a
+phrase, the phase proves the log is searchable at all by finding a phrase it knows
+must be there. A search over an unreadable or empty target reports a clean absence
+and says nothing — discipline 5 in the phase runner's header.
+
+**`PG.2a` and `PG.2b` did not run on this pass**, because `-DeferredProvider`
+completes the phase at section 1. They run on the second pass, which carries
+`PG.3f` — see section 11, and see 1.2 for why that second pass needed a harness fix
+before it could be taken at all.
+
 
 
 ---
