@@ -90,13 +90,30 @@ sed -n '1,40p' /etc/clawfactory/read-fetch-hosts.txt 2>/dev/null | sed 's/^/RF_H
 '@
 W $state.Out
 
+# THE TWO FILES HAVE DIFFERENT SHAPES AND THE FIRST DRAFT ASSUMED THEY DID NOT.
+#
+# setup.ps1:1721 writes the toolchain seed as
+#     printf '%s\n' "$TOOLCHAIN_HOSTS" > /etc/clawfactory/toolchain-hosts.seed
+# with $TOOLCHAIN_HOSTS QUOTED, so all eight hostnames land on ONE
+# space-separated line. (Two lines above it, `printf '%s\n' $ALLOWED_IPS` is
+# UNQUOTED and does give one per line -- the two idioms sit three lines apart in
+# the same block.) read-fetch-hosts.txt is genuinely one host per line.
+#
+# A parser taking (\S+) off each line therefore captured api.clawhub.ai and
+# silently dropped the other seven, and cfv-180 measured 1 of 8 toolchain hosts
+# while reporting a clean PASS. Splitting on whitespace handles both shapes.
+#
+# Clause 1 is what caught it: the probe PRINTS the raw content it discovered, so
+# the one-line shape was visible in the transcript next to a
+# DISCOVERED_TOOLCHAIN_HOSTS line naming a single host. Without that print the
+# undercount would have been invisible and the reading would have looked complete.
 $tcHosts = @()
 foreach ($line in ($state.Out -split "`n")) {
-    if ($line -match '^\s*TC_HOST\s+(\S+)') { $tcHosts += $Matches[1] }
+    if ($line -match '^\s*TC_HOST\s+(.+)$') { $tcHosts += ($Matches[1] -split '\s+') }
 }
 $rfHosts = @()
 foreach ($line in ($state.Out -split "`n")) {
-    if ($line -match '^\s*RF_HOST\s+(\S+)') { $rfHosts += $Matches[1] }
+    if ($line -match '^\s*RF_HOST\s+(.+)$') { $rfHosts += ($Matches[1] -split '\s+') }
 }
 $tcHosts = @($tcHosts | Where-Object { $_ -match '^[a-z0-9]' } | Sort-Object -Unique)
 $rfHosts = @($rfHosts | Where-Object { $_ -match '^[a-z0-9]' } | Sort-Object -Unique)
