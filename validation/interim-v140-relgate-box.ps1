@@ -55,6 +55,14 @@ param(
     [long]$ExpectBytes     = 440610608,
     [string]$Phase1Script  = 'interim-v120-phase1.ps1',
     [string]$Phase1Extra   = 'none',
+    # Matrix row 2 needs a SECOND binary on the box: the last licence-carrying
+    # build, which must abort under the same block minutes before the subject
+    # completes under it. Supply the local path and it is staged to
+    # C:\cfv\prior-setup.exe with its digest re-verified ON THE BOX, exactly as
+    # the subject artifact is. Empty means "row 2 is not being taken here".
+    [string]$PriorExe      = '',
+    [string]$PriorSha256   = '67619df79179db11e76454e9734de244a51128b37c55f66071213c98f72719a9',
+    [long]$PriorBytes      = 440525520,
     [string]$InstallProvider = 'claude',
     [string]$OutDir        = ''
 )
@@ -127,6 +135,18 @@ $sig = Get-AuthenticodeSignature $CombinedExe
 if ($sig.Status -ne 'Valid') { throw "Artifact Authenticode is '$($sig.Status)', not Valid." }
 Say "  artifact verified: $localSha ($len bytes), Authenticode Valid" Green
 
+# The row-2 control binary gets the SAME preflight as the subject. It is the half
+# of row 2 that makes the row mean anything, so an unidentified file here would
+# quietly turn a behaviour change into a coincidence.
+if ($PriorExe) {
+    if (-not (Test-Path $PriorExe)) { throw "Prior (licence-carrying) artifact not found at $PriorExe." }
+    $priorLen = (Get-Item $PriorExe).Length
+    if ($priorLen -ne $PriorBytes) { throw "Prior artifact size $priorLen != expected $PriorBytes. STOP, wrong binary." }
+    $priorSha = (Get-FileHash $PriorExe -Algorithm SHA256).Hash.ToLower()
+    if ($priorSha -ne $PriorSha256.ToLower()) { throw "Prior artifact hash mismatch: $priorSha != $($PriorSha256.ToLower()). STOP." }
+    Say "  prior artifact verified: $priorSha ($priorLen bytes)" Green
+}
+
 if (az vm list -g $ResourceGroup --query "[?name=='$VmName'].name" -o tsv) { throw "VM $VmName already exists." }
 
 $SeedKeyB64 = Read-CredAsBase64 $SeedKeyTarget
@@ -196,6 +216,7 @@ $files = @(
     @{ p = (Join-Path $PSScriptRoot 'interim-v120-phaselib.ps1'); n = 'interim-v120-phaselib.ps1' },
     @{ p = (Join-Path $PSScriptRoot 'harness-selftest.ps1');      n = 'harness-selftest.ps1' }
 )
+if ($PriorExe) { $files += @{ p = $PriorExe; n = "prior-$VmName.exe" } }
 foreach ($f in $files) {
     if (-not (Test-Path $f.p)) { throw "Cannot stage '$($f.p)', not found." }
     az storage blob upload --account-name $StorageAcct --account-key $key --container-name $Container `
@@ -223,9 +244,14 @@ $stage = "`$ErrorActionPreference='Stop'; New-Item -ItemType Directory -Path C:\
          "Invoke-WebRequest -Uri '$uCh' -OutFile C:\cfv\interim-v120-wslchan.ps1 -UseBasicParsing; " +
          "Invoke-WebRequest -Uri '$uLib' -OutFile C:\cfv\interim-v120-phaselib.ps1 -UseBasicParsing; " +
          "Invoke-WebRequest -Uri '$uSt' -OutFile C:\cfv\harness-selftest.ps1 -UseBasicParsing; " +
+         $(if ($PriorExe) { "Invoke-WebRequest -Uri '$(Sas "prior-$VmName.exe")' -OutFile C:\cfv\prior-setup.exe -UseBasicParsing; " } else { '' }) +
          "`$h=(Get-FileHash C:\cfv\combined-setup.exe -Algorithm SHA256).Hash.ToLower(); " +
          "if (`$h -ne '$Sha256') { throw `"ARTIFACT HASH MISMATCH ON VM: `$h`" }; " +
-         "`"OK staged; artifact=`$h size=`$((Get-Item C:\cfv\combined-setup.exe).Length)`""
+         $(if ($PriorExe) {
+             "`$ph=(Get-FileHash C:\cfv\prior-setup.exe -Algorithm SHA256).Hash.ToLower(); " +
+             "if (`$ph -ne '$($PriorSha256.ToLower())') { throw `"PRIOR ARTIFACT HASH MISMATCH ON VM: `$ph`" }; "
+           } else { '' }) +
+         "`"OK staged; artifact=`$h size=`$((Get-Item C:\cfv\combined-setup.exe).Length)$(if ($PriorExe) { ' prior=$ph priorSize=$((Get-Item C:\cfv\prior-setup.exe).Length)' })`""
 $r = Invoke-Rc $stage 'stage'; Save 'stage.txt' $r
 if ($r -notmatch 'OK staged') { throw "Stage did not confirm the artifact hash on the VM. Output: $r" }
 Say "Staged, digest re-verified ON THE BOX. $r" Green

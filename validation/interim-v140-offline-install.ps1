@@ -1,5 +1,5 @@
 <#
-  v1.4.0 release gate, box B. One matrix row that cannot be taken on box A,
+  release gate, licence-host-unreachable box. One matrix row that cannot be taken on box A,
   because it is a property of the INSTALL ITSELF and box A is already
   installed.
 
@@ -24,7 +24,7 @@
     control B2  the block WOULD have stopped the old code
                                              (v1.1.1 /SILENT aborts at its
                                               licence gate and installs nothing)
-    subject     v1.4.0 installs to completion under the identical block
+    subject     the subject artifact installs to completion under the identical block
 
   v1.1.1 aborts inside InitializeWizard, before any file is copied and before
   setup.ps1 is invoked, so it leaves the box clean for the subject. This probe
@@ -41,7 +41,22 @@ param(
     # On box B this probe IS phase 1: it is the phase that installs. It reports
     # through phase 1's transcript, results file and sentinel so the driver's
     # evidence gate and retrieval need no special case.
-    [string]$Transcript  = 'C:\cfv\phase1-out-probe.txt'
+    [string]$Transcript  = 'C:\cfv\phase1-out-probe.txt',
+    # DISCOVER, DO NOT ASSUME -- applied to the two binaries this row's whole
+    # argument rests on. "The old build died and the new one completed" is only a
+    # behaviour change if both files are the ones named. Each is re-hashed on the
+    # box and compared to a value carried in from the driver; a mismatch VOIDs
+    # rather than measuring an unidentified binary.
+    #
+    # v1.1.1, the last licence-carrying build. Not in released-versions.tsv: that
+    # ledger begins at 1.2.0, so this value comes from the retained blob and from
+    # the v1.4.1 closure close-out, which agree with the local Output copy.
+    [string]$PriorSha256   = '67619df79179db11e76454e9734de244a51128b37c55f66071213c98f72719a9',
+    [long]$PriorBytes      = 440525520,
+    # The subject. Supplied by the driver so this probe carries no release literal
+    # of its own to go stale; empty means "do not check", which is recorded.
+    [string]$SubjectSha256 = '',
+    [long]$SubjectBytes    = 0
 )
 
 $ErrorActionPreference = 'Continue'
@@ -57,7 +72,7 @@ function Finish($code) {
 $SUBJECT = 'api.clawfactory.app'
 $CONTROL = 'openclaw.ai'
 
-Start-Phase -Name 'ClawFactory v1.4.0 release gate, box B (install with the licence host unreachable)' `
+Start-Phase -Name 'ClawFactory release gate, licence-host-unreachable box (install with the licence host unreachable)' `
     -Transcript $Transcript -Sentinel 'PHASE1_PROBE_COMPLETE'
 
 # ---------------------------------------------------------------- 1. the block
@@ -104,11 +119,16 @@ Register-Control -Id 'B1' -Name 'the block is real and specific' -Fired $blockPr
 # ------------------------------------------- 2. control B2, the old build dies
 Section '2. CONTROL: the last licence-carrying build ABORTS under this same block'
 
-$havePrior = Require-Precondition -Id 'B2.0' -Name 'v1.1.1 is staged on the box' `
-    -Met (Test-Path $PriorExe) `
-    -Reason "without the old build there is no measured evidence that the block would have stopped the licence call, only an argument from source"
+$priorOnBox = if (Test-Path $PriorExe) { (Get-FileHash $PriorExe -Algorithm SHA256).Hash.ToLower() } else { '(absent)' }
+$priorLenOnBox = if (Test-Path $PriorExe) { (Get-Item $PriorExe).Length } else { 0 }
+W "prior artifact on the box: sha256=$priorOnBox bytes=$priorLenOnBox"
+W "prior artifact expected  : sha256=$($PriorSha256.ToLower()) bytes=$PriorBytes"
+$priorIdentified = ($priorOnBox -eq $PriorSha256.ToLower()) -and ($priorLenOnBox -eq $PriorBytes)
+
+$havePrior = Require-Precondition -Id 'B2.0' -Name 'the v1.1.1 control binary is staged AND is the binary it is named as' `
+    -Met $priorIdentified `
+    -Reason "without the old build there is no measured evidence that the block would have stopped the licence call, only an argument from source -- and an unidentified binary in its place proves nothing either. onBox=$priorOnBox/$priorLenOnBox expected=$($PriorSha256.ToLower())/$PriorBytes"
 if ($havePrior) {
-    W "prior artifact sha256: $((Get-FileHash $PriorExe -Algorithm SHA256).Hash.ToLower())"
     $sw = [Diagnostics.Stopwatch]::StartNew()
     Start-Process -FilePath $PriorExe -ArgumentList `
         '/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/LOG=C:\cfv\prior-install.log', `
@@ -125,29 +145,45 @@ if ($havePrior) {
 
     Register-Control -Id 'B2' -Name 'the block WOULD have stopped the old licence-carrying build' `
         -Fired ($priorAborted -and (-not $priorInstalled)) `
-        -Evidence "v1.1.1 under the identical block: log carries 'License activation failed'=$priorAborted, and it installed nothing=$(-not $priorInstalled). This is what v1.4.0 is being compared against." | Out-Null
+        -Evidence "v1.1.1 under the identical block: log carries 'License activation failed'=$priorAborted, and it installed nothing=$(-not $priorInstalled). This is what the SUBJECT artifact is being compared against." | Out-Null
 
     Record 'B2.1' 'v1.1.1 left the box clean for the subject install' `
         $(if (-not $priorInstalled) { 'PASS' } else { 'FAIL' }) `
         "Program Files\ClawFactory\setup.ps1 present=$priorInstalled. A partial install here would poison every row after it."
 }
 
-# --------------------------------------------------- 3. the subject: v1.4.0
-Section '3. SUBJECT: v1.4.0 installs to completion under the identical block'
+# ------------------------------------------------ 3. the subject artifact
+Section '3. SUBJECT: the subject artifact installs to completion under the identical block'
 
 if (-not (Test-Path $CombinedExe)) {
-    Record 'B3.0' 'v1.4.0 present on the box' 'FAIL' "missing at $CombinedExe"
+    Record 'B3.0' 'the subject artifact is present on the box' 'FAIL' "missing at $CombinedExe"
     Marker 'PHASE1_FEASIBILITY_FAIL'
     Complete-Phase -ResultsJson 'C:\cfv\phase1-results.json' -MarkerPrefix 'PHASE1'
     Finish 2
 }
-W "subject artifact sha256: $((Get-FileHash $CombinedExe -Algorithm SHA256).Hash.ToLower())"
+$subjOnBox  = (Get-FileHash $CombinedExe -Algorithm SHA256).Hash.ToLower()
+$subjLenBox = (Get-Item $CombinedExe).Length
+W "subject artifact on the box: sha256=$subjOnBox bytes=$subjLenBox"
+if ($SubjectSha256) {
+    W "subject artifact expected  : sha256=$($SubjectSha256.ToLower()) bytes=$SubjectBytes"
+    $subjIdentified = ($subjOnBox -eq $SubjectSha256.ToLower()) -and (($SubjectBytes -eq 0) -or ($subjLenBox -eq $SubjectBytes))
+    if (-not (Require-Precondition -Id 'B3.PRE' -Name 'the subject binary is the artifact this run is validating' `
+            -Met $subjIdentified `
+            -Reason "onBox=$subjOnBox/$subjLenBox expected=$($SubjectSha256.ToLower())/$SubjectBytes. A row 2 taken against an unidentified binary says nothing about the release")) {
+        Marker 'PHASE1_FEASIBILITY_FAIL'
+        Complete-Phase -ResultsJson 'C:\cfv\phase1-results.json' -MarkerPrefix 'PHASE1'
+        Finish 4
+    }
+} else {
+    Record 'B3.PRE' 'the subject binary was NOT pinned by the caller' 'INFO' `
+        "no -SubjectSha256 was supplied, so the binary at $CombinedExe is taken on trust; its measured digest is $subjOnBox ($subjLenBox bytes)"
+}
 
 $sw2 = [Diagnostics.Stopwatch]::StartNew()
 Start-Process -FilePath $CombinedExe -ArgumentList `
     '/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/LOG=C:\cfv\install.log',"/PROVIDER=$Provider" -Wait
 $sw2.Stop()
-W "v1.4.0 returned after $([int]$sw2.Elapsed.TotalMinutes) min"
+W "subject installer returned after $([int]$sw2.Elapsed.TotalMinutes) min"
 Marker 'PHASE1_INSTALL_RETURNED'
 
 # The Inno exit code is not the honest verdict. setup.ps1 writes the real one.
@@ -155,7 +191,7 @@ $resultFile = 'C:\ProgramData\ClawFactory\install-result.txt'
 $verdict = if (Test-Path $resultFile) { (Get-Content $resultFile -Raw).Trim() } else { '(install-result.txt ABSENT)' }
 W "install-result.txt: $verdict"
 
-Record 'B3' "ROW 2: v1.4.0 installs to completion with $SUBJECT unreachable" `
+Record 'B3' "ROW 2: the subject artifact installs to completion with $SUBJECT unreachable" `
     $(if ($verdict -match 'success') { 'PASS' } else { 'FAIL' }) `
     "install-result.txt='$verdict'. The old build under this identical block aborted before copying a file (control B2), so this is a behaviour change measured on one machine rather than argued from source."
 
