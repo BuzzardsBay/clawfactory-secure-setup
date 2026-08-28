@@ -639,6 +639,67 @@ cfv-180-nsg     Microsoft.Network/networkSecurityGroups
 Five resources. `az vm delete` removes only the first, so teardown sweeps the other
 four explicitly, **NIC first**, because it references the public IP and the NSG.
 
+---
+
+## 6. BOX B, THE INSTALL: `-Provider later` completes. **PASS**
+
+The install ran in the operator's interactive session (nothing launches
+`wrapper.cmd`; no auto-logon is armed) and was polled from here, one
+`run-command` at a time, with **no automated probe touching the box while the
+operator was on it**.
+
+Nine polls over roughly fourteen minutes, each reading the runner heartbeat
+separately from the install state so *"runner alive, job slow"* and *"runner dead"*
+stay distinguishable:
+
+```
+poll 9/60  az_exit=0  12:00:59
+PHASE1_DONE=True
+RUNNER_HEARTBEAT=2026-08-28T18:03:55
+INSTALL_RESULT=INSTALLER_DONE=success
+LOG_TAIL:
+  [2026-08-28 18:03:19] [INFO] PostInstall smoke task registered (fires at next user logon)
+  [2026-08-28 18:03:19] [INFO] ==== ClawFactory Secure Setup - completed successfully ====
+  [2026-08-28 18:03:20] [INFO] INSTALLER_DONE=success
+```
+
+### 6.1 Phase 1 on a deferred-provider box. **PASS, 15/0/0/4 of 19**
+
+```
+P1.5              PASS  install-result.txt reports success
+P1.2              PASS  Step-Preflight ran and passed (installer claim)
+P1.3.CTL          PASS  POSITIVE CONTROL: the enumeration can see a resource that IS there
+P1.3              PASS  All 34 required resources on disk (independent enumeration)
+P1.3b             PASS  Installer resource count and this probe agree
+P1.3c             PASS  CONTROL: absent resource must not be found
+P1.CHAN           PASS  POSITIVE CONTROL: the file-based WSL channel discriminates
+PIN.persona       PASS  Pin 1of7 persona.md
+PIN.soul          PASS  Pin 2of7 safety-rules.md (SOUL)
+PIN.soul.indistro PASS  Pin 2of7 SOUL as installed in distro
+PIN.soul.rootpin  PASS  Root-owned /etc/clawfactory/soul.sha256 matches pin
+PIN.workspaceSoul PASS  Pin 3of7 composed workspace SOUL matches pin
+PIN.studio.asar   PASS  Studio pin: the INSTALLED app.asar matches the build-time digest
+PIN.version       PASS  Installed version reports 1.4.4
+PIN.bundle        PASS  Bundle completeness (all 34 preflight resources shipped)
+
+PASS=15 FAIL=0 VOID=0 INFO=4  (counted 19 of 19 recorded rows)
+positive controls registered=2 fired=2
+preconditions declared=0 met=0
+PHASE VERDICT: PASS
+```
+
+**This is not a re-run of box A's row 1 and is not reported as one.** Box A proved
+the clean install on `-Provider claude`. What this adds is that **the same 34
+resources, the same seven pins and the same version all land identically when the
+provider is deferred** — a variant no box has taken since cfv-171 at v1.4.0, and a
+different install path through `setup.ps1` (the key wizard and the provider-route
+gate are both skipped). The two `INFO` rows carrying `PIN.rootfs` and the baseline
+are the same four INFO rows box A recorded, for the same reasons.
+
+`SENTINEL_PRESENT=True`, transcript 11,310 bytes, and the results JSON agrees with
+the transcript on all three summary numbers — two independent channels, compared
+rather than one trusted.
+
 
 
 ---
