@@ -216,30 +216,56 @@ if ($RunFullInstallControl) {
     # Proven durable on cfv-180 before any install was spent on it, with a boot_id
     # control showing the distro really restarted: interim-v144-rigdurable.ps1,
     # RD.1 PASS, RD.2 PASS (box left byte-identical by wsl.conf digest).
-    $l2 = Invoke-WslFile -Tag 'pg-l2-rig' -User 'root' -Body @"
-cp /etc/hosts /var/tmp/hosts.bak2
-cp /etc/wsl.conf /var/tmp/wsl.conf.bak2
-if grep -qi 'generateHosts' /etc/wsl.conf; then
-  sed -i 's/^[[:space:]]*generateHosts.*/generateHosts=false/I' /etc/wsl.conf
-elif grep -qi 'generateResolvConf' /etc/wsl.conf; then
-  sed -i '0,/generateResolvConf.*/s//&\ngenerateHosts=false/' /etc/wsl.conf
-else
-  printf '\n[network]\ngenerateHosts=false\n' >> /etc/wsl.conf
-fi
-grep -q '192.0.2.1 $ProviderHost' /etc/hosts || echo "192.0.2.1 $ProviderHost" >> /etc/hosts
-echo "L2_GENHOSTS=`$(grep -ci 'generateHosts=false' /etc/wsl.conf || true)"
-echo "L2_NETWORK_SECTIONS=`$(grep -c '^\[network\]' /etc/wsl.conf || true)"
-echo "L2_RIG=`$(getent ahostsv4 $ProviderHost | awk '{print `$1}' | sort -u | tr '\n' ' ')"
-"@
-    W $l2.Out
-    # BOTH halves are required. The address rig alone is what cfv-180 had, and it
-    # scored a fired control over a fault that was about to be erased.
-    $l2Landed = ($l2.Out -match 'L2_RIG=.*192\.0\.2\.1') -and
-                ($l2.Out -match 'L2_GENHOSTS=1') -and
-                ($l2.Out -match 'L2_NETWORK_SECTIONS=1')
-    Register-Control -Id 'PG.3.CTL' -Name 'THE FAULT LANDED for the level-2 control, in a form that survives a distro restart' `
+    # THE RIG IS WINDOWS-SIDE, AND THAT IS THE THIRD ATTEMPT AT IT.
+    #
+    # Every in-distro rig is erased by the install's own normal behaviour, and
+    # there are THREE independent mechanisms, each measured rather than argued:
+    #
+    #   1. Step-ConfigureWslConf (Step 3) OVERWRITES /etc/wsl.conf wholesale from a
+    #      here-string carrying no generateHosts, so a generateHosts=false rig dies
+    #      before the restart it exists to survive.  (setup.ps1:1229-1247)
+    #   2. Step-RestartWsl (Step 4) runs `wsl --shutdown`, and WSL then regenerates
+    #      /etc/hosts, erasing an /etc/hosts rig.  (cfv-180, cfv-181)
+    #   3. Step-EgressFirewall rewrites the nftables ruleset, erasing a rigged
+    #      rule -- the reason this file's header rejected a firewall rig at the
+    #      start.
+    #
+    # cfv-180 lost a full install to (2). cfv-181 lost a second one to (1), because
+    # the fix for (2) was calibrated against a bare `wsl --shutdown` rather than
+    # against what the install actually does -- a simplified model of the subject
+    # instead of the subject.
+    #
+    # A Windows outbound firewall rule is outside all three: setup.ps1 never
+    # touches Windows firewall rules, and matrix row 2 proves such a block survives
+    # a full 14-minute install (B3.1 re-measures it as still in force at the end).
+    #
+    # THAT IT REACHES THE IN-WSL GATE AT ALL WAS MEASURED, NOT ASSUMED, before this
+    # was written: interim-v144-winrigcal.ps1 on cfv-181 rigged Windows-side and
+    # ran THIS gate's own extracted probe body as clawuser, which failed with
+    # "[provider-route] FAILED after 3 attempts as uid 1000" and recovered when the
+    # rule was removed. WINRIG_STATE=REACHES_WSL, 6 of 6 rows PASS.
+    $l2ips = @()
+    try { $l2ips = @((Resolve-DnsName $ProviderHost -Type A -ErrorAction Stop | Where-Object { $_.IPAddress }).IPAddress) } catch { }
+    W "$ProviderHost resolves Windows-side to: $(if ($l2ips) { $l2ips -join ' ' } else { '(did not resolve)' })"
+    Remove-NetFirewallRule -DisplayName 'cfv-pg-l2-provider' -ErrorAction SilentlyContinue
+    foreach ($ip in $l2ips) {
+        New-NetFirewallRule -DisplayName 'cfv-pg-l2-provider' -Direction Outbound -Action Block `
+            -RemoteAddress $ip -Protocol Any -Profile Any -ErrorAction SilentlyContinue | Out-Null
+    }
+    $l2rules = @(Get-NetFirewallRule -DisplayName 'cfv-pg-l2-provider' -ErrorAction SilentlyContinue).Count
+    W "level-2 block rules created: $l2rules for $($l2ips.Count) address(es)"
+
+    # THE FAULT IS PROVEN TO REACH THE GATE'S OWN PROBE BEFORE THE INSTALL RUNS.
+    # This is the control cfv-180 and cfv-181 both lacked: each fired a
+    # fault-landed control on a rig that was real at injection time and gone by the
+    # time the gate ran. Running the gate's extracted probe body here, rigged,
+    # means the fault is verified at the layer the gate actually measures.
+    $l2verify = Invoke-WslFile -Tag 'pg-l2-verify' -User 'clawuser' -Body 'bash /var/tmp/pg-probe.sh; echo "PROBE_RC=$?"'
+    W $l2verify.Out
+    $l2Landed = ($l2rules -gt 0) -and ($l2verify.Out -match 'PROBE_RC=1')
+    Register-Control -Id 'PG.3.CTL' -Name 'THE FAULT LANDED for the level-2 control, verified against the GATE''S OWN PROBE' `
         -Fired $l2Landed `
-        -Evidence "provider resolves unroutable=$($l2.Out -match 'L2_RIG=.*192\.0\.2\.1'); generateHosts=false written=$($l2.Out -match 'L2_GENHOSTS=1'); exactly one [network] section=$($l2.Out -match 'L2_NETWORK_SECTIONS=1'). All three are required: on cfv-180 the first alone fired this control over a rig the install erased three seconds later" | Out-Null
+        -Evidence "Windows block rules=$l2rules; the gate's own extracted probe body, run as clawuser under the rig, FAILED=$($l2verify.Out -match 'PROBE_RC=1'). Both are required. cfv-180 and cfv-181 each fired this control on a rig that was real when injected and erased before the gate ran; asserting against the gate's own probe closes that gap"
 
     $before = if (Test-Path $InstallLog) { (Get-Item $InstallLog).Length } else { 0 }
     $inst = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$AppDir\setup.ps1" `
@@ -270,22 +296,19 @@ echo "L2_RIG=`$(getent ahostsv4 $ProviderHost | awk '{print `$1}' | sort -u | tr
         $(if ($st3 -eq 'GATE_ABORT' -or $st3 -eq 'OTHER_ABORT') { 'PASS' } elseif ($st3 -eq 'NO_MARKER') { 'FAIL' } else { 'FAIL' }) `
         "state=$st3, marker line: $reasonLine. A clean failure that emits nothing looks identical to a hang. The old form of this row matched bare 'INSTALLER_DONE', which INSTALLER_DONE=success also satisfies, so it could not fail"
 
-    # BOTH files are restored, and both are read back. Leaving generateHosts=false
-    # behind would be a durable, invisible change to the box's networking config,
-    # which is worse than the hosts entry it was carrying.
-    $l2r = Invoke-WslFile -Tag 'pg-l2-unrig' -User 'root' -Body @"
-cp /var/tmp/hosts.bak2 /etc/hosts
-cp /var/tmp/wsl.conf.bak2 /etc/wsl.conf
-echo "L2_GENHOSTS_AFTER=`$(grep -ci 'generateHosts' /etc/wsl.conf || true)"
-echo "L2_HOSTS_RIG_AFTER=`$(grep -c '192.0.2.1 $ProviderHost' /etc/hosts || true)"
-echo "L2_RESTORED=`$(getent ahostsv4 $ProviderHost | awk '{print `$1}' | sort -u | tr '\n' ' ')"
-"@
+    # REMOVED AND READ BACK FROM BOTH SIDES. The rule going away is one claim; the
+    # provider being reachable again from inside the distro, where the agent needs
+    # it, is a different one. A probe that leaves this fault behind bricks the
+    # agent on the box.
+    Remove-NetFirewallRule -DisplayName 'cfv-pg-l2-provider' -ErrorAction SilentlyContinue
+    $l2left = @(Get-NetFirewallRule -DisplayName 'cfv-pg-l2-provider' -ErrorAction SilentlyContinue).Count
+    $l2winBack = Test-NetConnection -ComputerName $ProviderHost -Port 443 -InformationLevel Quiet -WarningAction SilentlyContinue
+    $l2r = Invoke-WslFile -Tag 'pg-l2-unrig' -User 'clawuser' -Body 'bash /var/tmp/pg-probe.sh; echo "PROBE_RC=$?"'
     W $l2r.Out
-    Record 'PG.3e' 'The level-2 rig was removed, both the hosts entry AND the wsl.conf change' `
-        $(if (($l2r.Out -notmatch 'L2_RESTORED=.*192\.0\.2\.1') -and
-              ($l2r.Out -match 'L2_GENHOSTS_AFTER=0') -and
-              ($l2r.Out -match 'L2_HOSTS_RIG_AFTER=0')) { 'PASS' } else { 'FAIL' }) `
-        "provider resolves normally again=$($l2r.Out -notmatch 'L2_RESTORED=.*192\.0\.2\.1'); generateHosts gone=$($l2r.Out -match 'L2_GENHOSTS_AFTER=0'); hosts rig gone=$($l2r.Out -match 'L2_HOSTS_RIG_AFTER=0'). The box must be left usable for the phases after this one, and a leftover generateHosts=false would be a durable networking change nobody asked for"
+    $l2wslBack = $l2r.Out -match 'PROBE_RC=0'
+    Record 'PG.3e' 'The level-2 rig was removed and the provider route works again from BOTH Windows and the distro' `
+        $(if (($l2left -eq 0) -and $l2winBack -and $l2wslBack) { 'PASS' } else { 'FAIL' }) `
+        "block rules left=$l2left (must be 0); Windows-side reachable again=$l2winBack; the gate's own probe as clawuser rc=0 again=$l2wslBack. The rule being gone and the route working are two different claims and both are asserted"
 } else {
     Record 'PG.3f' 'LEVEL 2 CONTROL NOT RUN: the installer''s loud abort was not observed in this run' 'INFO' `
         'Level 1 above proves the gate MEASURES correctly in both directions on the shipped probe. It does NOT observe the installer aborting. Re-run this phase with -RunFullInstallControl to close that half; it costs a full install. Recorded as INFO rather than omitted, because a control that was skipped and a control that passed must never look the same in a results file'
