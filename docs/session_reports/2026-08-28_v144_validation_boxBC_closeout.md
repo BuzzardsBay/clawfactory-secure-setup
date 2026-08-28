@@ -1165,6 +1165,63 @@ Two independent reasons, and both would have to be fixed to take it here:
 **Box C installs with a real provider, so `PG.2.PRE` holds there.** That is where
 `PG.3f` can be both rigged durably and certified.
 
+---
+
+## 13. BOX B TORN DOWN, VERIFIED BY RE-READ
+
+Deleted the moment its work was done rather than at the end of the session, so at
+most one VM ever billed.
+
+```
+=== deleting cfv-180 ===
+VM_DELETE_EXIT=0   NIC_DELETE_EXIT=0   PIP_DELETE_EXIT=0
+NSG_DELETE_EXIT=0  DISK_DELETE_EXIT=0
+
+=== VERIFY by unfiltered re-read, subscription-wide ===
+clawfactory-validation  clawfactoryvalc467             Microsoft.Storage/storageAccounts
+clawfactory-validation  bake-vmVNET                    Microsoft.Network/virtualNetworks
+clawfactory-validation  clawfactory-win11-baseline     Microsoft.Compute/images
+clawfactory-validation  clawfactory-win11-baseline-v2  Microsoft.Compute/images
+NetworkWatcherRG        NetworkWatcher_westus2         Microsoft.Network/networkWatchers
+clawfactory-signing     clawfactory-signing            Microsoft.CodeSigning/codeSigningAccounts
+VM_LIST_EXIT=0  RESOURCE_LIST_EXIT=0  DISK_LIST_EXIT=0
+NIC_LIST_EXIT=0 PIP_LIST_EXIT=0       NSG_LIST_EXIT=0   -- all four lists empty
+```
+
+**All five resources gone, NIC deleted before the public IP and the NSG** because it
+references both. Verified by an **unfiltered** re-read rather than by a grep for the
+VM name, and by exit codes rather than by empty output. Nothing needed a re-check
+for the propagation race PROMPT 15 warns about; every delete was gone on the first
+read.
+
+**Box B's ledger:** 1 VM provisioned, 1 deleted, 0 running. Roughly 14:23 to 15:05
+plus the install window, about **1.6 hours** at ~$0.10/hour, so **about $0.16**.
+
+### 13.1 What box B banked
+
+| Item | Verdict | Where |
+| --- | --- | --- |
+| Install, `-Provider later` | **PASS** | section 6 |
+| Phase 1, all 34 resources and all seven pins | **PASS** 15/0/0/4 of 19 | 6.1 |
+| **Matrix row 4** | **PASS** 5/5, both halves | section 7 |
+| **Section 14.11 CR census** | **PASS** 15/15 | section 8 |
+| **`#261`** repeated-attempt sample | **measured, no verdict taken** | section 10 |
+| **TASK 0.2 fix on a real box** | **PROVEN**, FAIL=7 → FAIL=0 | section 11 |
+| Row 14 | **VOID**, named reason, credential absent by design | 11.2 |
+| **`PG.3f`** | **NOT CLOSED**, root-caused and fixed | section 12 |
+| Rig durability calibration | **PASS** 6/6 | 12.5 |
+
+---
+
+## 14. BOX C: provisioning
+
+Box C carries matrix row 2 and the control that makes it mean anything, plus
+`PG.3f` and the four-item by-hand batch that closes `5d`.
+
+It stages **two** 440 MB binaries: the subject (`6e655603…`) and the v1.1.1
+licence-carrying control (`67619df7…`), each digest-verified on the build machine
+before upload and re-verified on the box after transfer.
+
 
 
 ---
