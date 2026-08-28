@@ -44,7 +44,12 @@
   permitted to report an answer on a real one.
 #>
 param(
-    [string]$Transcript  = 'C:\cfv\crcensus-out.txt',
+    # NAMED FOR THE DISPATCHER'S CONVENTION, not for readability. interim-v120-job.ps1
+    # retrieves the transcript channel by deriving '<probe>-out-probe.txt' from the
+    # script's leaf name. A transcript written anywhere else is simply not fetched,
+    # the phase falls back to ONE evidence channel, and cfv-149 lost a whole run to
+    # having one. Found by reading the dispatcher before running it.
+    [string]$Transcript  = 'C:\cfv\crcensus-out-probe.txt',
     [string]$ResultsJson = 'C:\cfv\crcensus-results.json',
     [string]$AppDir     = 'C:\Program Files\ClawFactory',
     [string]$WorkDir    = 'C:\cfv\crwork',

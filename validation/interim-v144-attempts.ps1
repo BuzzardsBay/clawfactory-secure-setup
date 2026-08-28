@@ -42,7 +42,10 @@
   ran.
 #>
 param(
-    [string]$Transcript = 'C:\cfv\attempts-out.txt',
+    # '<probe>-out-probe.txt' is the name interim-v120-job.ps1 derives and fetches;
+    # anything else silently costs the second evidence channel. See the matching
+    # note in interim-v144-crcensus.ps1.
+    [string]$Transcript = 'C:\cfv\attempts-out-probe.txt',
     [int]$Attempts      = 12,
     # Timeout per attempt, seconds. Kept short deliberately: a long timeout turns
     # an intermittency measurement into a patience measurement.
