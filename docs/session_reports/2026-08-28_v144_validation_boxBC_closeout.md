@@ -970,6 +970,74 @@ firewall holding a resolved address snapshot while a service answers from a
 rotating pool. Nothing in this run measures the pool itself, so that is an
 interpretation offered to the operator, not a finding.
 
+---
+
+## 11. THE TASK 0.2 FIX, MEASURED ON A REAL BOX. Row 14 is **VOID**, not FAIL
+
+Phase 3 was run on box B for one purpose: to see whether the precondition added
+under TASK 0.2 behaves on a real unconfigured machine the way it behaved against a
+rigged channel. It does.
+
+**The credential is absent, measured rather than assumed:**
+
+```
+cred : stat: cannot statx '/etc/clawfactory/send-credential.json': No such file or directory
+CREDENTIAL_ABSENT
+Real credential configured: False
+```
+
+**Same artifact, same unconfigured state, before and after the fix:**
+
+| | cfv-179 (box A) | cfv-180 (box B) |
+| --- | --- | --- |
+| Tally | `PASS=14 FAIL=7 VOID=4 INFO=1` | `PASS=0 FAIL=0 VOID=27 INFO=1` |
+| Preconditions | `declared=0 met=0` | `declared=1 met=0` |
+| Phase verdict | **FAIL** | **VOID (instrument)** |
+
+```
+G2.CRED  VOID  PRECONDITION: an SMTP send credential is configured on this box
+               NOT MET: ... Nothing downstream of this is a product verdict.
+PHASE VERDICT: VOID (instrument). This phase reports no product result at all.
+```
+
+**Seven FAILs became zero, and none of them was ever a product defect.** A reader
+skimming box A's row 14 would have concluded the approval-gated send path is broken
+on v1.4.4. It is not; it is unconfigured, and the results file now says so in the
+runner's own vocabulary.
+
+### 11.1 The cost I flagged in advance is visible, and it is bounded
+
+Nine rows are annotated `(was PASS, voided with the phase)`:
+
+```
+G2.CHAN  G2.0  G2.sink  G2.8  G2.8c  G2.9  G2.9ctlA  G2.9ctlB  G2.12  G2.10c  G2.199b
+```
+
+These are the credential-**independent** measurements — the request-socket ownership
+and modes, the five approval channels the agent cannot use, the SMTP route blocks
+for uid 1000 with both its controls, the broker-down loud-failure path, and the
+ad-hoc-transport check. **They passed on their own merits and the runner records
+that they did**, then withholds certification because the phase as a whole could not
+be trusted. Nothing is lost from the record; what changes is that none of it is
+claimed as a verdict.
+
+That is the correct behaviour under PROMPT 15's rule and it is what box A
+recommended. It is also a reason to split the phase, which stays carded: a suite
+where a third of the rows do not depend on the precondition that voids them is a
+suite doing two jobs.
+
+### 11.2 Scope, so this is not read as more than it is
+
+**This run does not certify Guard 2 and is not offered as row 14's verdict for the
+release.** Row 14 becomes a real verdict only on a box where the credential exists,
+which is **box D**. What box B establishes is narrower and was its whole purpose:
+*the instrument now reports an unconfigured box as unmeasured rather than as
+broken.*
+
+**Zero outbound email.** `phase3b` was not run, `-ExpectRealCredential` was not
+passed, `G2.198` recorded VOID with its reason, and the only SMTP destination
+anywhere in the phase is the local sink on `127.0.0.1:2525`.
+
 
 
 ---
