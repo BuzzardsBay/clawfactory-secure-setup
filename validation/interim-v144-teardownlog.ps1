@@ -56,8 +56,12 @@ param(
 
 $ErrorActionPreference = 'Continue'
 $tag = $Expect.ToLower()
-if (-not $Transcript)  { $Transcript  = "C:\cfv\teardownlog-$tag-out-probe.txt" }
-if (-not $ResultsJson) { $ResultsJson = "C:\cfv\teardownlog-$tag-results.json" }
+# Named for interim-v120-job.ps1's fetch convention (strip interim-vNNN-, append
+# -out-probe.txt). A mode-suffixed default is a file the dispatcher never asks
+# for, which silently costs the second evidence channel. Both -Expect runs share
+# these names and the dispatcher retrieves after each.
+if (-not $Transcript)  { $Transcript  = 'C:\cfv\teardownlog-out-probe.txt' }
+if (-not $ResultsJson) { $ResultsJson = 'C:\cfv\teardownlog-results.json' }
 
 . (Join-Path $LibDir 'interim-v120-phaselib.ps1')
 

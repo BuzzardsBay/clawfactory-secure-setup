@@ -56,8 +56,16 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
-if (-not $Transcript)  { $Transcript  = "C:\cfv\uninstate-$($Mode.ToLower())-out-probe.txt" }
-if (-not $ResultsJson) { $ResultsJson = "C:\cfv\uninstate-$($Mode.ToLower())-results.json" }
+# NAMED FOR THE DISPATCHER'S FETCH CONVENTION, not for this probe's convenience.
+# interim-v120-job.ps1 derives the transcript it retrieves by stripping the
+# interim-vNNN- prefix and appending -out-probe.txt, and the results file the same
+# way. A mode-suffixed default (uninstate-before-out-probe.txt) is a file the
+# dispatcher never asks for, so the run silently falls back to a SINGLE evidence
+# channel -- and cfv-149 lost an entire run to having one channel. Both modes
+# therefore share these names; the dispatcher retrieves after each run, and the
+# Before pass's durable output is $Snapshot, which is NOT shared.
+if (-not $Transcript)  { $Transcript  = 'C:\cfv\uninstate-out-probe.txt' }
+if (-not $ResultsJson) { $ResultsJson = 'C:\cfv\uninstate-results.json' }
 
 . (Join-Path $LibDir 'interim-v120-wslchan.ps1')
 . (Join-Path $LibDir 'interim-v120-phaselib.ps1')

@@ -57,8 +57,12 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
-if (-not $Transcript)  { $Transcript  = "C:\cfv\teardownfault-$($Mode.ToLower())-out-probe.txt" }
-if (-not $ResultsJson) { $ResultsJson = "C:\cfv\teardownfault-$($Mode.ToLower())-results.json" }
+# Named for interim-v120-job.ps1's fetch convention (strip interim-vNNN-, append
+# -out-probe.txt). A mode-suffixed default is a file the dispatcher never asks
+# for, which silently costs the second evidence channel. Both modes share these
+# names; the durable cross-pass output is $MarkerFile, which is NOT shared.
+if (-not $Transcript)  { $Transcript  = 'C:\cfv\teardownfault-out-probe.txt' }
+if (-not $ResultsJson) { $ResultsJson = 'C:\cfv\teardownfault-results.json' }
 
 . (Join-Path $LibDir 'interim-v120-wslchan.ps1')
 . (Join-Path $LibDir 'interim-v120-phaselib.ps1')
