@@ -72,6 +72,7 @@ exact wording you saw.
 3  PASS / FAIL   (if FAIL, what appeared instead)
 4  PASS / FAIL   (if FAIL, which of the three inputs, and what happened)
 5  PASS / FAIL   (if FAIL, what the list shows afterwards)
+5d PASS / FAIL / VOID (not seeded)   -- see the SEEDED READ-FETCH HOST line on the card
 6  PASS / FAIL   (if FAIL, which bullet, and the exact text)
 7  PASS / FAIL   (if FAIL, the exact footer text, both sides)
 8  PASS / FAIL   (copy out BOTH messages you saw, off and on, exactly)
@@ -208,13 +209,31 @@ of the three, pass or fail, so the wording is on record.
 - [ ] 5b. A message appears reading exactly:
       **`docs.python.org is no longer reachable.`**
 - [ ] 5c. `docs.python.org` is gone from the list.
-- [ ] 5d. **The list is NOT empty.** One entry remains, and the handover card names it. It
-      was put there from the root tooling before you started, so that the panel had a
-      persisted entry to render at load rather than only one it had just added itself.
-      **Leave it. Do not remove it.**
+- [ ] 5d. **PRECONDITION FIRST, and it decides whether this check runs at all.**
+      Look at the handover card for the line
 
-**FAIL looks like:** the row stays; the message names a different host; or the remaining
-entry from the card has vanished too.
+      ```
+      SEEDED READ-FETCH HOST: <hostname>   or   SEEDED READ-FETCH HOST: (none)
+      ```
+
+      * If it names a hostname — **the list is NOT empty.** That one entry remains and is
+        the host the card names. It was written from the root tooling before you started,
+        so the panel is rendering a **persisted** entry at load rather than one it had
+        just added itself, which is the whole point of this check.
+        **Leave it. Do not remove it.**
+      * If it says `(none)` — **write `5d VOID (not seeded)` and move on.** The list being
+        empty is then *correct behaviour*, not a failure, and `Nothing allowed yet, so
+        your agent cannot read any website.` is the right thing to see.
+
+**FAIL looks like:** the row stays; the message names a different host; or, **when the card
+named a seeded host**, that entry has vanished too. An empty list on a box whose card says
+`(none)` is NOT a fail — it is the check having no subject.
+
+**Why this check states its own precondition.** On `cfv-179` it did not, and it was sent
+describing an entry no driver on that run had placed. Caught before hand-over only by
+reading it against the operator's first screenshot; sent as written it would have produced
+a **FAIL against correct behaviour**. A hand check whose subject is created by a *different*
+phase must name that dependency where the person reading it can see it.
 
 ## 6. The home route and the header
 
