@@ -1808,6 +1808,180 @@ and the box that carries the v1.4.2 uninstall debt has not run.
 **What is NOT claimed:** anything about the uninstall, anything about Guard 2's
 send path, and anything about `#261`.
 
+---
+
+## 23. TASK 7.6: CARDS
+
+**Box A owed five. One was already filed; the other four are now filed, plus three
+this session produced.**
+
+| Card | State | Subject |
+| --- | --- | --- |
+| `#294` | Review | `Invoke-WslBashBlock` discards payload stdout — **already filed**, box A's third |
+| **`#296`** | queued | **Encoding class** — 5 BOM-less shipped `.ps1`, 7 user-visible mojibake, plus the proposed **tenth build gate** |
+| **`#297`** | queued | **`MANUAL_CHECKS_studio.md` version literals go stale every release** — build gate, not another hand-fix |
+| **`#298`** | Review | **Phase 3 declared no precondition** — filed with its fix landed and measured on cfv-180 |
+| **`#299`** | queued | **Split phase 3** — a third of its rows do not depend on the credential that voids them |
+| **`#300`** | queued | **Uninstaller does not name what it could not remove**, nor suggest closing ClawChat |
+| **`#301`** | Review | **Check `5d` assumed a seeding step** — filed with its fix landed and the check closed |
+| **`#302`** | idea | Six drivers carry **stale `$VmName` defaults**; make the parameter mandatory |
+
+Each was created via `POST /api/agent/update`, action `create`, and **read back
+from the API's own response** for its id and status. `#298` and `#301` are filed as
+`Review` rather than `done` because the fix is landed and validated but the
+underlying class is a judgement for the operator.
+
+**No existing card was touched.** `#261` was not modified — this session took its
+measurement and deliberately no verdict. `#293` (v1.4.4 built, not validated)
+stays as it is: two boxes of four is not validation.
+
+---
+
+## 24. TASK 7.7: END-OF-SESSION GATE
+
+### 24.1 Task accounting
+
+| Task | State |
+| --- | --- |
+| PROMPT 15 preamble, pasted in full, staleness checked | **DONE** — §0 |
+| Challenge duty | **DONE** — three challenges raised BEFORE executing, §1 |
+| TASK 0.1 checklist `5d` + the mechanical recommendation | **DONE** — §3.1, closed §17.2 |
+| TASK 0.2 phase 3 precondition | **DONE** — §3.2, proven on a box §11 |
+| TASK 0.3 stale-default sweep, canaried | **DONE** — §3.7 |
+| TASK 0.4 starting estate + plan before provisioning | **DONE** — §4 |
+| TASK 1.1 matrix row 4, both halves | **DONE, PASS** — §7 |
+| TASK 1.2 `PG.3f` | **DONE, PASS — CLOSED** — §16 |
+| TASK 2.1 matrix row 2 | **DONE, PASS** — §15 |
+| TASK 2.2 prior-artifact control, block still in force | **DONE, PASS** — §15.1 |
+| TASK 3.1 section 14.11 CR census | **DONE, PASS** — §8 |
+| TASK 3.2 `#261` repeated attempts, no verdict | **DONE** — §10 |
+| TASK 4 operator handoffs | **DONE** — 3 cards, no probe ran while the operator was on a box |
+| TASK 5 standing traps | **DONE** — §24.5 |
+| TASK 6 teardown, both boxes, verified | **DONE** — §13, §18 |
+| TASK 7 close-out | **this document** |
+
+### 24.2 Resource ledger
+
+| | |
+| --- | --- |
+| VMs provisioned | **2** — `cfv-180`, `cfv-181` |
+| VMs running now | **0** |
+| VMs deleted | **2**, each with all four orphans, NIC first |
+| Estate after teardown | storage account, VNET, two baseline images. **Verified by unfiltered subscription-wide re-read**, all six list calls exit 0 and empty |
+| Concurrency | **never more than one box existed.** Box B was deleted before box C was provisioned |
+| Compute window | box B ~1.6 h, box C ~2.6 h billing plus a deallocated gap, so **about 4.2 hours** at ~$0.10/h — **roughly $0.42**, plus two OS disks for part of a day |
+| Licence slots | none consumed; no licence check exists since v1.4.0 |
+| Background tasks | all completed; **none running now** |
+| Persistent Monitors | **none started** |
+| Local WSL rigs | **none.** Nothing touched the local desktop's ClawFactory install |
+| Repo mutations outside the commits | **none.** Two sweep canaries injected into tracked files, both restored and proven byte-identical by hash; `git status --short` empty |
+| Outbound email | **NONE.** `phase3b` not run, `-ExpectRealCredential` not passed on either box, `G2.198` VOID. The only SMTP destination anywhere was the sink on `127.0.0.1:2525` |
+
+### 24.3 Credential hygiene
+
+**No password was generated, printed, requested or set by this session.**
+`az vm user update` was called **twice, by the operator, at Cards 1 and 2** — the
+one sanctioned use; this session never called it. The provider key was reported
+only as `provider key present (value never printed)`. The `DISPATCH_SECRET` was
+read by name for the card filing and reported only as
+`present=True len=64 (value never printed)`; that read was **single-key**, and the
+`.env` listing printed **key names only, never values**. **No secret value appears
+in any evidence file, commit or message.**
+
+### 24.4 Delta security sweep
+
+**No product code was changed by this session.** Committed: harness fixes in
+`validation/`, four new validation probes, and this close-out.
+
+* `interim-v144-crcensus.ps1`, `-attempts.ps1`, `-hostsdiag.ps1`, `-rigdurable.ps1`
+  and `-winrigcal.ps1` are **not bundled** and do not ship.
+* **Every injected fault was removed and each removal verified from both
+  directions**: the licence-host block (`FAULT_FULLY_REMOVED=True`, subject
+  reachable again), `PG.2d` the level-1 hosts rig, `PG.3e` the level-2 Windows
+  rule with an in-WSL read-back, `RD.2` the `generateHosts` rig proven restored by
+  `wsl.conf` **digest**, and `WC.2` the calibration block.
+* **The artifact validated is byte-identical** to the one built at `25945d5` and
+  signed as `6e655603…`, re-derived three ways on each box.
+* **Zero product defects found.** Nothing was fixed in shipped bytes, which is
+  clause 5 — the one shipped-byte defect box A found stays carded as `#296`.
+
+### 24.5 TASK 5's standing traps, each accounted for
+
+| Trap | Outcome |
+| --- | --- |
+| 1. never `az vm user update` after provisioning | **held** — called only by the operator, at each card |
+| 2. one `run-command` at a time | **VIOLATED ONCE, loudly.** §24.6 |
+| 3. `run-command` is SYSTEM, cannot touch WSL | **held**, and it bit the Studio read as an artefact rather than a wrong result — §17.4 |
+| 4. a single reachability attempt is a coin flip | **held** — 12 attempts per host, §10 |
+| 5. a binary string scan of the installer is blind | **held** — no string scan was used as evidence |
+| 6. `python` is blocked | **hit once**, harmlessly: a `python3` heredoc hung on stdin and was abandoned; cards went via PowerShell to `POST /api/agent/update` |
+| 7. an errored `az`'s empty output is not evidence | **held** — every `az` call's exit code read and printed |
+| 8. a resource may still list after a successful delete | **held** — both teardowns re-read; neither needed a propagation re-check |
+| 9. `$( )` in an inline WSL payload comes back empty | **held** — all payloads emit values as plain output |
+| 10. `H()` collides with `Get-History` | **VIOLATED, caught immediately.** §24.6 |
+
+### 24.6 The two trap violations, both mine, both caught by the trap itself
+
+**Trap 10.** I defined `function H($p)` for a hashing helper and it bound to the
+`Get-History` alias: *"Cannot bind parameter 'Id'. Cannot convert value
+'resources\safety-rules.md' to type 'System.Int64'."* It **failed loudly rather
+than returning a wrong hash**. Renamed to `Hash256`, and the replacement was
+checked against `Get-Alias` before use — which is what the trap says to do and
+what I had skipped.
+
+**Trap 2.** Dispatching `stagebox` immediately after `TaskStop`-ing a previous
+dispatch produced
+`(Conflict) Run command extension execution is in progress`. The harness threw and
+checked the exit code rather than measuring anything.
+
+**The transferable lesson is the one I did not know: `TaskStop` kills the LOCAL
+process, it does NOT cancel the `run-command` already in flight on Azure.** I
+treated stopping the task as stopping the operation. The recovery was to read what
+the interrupted dispatch had actually left on the box — nothing, no `.done`, no
+transcript — rather than assume either way, and only then re-dispatch.
+
+### 24.7 Delta bug review — five instrument defects, no product defects
+
+Counted, timed and root-caused in §20. Two were caught by dry-runs before any VM
+existed; one by clause 1's discover-and-print; two were written after hour six and
+caught by classification and by re-measurement. **Two of the five would have
+produced false findings**, and the closest — §17.4 — was a ship-blocker-shaped
+claim about a product that is fine.
+
+### 24.8 Files changed
+
+```
+53959d2  validation(phase 3): declare the SMTP-credential precondition PROMPT 15 requires
+c51b6c6  validation(by-hand): check 5d states its own precondition instead of assuming one
+72697f4  validation(providergate): PG.2a/PG.2b need the gate to have RUN; classify PG.3c/3d
+9f27bb4  validation(row 2): identify BOTH binaries by digest, and stage the control build
+b492769  validation: two new probes for section 14.11's CR census and #261's sample count
+9efbf5a  validation(driver): hoist the prior-artifact SAS URL alongside the other six
+9b57008  validation(probes): name both transcripts for the dispatcher's fetch convention
+aee0b6f  validation(attempts): the toolchain seed is ONE space-separated line, not one per line
+9519c49  validation: diagnose why PG.3f's level-2 rig cannot survive, and calibrate a fix
+b3970da  validation(providergate): make the level-2 rig survive the install's distro restart
+53256fb  validation(PG.3f): the level-2 rig goes Windows-side, the only layer the install cannot erase
+```
+
+plus the close-out commits. **No shipped byte was changed. No tag was created.**
+
+### 24.9 TASK 7.4: what is INFERRED rather than measured
+
+Labelled in place, and there are only three:
+
+1. **§10.3** — that the four-of-eight intermittency split is *consistent with* the
+   rotating-pool mechanism. Nothing here measures the pool. **INFERRED.**
+2. **§17.4** — that the shortcut's SYSTEM-profile target is an `%LOCALAPPDATA%`
+   expansion artefact of reading as SYSTEM. The two-field disagreement inside one
+   `.lnk` is the evidence. **INFERRED as to mechanism**; the conclusion that Studio
+   is correctly installed is **measured**, by digest.
+3. **§16.2 mechanism 3** — that `Step-EgressFirewall` would erase a firewall rig is
+   carried from the probe's own header and was **not re-measured** this session,
+   because the Windows-side rig made it moot.
+
+Everything else in this document is a reading.
+
 
 
 ---
