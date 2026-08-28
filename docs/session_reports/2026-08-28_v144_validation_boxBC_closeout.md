@@ -1222,6 +1222,44 @@ It stages **two** 440 MB binaries: the subject (`6e655603…`) and the v1.1.1
 licence-carrying control (`67619df7…`), each digest-verified on the build machine
 before upload and re-verified on the box after transfer.
 
+```
+[13:03:28]   artifact verified: 6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1 (440610608 bytes), Authenticode Valid
+[13:03:28]   prior artifact verified: 67619df79179db11e76454e9734de244a51128b37c55f66071213c98f72719a9 (440525520 bytes)
+[13:06:13]   RDP rule confirmed by read-back: 67.164.251.99/32
+[13:06:14]   public IP: 20.230.156.24
+[13:28:22] Staged, digest re-verified ON THE BOX. OK staged;
+           artifact=6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1 size=440610608
+           prior=67619df79179db11e76454e9734de244a51128b37c55f66071213c98f72719a9 priorSize=440525520
+[13:28:55]   WROTE wrapper=5313 runner=112 AutoAdminLogon=
+```
+
+**Both binaries are now identified by digest on the box**, which is the TASK 0
+change from section 3.4 doing its job: row 2's argument depends on the old build
+and the new one both being what they are named as, and until this run neither was
+checked there.
+
+RDP scope verified twice again, independently:
+
+```
+67.164.251.99/32   3389   Allow   Inbound      NSG_EXIT=0
+ProvisioningState/succeeded, PowerState/running  VM_EXIT=0
+```
+
+### 14.1 DEALLOCATED AT THE HANDOFF
+
+The operator was away when the box became ready, so it was **deallocated in the
+same turn** rather than left running for a login that had not happened yet:
+
+```
+DEALLOCATE_EXIT=0
+ProvisioningState/succeeded
+PowerState/deallocated
+```
+
+This costs nothing beyond the OS disk and adds **no operator step that was not
+already required**: restarting a deallocated box needs an RDP login to start the
+runner, and that login is Card 2 step 3 either way.
+
 
 
 ---
