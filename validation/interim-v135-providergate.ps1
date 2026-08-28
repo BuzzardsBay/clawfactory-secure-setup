@@ -84,11 +84,32 @@ if ($DeferredProvider) {
     Complete-Phase -ResultsJson 'C:\cfv\providergate-results.json' -MarkerPrefix 'PROVIDERGATE'
 }
 
+# PRECONDITION, ADDED 2026-08-28. PG.2a and PG.2b read the INSTALL LOG for a
+# verdict the gate writes. On a box installed with the provider DEFERRED the gate
+# never runs, so it writes no verdict, and both rows would report FAIL against an
+# installer that behaved exactly as designed.
+#
+# That is not hypothetical: box B installs with `-Provider later` and is the box
+# that pays for the level-2 control below, so this phase gets run there a second
+# time WITHOUT -DeferredProvider precisely to reach section 3. Without this
+# precondition that second run manufactures two product FAILs out of a deliberate
+# install variant.
+#
+# It is DISCOVERED, not assumed: the log is searched for either verdict the gate
+# can write, so "the gate ran and passed", "the gate ran and failed" and "the gate
+# never ran" are three distinguishable states rather than two.
+$gateRan = $logText -match 'Provider-route gate (PASSED|FAILED)'
+$gateSkipped = $logText -match 'Provider-route gate SKIPPED'
+W "install log states: gateRan=$gateRan gateSkipped=$gateSkipped"
+$gateSubject = Require-Precondition -Id 'PG.2.PRE' -Name 'this install actually RAN the provider-route gate' `
+    -Met $gateRan `
+    -Reason "PG.2a and PG.2b read a verdict the gate writes to the install log. gateRan=$gateRan gateSkipped=$gateSkipped. On an install with the provider deferred the gate is skipped by design and writes no verdict, so those two rows have no subject and record VOID rather than manufacturing a product FAIL out of a deliberate install variant"
+
 Record 'PG.2a' 'TEST 2: the provider-route gate PASSED on this healthy box' `
-    $(if ($logText -match 'Provider-route gate PASSED') { 'PASS' } else { 'FAIL' }) `
+    $(if (-not $gateSubject) { 'VOID' } elseif ($logText -match 'Provider-route gate PASSED') { 'PASS' } else { 'FAIL' }) `
     'the gate logs its own verdict; this reads the installer''s record rather than re-deriving it'
 Record 'PG.2b' 'The gate ran as clawuser, after the last firewall write' `
-    $(if ($logText -match 'Provider-route gate - TCP connect to .*:443 as clawuser, after the last firewall write') { 'PASS' } else { 'FAIL' }) `
+    $(if (-not $gateSubject) { 'VOID' } elseif ($logText -match 'Provider-route gate - TCP connect to .*:443 as clawuser, after the last firewall write') { 'PASS' } else { 'FAIL' }) `
     'placement is the whole point: every pre-existing check either stayed on loopback or ran Windows-side'
 
 # =========================================================================
@@ -186,12 +207,27 @@ echo "L2_RIG=`$(getent ahostsv4 $ProviderHost | awk '{print `$1}' | sort -u | tr
     $after = if (Test-Path $InstallLog) { Get-Content $InstallLog -Raw } else { '' }
     $tail  = if ($after.Length -gt $before) { $after.Substring($before) } else { $after }
 
-    Record 'PG.3c' 'TEST 2 CONTROL, loud half: the installer REFUSED rather than completing' `
-        $(if ($tail -match 'Provider-route gate FAILED') { 'PASS' } else { 'FAIL' }) `
-        'the refusal must name the gate, so an operator reading the log knows what to fix'
+    # CLASSIFY, DO NOT TEST FOR ABSENCE. Four mutually exclusive states, and the
+    # state is printed. The old shape asked only "does the tail contain the gate's
+    # failure string", which cannot distinguish an install that aborted somewhere
+    # ELSE under the same rig from one that aborted at the gate -- and the rig
+    # points the provider host at an unroutable address for the WHOLE install, not
+    # just for step 15h, so an earlier abort is a live possibility that has never
+    # been measured. Naming it is the difference between a result and a guess.
+    $st3 =
+        if     ($tail -match 'Provider-route gate FAILED')                    { 'GATE_ABORT' }
+        elseif ($tail -match 'INSTALLER_DONE=failure')                        { 'OTHER_ABORT' }
+        elseif ($tail -match 'INSTALLER_DONE=success')                        { 'COMPLETED' }
+        else                                                                  { 'NO_MARKER' }
+    $reasonLine = (($tail -split "`r?`n") | Where-Object { $_ -match 'INSTALLER_DONE=' } | Select-Object -First 1)
+    W "LEVEL2_STATE=$st3"
+    W "LEVEL2_MARKER=$reasonLine"
+    Record 'PG.3c' 'TEST 2 CONTROL, loud half: the installer REFUSED at the provider-route gate rather than completing' `
+        $(if ($st3 -eq 'GATE_ABORT') { 'PASS' } elseif ($st3 -eq 'NO_MARKER') { 'VOID' } else { 'FAIL' }) `
+        "state=$st3 (GATE_ABORT is the pass; OTHER_ABORT means the rig stopped the install somewhere earlier and the gate was never reached, which is a different result and not this control; COMPLETED means the rig did not stop it at all; NO_MARKER means the installer emitted no verdict, so nothing was measured). The refusal must NAME the gate, so an operator reading the log knows what to fix"
     Record 'PG.3d' 'The refusal reached the harness channel as a failure, not a timeout' `
-        $(if ($tail -match 'INSTALLER_DONE=failure' -or $tail -match 'INSTALLER_DONE') { 'PASS' } else { 'FAIL' }) `
-        'a clean failure that emits nothing looks identical to a hang'
+        $(if ($st3 -eq 'GATE_ABORT' -or $st3 -eq 'OTHER_ABORT') { 'PASS' } elseif ($st3 -eq 'NO_MARKER') { 'FAIL' } else { 'FAIL' }) `
+        "state=$st3, marker line: $reasonLine. A clean failure that emits nothing looks identical to a hang. The old form of this row matched bare 'INSTALLER_DONE', which INSTALLER_DONE=success also satisfies, so it could not fail"
 
     $l2r = Invoke-WslFile -Tag 'pg-l2-unrig' -User 'root' -Body @"
 cp /var/tmp/hosts.bak2 /etc/hosts
