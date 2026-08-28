@@ -22,6 +22,19 @@
   its value LEAKS; it never reads or prints it. Test 13 is deliberately last,
   and with a real secret configured it is a real test rather than a synthetic
   one.
+
+  THE CREDENTIAL PRECONDITION, ADDED 2026-08-28 AFTER cfv-179
+  -----------------------------------------------------------
+  PROMPT 15 has always said that a phase needing the SMTP credential is VOID when
+  it is absent. This phase had no mechanism to apply that rule: it declared ZERO
+  preconditions, so on a box with nothing configured it reported PASS=14 FAIL=7
+  and a phase verdict of FAIL. Nothing was broken. A reader skimming that
+  concludes the approval-gated send path is broken, which it is not.
+
+  G2.CRED now declares it. The rows whose subject is an enqueue, an
+  approval-to-send, a receipt or the credential FILE record VOID with that reason
+  when it is absent; the rows that do not depend on it keep real verdicts. See
+  the comment at the declaration for the exact split and why it is narrow.
 #>
 param(
     [string]$Transcript = 'C:\cfv\phase3-out-probe.txt',
@@ -77,6 +90,29 @@ Record 'G2.0' 'Send broker reachable: request socket EXISTS with correct modes' 
     $(if ($sockLive) { 'PASS' } else { 'FAIL' }) `
     'req-sock 0660 root:clawuser, admin-sock 0600 root:root, ctl 0750 root:root; proven by the socket, not by systemctl is-active'
 W "Real credential configured: $credPresent"
+
+# ------------------------------------------------------- THE PRECONDITION
+# PROMPT 15: "The SMTP app password is a deliberately KEPT throwaway ... If a
+# phase needs it and it is absent, that phase is VOID."
+#
+# This phase had NO MECHANISM TO APPLY THAT RULE. On cfv-179 it declared zero
+# preconditions and reported PASS=14 FAIL=7 on a box where nothing was broken and
+# nothing was configured, and the consequence is concrete: a reader skimming
+# FAIL=7 on the Guard 2 suite concludes the approval-gated send path is broken on
+# v1.4.4. It is not; it is unconfigured.
+#
+# SCOPE, kept narrow on purpose. Not every row here needs a credential, and
+# voiding the ones that do not would throw away real coverage. The rows that
+# DO need one are the rows whose subject is an enqueue, an approval-to-send, a
+# receipt, or the credential file itself -- because without a destination the
+# broker has nothing to enqueue against, and "the broker refused" and "there was
+# nothing to refuse" become indistinguishable. The rows that do NOT need one keep
+# real verdicts: socket ownership and modes (G2.0), the five approval channels
+# (G2.8/8c), the SMTP route blocks for uid 1000 (G2.9*), the broker-down loud
+# failure (G2.12) and the discoverability pair (G2.199a/b).
+$credOk = Require-Precondition -Id 'G2.CRED' -Name 'an SMTP send credential is configured on this box' `
+    -Met $credPresent `
+    -Reason 'PROMPT 15 rules that a phase needing the SMTP credential is VOID when it is absent. Without a configured destination the broker has nothing to enqueue against, so the enqueue, approve-to-send, receipt and credential-file rows have NO SUBJECT and record VOID rather than FAIL. The rows that do not depend on it -- socket modes, the five approval channels, the SMTP route blocks for uid 1000, the broker-down loud failure and the discoverability pair -- still record real verdicts below'
 
 # ------------------------------------------------------------ local sink
 Section "0b. Local sink for mechanism tests (test 3 scope, stated up front)"
@@ -142,8 +178,8 @@ $payHash = if ($t12.Out -match '"payloadHash"\s*:\s*"([a-f0-9]{64})"') { $Matche
 W "requestId=$reqId payloadHash=$payHash"
 $sinkUnchanged = ($t12.Out -match 'BEFORE_SINK_COUNT=0') -and ($t12.Out -match 'AFTER_SINK_COUNT=0')
 Record 'G2.1' 'Test 1: agent enqueues, nothing leaves the machine' `
-    $(if (($t12.Out -match 'pending') -and $sinkUnchanged) { 'PASS' } else { 'FAIL' }) `
-    "status=pending, sink count unchanged at 0, requestId=$reqId"
+    $(if (-not $credOk) { 'VOID' } elseif (($t12.Out -match 'pending') -and $sinkUnchanged) { 'PASS' } else { 'FAIL' }) `
+    "status=pending, sink count unchanged at 0, requestId=$reqId; credentialConfigured=$credPresent"
 
 $t2 = Invoke-WslFile -Tag 'g2t2' -User 'root' -Body @"
 node /usr/local/sbin/clawfactory-sendctl.js list 2>&1
@@ -158,14 +194,23 @@ $stagedMatches = $srcSha -and ($t2.Out -match "STAGED .*sha=$srcSha")
 # comparison was not made rather than failed: VOID. With it, a mismatch means the
 # staged copy is not the source bytes, which is the claim failing: FAIL.
 Record 'G2.2' 'Test 2: approval card carries the full payload; staged hash equals source hash' `
-    $(if (-not $srcSha) { 'VOID' } elseif (($t2.Out -match "Subject-$rand") -and $stagedMatches) { 'PASS' } else { 'FAIL' }) `
-    "full body/recipients/subject rendered; sourceShaRead=$([bool]$srcSha) stagedShaEqualsSource=$stagedMatches"
+    $(if (-not $credOk) { 'VOID' } elseif (-not $srcSha) { 'VOID' } elseif (($t2.Out -match "Subject-$rand") -and $stagedMatches) { 'PASS' } else { 'FAIL' }) `
+    "full body/recipients/subject rendered; sourceShaRead=$([bool]$srcSha) stagedShaEqualsSource=$stagedMatches; credentialConfigured=$credPresent"
+# The negative marker below is absent on a box where nothing was queued at all,
+# so without an enqueue this row passes vacuously. That is discipline 5 in the
+# phase runner's header: a search for an absence says nothing until the search
+# has been shown to have a searchable subject.
 Record 'G2.2c' 'CONTROL: a subject that was never queued must not appear in the card' `
-    $(if ($t2.Out -notmatch 'Subject-neverqueued') { 'PASS' } else { 'FAIL' }) 'negative marker absent'
+    $(if (-not $credOk) { 'VOID' } elseif ($t2.Out -notmatch 'Subject-neverqueued') { 'PASS' } else { 'FAIL' }) 'negative marker absent'
 
 # --------------------------------------------------- test 3: mechanism only
 Section "Test 3: approve, send executes, receipt written (MECHANISM, against the sink)"
-if ($reqId -and $payHash) {
+if (-not $credOk) {
+    Record 'G2.3' 'Test 3: approve executes the send and writes a receipt' 'VOID' `
+        'no SMTP credential is configured, so the broker has no destination and there is no send to approve. See G2.CRED'
+    Record 'G2.3b' 'Staging purged after send' 'VOID' `
+        'no send was executed, so there is no post-send state to read. See G2.CRED'
+} elseif ($reqId -and $payHash) {
     $t3 = Invoke-WslFile -Tag 'g2t3' -User 'root' -Body @"
 echo "sink BEFORE=`$(cat /tmp/cf-sink-count)"
 node /usr/local/sbin/clawfactory-sendctl.js approve '$reqId' '$payHash' 2>&1
@@ -186,6 +231,11 @@ if [ -d /var/lib/clawfactory/send/staging/$reqId ]; then echo STAGING_STILL_PRES
 } else {
     # VERDICT TRIAGE. Missing precondition, never a product verdict.
     Record 'G2.3' 'Test 3: approve executes the send and writes a receipt' 'VOID' 'no requestId from test 1, so the approve path was not exercised'
+    # G2.3b used to vanish entirely down this branch, so a run in which staging
+    # was never checked and a run in which it passed produced different ROW
+    # COUNTS and the same verdict list. A row that was skipped and a row that
+    # passed must never look the same in a results file.
+    Record 'G2.3b' 'Staging purged after send' 'VOID' 'no send was executed, so there is no post-send state to read'
 }
 
 # ------------------------------------------------ tests 4,5,5b,6,7 lifecycle
@@ -278,13 +328,13 @@ $lifeRan = $life.Out -match 'expired_rc='
 if (-not $lifeRan) { W 'WARNING: the lifecycle probe did not run to completion; tests 4 to 7 are VOID rather than failed.' }
 
 Record 'G2.4' 'Test 4: deny sends nothing, receipt records denied, staging purged' `
-    $(if (-not $lifeRan) { 'VOID' } elseif ($life.Out -match 'denied') { 'PASS' } else { 'FAIL' }) `
+    $(if (-not $credOk -or -not $lifeRan) { 'VOID' } elseif ($life.Out -match 'denied') { 'PASS' } else { 'FAIL' }) `
     "sink count unchanged across deny; probeRanToCompletion=$lifeRan"
 Record 'G2.5' 'Test 5: replay of a consumed approval refused' `
-    $(if (-not $lifeRan) { 'VOID' } elseif ($life.Out -match 'ESTATE|already') { 'PASS' } else { 'FAIL' }) `
+    $(if (-not $credOk -or -not $lifeRan) { 'VOID' } elseif ($life.Out -match 'ESTATE|already') { 'PASS' } else { 'FAIL' }) `
     "ESTATE request is already sent/denied; probeRanToCompletion=$lifeRan"
 Record 'G2.5b' 'Test 5b: wrong payload hash voids the approval' `
-    $(if (-not $lifeRan) { 'VOID' } elseif ($life.Out -match 'EHASH|changed|voided') { 'PASS' } else { 'FAIL' }) `
+    $(if (-not $credOk -or -not $lifeRan) { 'VOID' } elseif ($life.Out -match 'EHASH|changed|voided') { 'PASS' } else { 'FAIL' }) `
     "EHASH approval voided; probeRanToCompletion=$lifeRan"
 # The most important result in the Guard 2 job. Both comparisons are made
 # explicitly: the approved bytes MUST appear at the sink and the tampered bytes
@@ -296,11 +346,11 @@ $bIn = if ($life.Out -match 'B_BYTES_IN_SINK=(\d+)') { [int]$Matches[1] } else {
 # and stays FAIL. Approved bytes absent means the approved send did not transmit,
 # which is also a failure rather than something to review later.
 Record 'G2.6' 'Test 6: attachment rewritten after approval, approved bytes are the sent bytes' `
-    $(if (-not $lifeRan -or $aIn -lt 0 -or $bIn -lt 0) { 'VOID' } `
+    $(if (-not $credOk -or -not $lifeRan -or $aIn -lt 0 -or $bIn -lt 0) { 'VOID' } `
       elseif ($bIn -gt 0) { 'FAIL' } elseif ($aIn -gt 0) { 'PASS' } else { 'FAIL' }) `
     "approvedBytesAtSink=$aIn tamperedBytesAtSink=$bIn (both comparisons made; tampered must be 0); probeRanToCompletion=$lifeRan"
 Record 'G2.7' 'Test 7: expired approval refused, nothing sent' `
-    $(if (-not $lifeRan) { 'VOID' } elseif ($life.Out -match 'EEXPIRED|expired|closed') { 'PASS' } else { 'FAIL' }) `
+    $(if (-not $credOk -or -not $lifeRan) { 'VOID' } elseif ($life.Out -match 'EEXPIRED|expired|closed') { 'PASS' } else { 'FAIL' }) `
     "EEXPIRED window closed; probeRanToCompletion=$lifeRan"
 
 # --------------------------------------------- test 8: agent cannot approve
@@ -390,11 +440,12 @@ W $t1112.Out
 # accepted, because if the enqueue path is broken outright then every attachment
 # is refused and the refusal above means nothing.
 Record 'G2.11' 'Test 11: root-only file as attachment refused before staging' `
-    $(if (-not ($t1112.Out -match 'pending')) { 'VOID' } `
+    $(if (-not $credOk -or -not ($t1112.Out -match 'pending')) { 'VOID' } `
       elseif ($t1112.Out -match 'permission denied|/etc/shadow') { 'PASS' } else { 'FAIL' }) `
     "enqueuePathLive=$($t1112.Out -match 'pending'), so this refusal is targeted rather than a uniformly broken attach path"
 Record 'G2.11c' 'CONTROL: a readable attachment is accepted' `
-    $(if ($t1112.Out -match 'pending') { 'PASS' } else { 'FAIL' }) ''
+    $(if (-not $credOk) { 'VOID' } elseif ($t1112.Out -match 'pending') { 'PASS' } else { 'FAIL' }) `
+    "credentialConfigured=$credPresent. Without a destination there is nothing to enqueue, so this control has no subject; see G2.CRED"
 
 $t12b = Invoke-WslFile -Tag 'g2t12b' -User 'root' -Body @"
 systemctl stop clawfactory-send.service; sleep 2
@@ -507,8 +558,15 @@ head -1 /etc/clawfactory/send.json 2>&1
 echo "control_rc=$?"
 '@
 W $t10.Out
+# The SUBJECT of this row is /etc/clawfactory/send-credential.json. On a box
+# where that file does not exist, "unreadable by the agent uid" is not a property
+# that can be measured: the read fails for the wrong reason and a FAIL here says
+# nothing at all about the product's credential protection. Its own control
+# (G2.10c) passed on cfv-179 while this row FAILed, which is the clearest possible
+# evidence that the reader worked and the subject was absent.
 Record 'G2.10' 'Test 10: credential file unreadable by the agent uid' `
-    $(if ($t10.Out -match 'Permission denied') { 'PASS' } else { 'FAIL' }) ''
+    $(if (-not $credOk) { 'VOID' } elseif ($t10.Out -match 'Permission denied') { 'PASS' } else { 'FAIL' }) `
+    "credentialConfigured=$credPresent. The subject of this row is the credential FILE; with no file there is no permission boundary to measure. See G2.CRED"
 Record 'G2.10c' 'CONTROL: a world-readable config IS readable by the agent' `
     $(if ($t10.Out -match 'control_rc=0') { 'PASS' } else { 'FAIL' }) `
     'proves the denial above is a permission boundary, not a missing file'
