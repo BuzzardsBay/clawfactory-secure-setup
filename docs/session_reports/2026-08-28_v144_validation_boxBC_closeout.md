@@ -1,0 +1,574 @@
+# CLOSE-OUT: v1.4.4 validation, BOXES B and C
+
+**Companion to** `2026-08-27_v144_validation_boxA_closeout.md` (box A's evidence) and
+`2026-08-28_v144_boxA_lessons_and_next_job_guidance.md` (the five clauses this job
+is run under).
+
+**Scope.** Box B (`-Provider later`, matrix row 4 plus `PG.3f`) and box C (licence
+host unreachable, matrix row 2 with the prior artifact as its control), plus the
+carry-forward items box A could not close. **Box D is a separate session and
+carries the keep-Linux uninstall.**
+
+**No fitness-to-publish verdict.** Two boxes of four, by instruction and because it
+would be unsupportable in any case.
+
+---
+
+## 0. PROMPT 15 preamble
+
+Pasted in full from `FrontierAI_CC_Prompt_Library.md`, VM clauses included. The copy
+read carries `PROMPT 15` at line 645 of 925 and is **not stale**. Nothing was
+deleted from it.
+
+The five clauses from box A's root-cause analysis are in force and each one is
+answered specifically in section 17.
+
+---
+
+## 1. THREE CHALLENGES TO THE JOB CARD, RAISED BEFORE EXECUTING IT
+
+PROMPT 15: *"If a premise is stale, say which and what the repo actually shows.
+The repo is truth."*
+
+### 1.1 "Confirm the digest and bytes from the ledger" — the ledger does not carry it
+
+The card directs that box C's control artifact be confirmed **from the ledger**
+rather than from memory of a close-out. `released-versions.tsv` **begins at 1.2.0**
+and has no v1.1.1 row at all, so the ledger cannot confirm it. Its own header says
+why: rows before the gate existed are backfilled or absent, and the gate refuses to
+compare against a `kind=signed` row.
+
+Three independent sources were used instead, and they agree:
+
+| Source | sha256 | bytes |
+| --- | --- | --- |
+| `Output\ClawFactory-Secure-Setup.exe.PRIOR`, re-hashed today | `67619df79179db11e76454e9734de244a51128b37c55f66071213c98f72719a9` | 440,525,520 |
+| Retained blob `prior-setup.exe`, read at the service | (size read at the service) | 440,525,520 |
+| `2026-08-26_v141_validation_closure_closeout.md:98` | `67619df7…` | 440,525,520 |
+
+**The instruction is not followable as written; the intent is satisfied.** Recorded
+rather than silently substituted.
+
+### 1.2 `PG.3f` on box B needed a harness fix first, or it would have manufactured two FAILs
+
+`interim-v135-providergate.ps1` reaches its level-2 control **only when
+`-DeferredProvider` is absent** — that switch completes the phase early. So taking
+`PG.3f` on box B means running the phase a second time without it, and `PG.2a` and
+`PG.2b` then read the install log for a verdict that a `-Provider later` install
+**never writes**, because the gate is skipped by design at `setup.ps1:3225`.
+
+Sent as written, `PG.3f` on box B produces **two product FAILs against an installer
+behaving exactly as specified**. Fixed under TASK 0 (section 3.3), not worked
+around.
+
+### 1.3 The by-hand pass: row 11 is already PASSED, and only `5d` is owed
+
+The card says to expect "the by-hand checks". Matrix row 11 passed in full on box A
+with all ten checks read by a human. The only owed by-hand item is **`5d`**, which
+box A recorded VOID because no driver on that run seeded the entry it describes.
+
+Re-running all ten checks on B and C would cost 20 minutes of operator time to
+re-measure something already measured on this same artifact digest. **The plan is a
+targeted four-item batch — checks 5a to 5d only — on one box**, which closes box
+A's owed item at near-zero marginal cost. Said here rather than decided silently.
+
+---
+
+## 2. THE ARTIFACT. Derivation 1 agrees; 2 and 3 follow at staging
+
+| | |
+| --- | --- |
+| version | v1.4.4 |
+| signed sha256 | `6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1` |
+| signed bytes | 440,610,608 |
+| build commit | `25945d5` |
+
+**Derivation 1, on the build machine, by hand:**
+
+```
+Output\ClawFactory-Secure-Setup.exe   440610608 bytes
+SHA256 = 6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1
+```
+
+Equal to the value the job card carries. Derivations 2 (blob, by download and
+re-hash) and 3 (on the box after transfer) are performed by the driver at staging
+and are recorded in section 5.
+
+**The control artifact for box C** is `67619df7…` / 440,525,520 B — see 1.1.
+
+---
+
+## 3. TASK 0: the harness fixes, all landed and all dry-run BEFORE provisioning
+
+Box A's process finding: **all five of its day-two instrument defects were in
+probes written after hour four, and none of them could be dry-run.** Every change
+below was written before any VM existed and exercised against a rigged input on the
+build machine, which costs nothing.
+
+### 3.1 TASK 0.1: checklist `5d`, and the recommendation the card asked for
+
+**The two options the card names, and which one is right.**
+
+* **(a) Seed the entry from root tooling during staging.** The tool exists and
+  ships with the product: `interim-v140-stagebox.ps1` section 2 calls
+  `clawfactory-fetchctl add <host>` as root and records `SB.2`. Box A did not run
+  that driver, which is the whole cause.
+* **(b) Rewrite the check to state its own precondition.**
+
+**Recommendation: (a), and (b) as the safety net — but they are not
+interchangeable and the card's "recommend one" deserves a straight answer.**
+
+**(a) is the right primary fix, because (b) alone permanently converts `5d` into a
+check that never measures anything.** The property `5d` exists to prove is that
+the panel renders a **persisted** entry *at load* — as opposed to one it added
+itself moments earlier, which is a different and much weaker claim. If the box is
+never seeded, that property stays unmeasured for ever and the check becomes a
+line the operator reads and skips. A check nobody can ever pass is worse than an
+absent one: it trains the reader to skip checks.
+
+**(b) is still landed, because (a) cannot be guaranteed by the checklist itself.**
+The checklist is a file handed to a person; the seeding lives in a driver a future
+run may or may not invoke. So `5d` now branches on a named line the handover card
+must carry — `SEEDED READ-FETCH HOST: <hostname>` or `(none)` — and directs a VOID
+rather than a FAIL when nothing was seeded. Under that shape the check can never
+again produce a FAIL against correct behaviour, whichever driver ran.
+
+**What would stop this MECHANICALLY, which is the more useful half of the question.**
+
+Two different recurrences are tangled together here and they need different fixes:
+
+| Recurrence | Mechanical fix |
+| --- | --- |
+| **The version string goes stale on every release** (`1.4.1` → `1.4.3` → fixed to `1.4.4` in three consecutive runs, each time by a human noticing) | **A build gate.** The interpolation gate added in v1.4.4 already parses every shipped script; extend the same pass to assert that every version literal in `validation\MANUAL_CHECKS_studio.md` equals `#define MyAppVersion` / `$InstallerVersion` / the Studio filename in the `.iss`, **excluding lines carrying an explicit historical marker**. That is byte-level, canary-able in the shape of the existing nine, and it makes the recurrence impossible rather than remembered. **Carded, not built** — this job changes no build path. |
+| **The checklist carries expectations created by a phase that may not run** (`5d`, twice in two runs) | **The card, not the checklist, states the state.** The by-hand file should quote no value that a staging phase decides; it should name the card line that carries it. `interim-v140-stagebox.ps1` already emits a `HANDOVER_CARD_*` block designed for exactly this and `5d` was the one check not wired to it. Every remaining state-dependent expectation in that file should be moved to the same shape, which is a mechanical audit rather than a judgement call. **Carded.** |
+
+**The generalisation, stated plainly:** a by-hand check may assert on the
+*product*, never on the *box's configuration*, unless it names where that
+configuration is reported.
+
+### 3.2 TASK 0.2: phase 3 declares its precondition
+
+`interim-v120-phase3.ps1` had `preconditions declared=0` and reported
+`PASS=14 FAIL=7 VOID=4 INFO=1 / PHASE VERDICT: FAIL` on cfv-179, a box on which
+nothing was broken and nothing was configured.
+
+`G2.CRED` now declares `CREDENTIAL_PRESENT`. **The scope is deliberately narrow.**
+Voiding the whole suite by reflex would throw away real coverage, so only the rows
+whose subject is an enqueue, an approval-to-send, a receipt or the credential
+**file** are gated: `G2.1`, `G2.2`, `G2.2c`, `G2.3`, `G2.3b`, `G2.4`, `G2.5`,
+`G2.5b`, `G2.6`, `G2.7`, `G2.10`, `G2.11`, `G2.11c`. The rows that do not depend on
+a credential keep real verdicts.
+
+A second, smaller fix in the same file: **`G2.3b` used to vanish entirely** down
+the no-`requestId` branch, so a run in which staging was never checked and a run in
+which it passed produced different row counts and the same verdict list.
+
+**Dry-run, both directions, against a rigged channel, before any box existed:**
+
+```
+credential ABSENT   13 of 13 gated rows VOID, FAIL=0,
+                    PASS=0 FAIL=0 VOID=28 INFO=1 (counted 29 of 29)
+                    preconditions declared=1 met=0
+                    PHASE VERDICT: VOID (instrument)
+
+credential PRESENT  (channel rigged empty, so everything else IS broken)
+                    G2.1 FAIL, G2.10 FAIL, G2.11c FAIL
+                    PASS=8 FAIL=9 VOID=10 INFO=1 (counted 28 of 28)
+                    preconditions declared=1 met=1
+                    PHASE VERDICT: FAIL
+```
+
+**Both halves matter.** The first is the fix working. The second proves the gate is
+**not a blanket suppressor**: with a credential present, real failures still
+surface as FAIL rather than being hidden behind a precondition.
+
+**One cost, stated rather than glossed.** The phase runner voids an entire phase
+whose declared precondition is unmet, so on an unconfigured box the
+credential-*independent* rows — socket modes, the five approval channels, the SMTP
+route blocks for uid 1000, the broker-down loud failure — are downgraded too, and
+row 14 contributes no positive coverage. That is PROMPT 15's rule applied
+literally and it is what box A recommended, and the runner annotates each row
+`(was PASS, voided with the phase)` so nothing is lost from the record. **The
+follow-up is to split phase 3 into a credential-dependent phase and a
+credential-independent one; carded, not done here.**
+
+### 3.3 The providergate precondition, which `PG.3f` on box B requires
+
+See 1.2 for why. `PG.2.PRE` **discovers** which of three states the install log is
+in and prints it, rather than assuming one:
+
+```
+gateRan     the log carries 'Provider-route gate PASSED' or '... FAILED'
+gateSkipped the log carries 'Provider-route gate SKIPPED'
+neither
+```
+
+Every string is quoted from the product, not paraphrased: `setup.ps1:3225`
+(skip, deferred), `:3243` (placement), `:3282` (passed), `:3272` (failed).
+
+`PG.3c` and `PG.3d` were also **classified rather than tested for a string**, per
+clause 2. The level-2 rig points the provider host at an unroutable address for the
+*whole* install, so an abort at an earlier step is a live possibility that has
+never been measured; `GATE_ABORT`, `OTHER_ABORT`, `COMPLETED` and `NO_MARKER` are
+now four distinguishable outcomes. **`PG.3d` previously matched bare
+`INSTALLER_DONE`, which `INSTALLER_DONE=success` also satisfies — a control that
+could not fail.**
+
+**Dry-run against install logs quoting the product verbatim:**
+
+```
+gate-ran      install log states: gateRan=True  gateSkipped=False
+              PG.2.PRE PASS, PG.2a PASS, PG.2b PASS
+gate-skipped  install log states: gateRan=False gateSkipped=True
+              PG.2.PRE VOID (named reason), PG.2a VOID, PG.2b VOID
+              FAIL=0
+```
+
+Before the fix the second case produced two product FAILs.
+
+### 3.4 Row 2 identifies BOTH of its binaries
+
+Row 2's argument is *"the old licence-carrying build died under this block minutes
+before the new one completed under it."* That is a behaviour change only if both
+files are the ones they are named as, and **neither was checked on the box**.
+
+`B2.0` is now a precondition on the control binary's digest AND byte count,
+re-hashed on the VM. `B3.PRE` pins the subject the same way when the driver
+supplies it, and records an explicit INFO when it does not — so "taken on trust"
+and "verified" never look the same. `interim-v140-relgate-box.ps1` gained
+`-PriorExe`, which gives the control binary the same build-machine preflight the
+subject gets and re-verifies its digest on the box.
+
+The probe's row labels also carried `v1.4.0`, stale by four releases. The subject
+is now named by the digest it is handed rather than by a number in a string.
+
+### 3.5 Two new probes, written cold and dry-run against rigged inputs
+
+**`interim-v144-crcensus.ps1`** — section 14.11's missing half (TASK 3.1).
+It **enumerates** what is installed rather than asserting against a remembered
+list, and names the one file whose destination differs from its source, quoting
+the line that decides it:
+
+```
+ClawFactory-Secure-Setup.iss:61
+  Source: "smoke-test.ps1";   DestDir: "{app}\resources";   Flags: ignoreversion
+```
+
+Ten shipped Windows-side scripts: `{app}\setup.ps1` and nine under
+`{app}\resources`. The held copy is measured from the repo at this commit and
+**compared**, not printed.
+
+```
+DRY-RUN 1, clean rig            PASS=15 FAIL=0 VOID=0 INFO=0 (15 of 15)
+                                calibration: planted expected=1 measured=1
+                                             stripped expected=0 measured=0
+DRY-RUN 2, three planted faults PASS=11 FAIL=4  -- and exactly the right four:
+    CR.resources\launcher.ps1   FAIL  cr=250 after CRLF-ifying it
+    CR.SET                      FAIL  onBoxNotExpected=1 [stowaway.ps1]
+                                      expectedNotOnBox=1 [uninstall.ps1]
+    CR.HELD                     FAIL  launcher box=250 repo=0
+    CR.BYTES                    FAIL  launcher box=11600 repo=11350
+```
+
+**The dry-run found a defect in the probe itself.** With the calibration sample
+chosen by ascending size, the 18-byte stowaway *became* the calibration subject —
+so anyone able to drop a file into the install directory could choose what the
+instrument calibrates on. Sample is now the **largest** file, which cannot be
+displaced downwards.
+
+**`interim-v144-attempts.ps1`** — `#261`'s repeated-attempt measurement (TASK 3.2).
+Twelve attempts per host as uid 1000. Subject hosts are **read off the box** from
+the files the product writes, quoted rather than guessed:
+
+```
+setup.ps1:1721                          -> /etc/clawfactory/toolchain-hosts.seed
+resources/clawfactory-read-fetch.sh:36  -> /etc/clawfactory/read-fetch-hosts.txt
+```
+
+*(The first draft of this probe read `toolchain-hosts.txt`, a name that does not
+exist. Clause 1 caught it before it ran — the discovery step is what turned an
+assumption into a check.)*
+
+Two rows per host, as box A's bootpath probe does:
+
+* `AT.EXISTS.<host>` — a real verdict: did a working route get built at all (`#276`,
+  closed)
+* `AT.ALWAYS.<host>` — **the raw count only, recorded INFO.** This session takes no
+  verdict on `#261`, proposes no fix and makes no recommendation. That is the
+  operator's call and he has it.
+
+```
+DRY-RUN rigA healthy/intermittent  PASS=8 VOID=0 INFO=4, verdict PASS
+                                   github 5/12 INTERMITTENT, npm 12/12 ALWAYS
+DRY-RUN rigB blind probe           deny host also connects -> AT.CTL FAIL
+                                   verdict VOID (instrument), exit 4
+DRY-RUN rigC switch OFF            AT.PRE.SWITCH not met -> verdict VOID
+DRY-RUN rigD no hosts discovered   AT.PRE.HOSTS not met  -> verdict VOID
+```
+
+**The switch-off rig found a second defect in the probe.** Its evidence field
+asserted *"a shortfall here is the rotating-pool sampling gap rather than a switch
+position"* over a `0/12` the switch had caused. An evidence field that names the
+wrong cause is the same defect class as a probe that measures the wrong subject.
+The cause clause is now conditional on the switch position and on whether the host
+is toolchain- or read-fetch-governed.
+
+### 3.6 One instrument defect found and CORRECTED IN THE RECORD, not just in code
+
+A render test of the driver's new staging string appeared to show the prior
+artifact's SAS URL rendering **without its blob name**, and a comment saying so was
+written into `interim-v140-relgate-box.ps1`.
+
+**That diagnosis was wrong and the fault was in my test stub.** The stub wrote
+`"$n?SASTOKEN"` without escaping the `?`; PowerShell reads that as a variable
+literally named `n?SASTOKEN`, which is undefined, so the empty URL came from the
+stub. The real function escapes it (`` $name`?$s ``). Retested with a correct stub:
+**both the inline and hoisted forms render the blob name correctly.**
+
+The change was kept — one URL built differently from the other six is a reading
+hazard in the builder whose historical failure mode was a silently malformed remote
+script — but the comment now says what is true rather than what was first
+concluded, and the commit says so too. Recorded here because a false defect left in
+a comment is a worse outcome than the defect it claimed.
+
+### 3.7 TASK 0.3: the stale-default sweep, fifth consecutive run
+
+**Scope widened past box A's final scope.** Box A's sweep as first written covered
+`.ps1` only and would have missed the stale value it eventually found in
+`MANUAL_CHECKS_studio.md`. This run includes `.md`, `.sh`, `.mjs`, the `.iss`,
+`setup.ps1`, `released-versions.tsv` and `.gitattributes`, and adds `scripts\`,
+which box A did not sweep at all.
+
+```
+SWEPT_FILES=89   (ps1=76  md=6  sh=3  other=4)     [box A: 58 files]
+TOTAL_HITS=2082                                     [box A: 920]
+  DIGEST   hits=37    distinct=28
+  VERSION  hits=987   distinct=156
+  BYTES    hits=17    distinct=16
+  HOST     hits=773   distinct=91
+  ARTPATH  hits=42    distinct=9
+  VMNAME   hits=226   distinct=49
+```
+
+`VMNAME` is a sixth class box A found by reading rather than by sweeping; it is a
+first-class class here.
+
+**The vacuity guard throws rather than reporting clean if zero files match.** The
+v1.4.3 instrument once reported `LEGACY_PROBE_FILES=0` from a bad glob, which made
+every "no hits" column mean "nothing was searched".
+
+#### The canary, in three shapes the tree does not contain — proven absent first
+
+A canary certifies a pattern only against the shape of the canary, so absence was
+**measured before planting**, not assumed:
+
+| Shape | Files in the tree matching it, before planting |
+| --- | --- |
+| digest as a **hashtable literal value**, `@{ … = '<64hex>' }` | **0** |
+| version inside a **`[ValidateSet(…)]` attribute argument** | **0** |
+| digest / byte count inside a **`.sh` file** | **0** |
+
+```
+PLANTED  validation\interim-v141-teardownstop.ps1  hashtable literal: digest + bytes
+PLANTED  validation\interim-v141-teardownstop.ps1  ValidateSet attribute: version
+PLANTED  validation\sp-prefix-fw.sh                shell comment: digest + bytes + VM name
+
+CANARY_HIT  aa11bb22…8899   interim-v141-teardownstop.ps1:136   DIGEST
+CANARY_HIT  440601234       interim-v141-teardownstop.ps1:136   BYTES
+CANARY_HIT  1.3.9           interim-v141-teardownstop.ps1:137   VERSION
+CANARY_HIT  440609999       sp-prefix-fw.sh:73                  BYTES
+CANARY_HIT  cfv-999         sp-prefix-fw.sh:73                  VMNAME
+CANARY_HIT  99887766…bbaa   sp-prefix-fw.sh:74                  DIGEST
+```
+
+**6 of 6 found — but only on the second attempt, and the first miss is worth
+recording.** The `.sh` digest canary was initially written 62 hex characters long,
+so the sweep correctly did not match it. **The canary was malformed, not the
+instrument** — which is exactly the ambiguity a canary exists to resolve, and it
+resolved it the right way round: had the instrument been blind to `.sh` files, the
+symptom would have been identical, and the only way to tell was to count the
+characters and re-plant.
+
+**Restoration was by writing back the bytes saved before planting, proven by hash**
+— never `git checkout --`, which under this machine's system-level
+`core.autocrlf=true` silently re-materialises a file as CRLF while `git status`,
+`git diff` and `grep` all report it clean:
+
+```
+ORIG interim-v141-teardownstop.ps1  sha=0a3fbfff…3e37  bytes=7932
+ORIG sp-prefix-fw.sh                sha=bee57941…4da0  bytes=3771
+RESTORED interim-v141-teardownstop.ps1 sha=0a3fbfff…3e37 bytes=7932 match=True
+RESTORED sp-prefix-fw.sh               sha=bee57941…4da0 bytes=3771 match=True
+git status --short -> neither file listed
+```
+
+#### The enumeration: digests, re-derived rather than assumed
+
+| Pin | Value | Verdict |
+| --- | --- | --- |
+| `PIN.soul` / `setup.ps1:2846` | `e70212603f…db7941` | **CURRENT.** `resources\safety-rules.md` re-hashes to it |
+| `PIN.persona` / `setup.ps1:2945` | `0557d07004…ff63a0` | **CURRENT.** `resources\persona.md` re-hashes to it |
+| `PIN.workspaceSoul` / `setup.ps1:2946` | `441b6279f6…a257` | **CURRENT by construction**, and the two sites agree |
+| `PIN.rootfs` / `setup.ps1:467` | `1483cc5c1d…b4109` | **CURRENT**, and still a dead literal — nothing compares it post-install. Left alone, as in v1.4.3 and box A |
+| `PIN.studioAsar` (`phase1:95`, `stagecards:132`) | `a64a118f7a…2a49e` | **CURRENT**, two sites agree. Studio unchanged |
+| `build_release.ps1:450` Studio installer | `ac59375166…e7dca` | **CURRENT.** `resources\ClawFactory-Studio-Setup-1.3.2.exe` re-hashes to it |
+| `bundlebytes:143` orchestrator prompt | `f781634267…2ec43` (`f7f81634…`) | **CURRENT.** `resources\orchestrator-prompt.md` re-hashes to it |
+| `.gitattributes:101` Apache-2.0 | `cfc7749b96…3d30` | **CURRENT.** `LICENSE` re-hashes to it |
+| `relgate-box:54,55` subject | `6e655603…` / 440,610,608 | **CURRENT.** Box A repinned it; re-verified today |
+| `offline-install:54,55`, `relgate-box:64,65` control | `67619df7…` / 440,525,520 | **CURRENT.** See 1.1 |
+| `phase3:254`, `phase3b:149`, `phase6:395` all-zeros | — | **NOT A PIN.** A deliberately wrong hash passed to `approve` as a negative control |
+| `interim-v120-validate.ps1:180,181` | `257f30ff…` / 440,613,512 | **STALE, DELIBERATELY LEFT.** That driver is forbidden by PROMPT 15 (it calls `az vm user update` after provisioning). A stale digest in a driver nobody may run is a brake, not a hazard; refreshing it would make a forbidden instrument look blessed |
+| `validation\diag\g4-probe.ps1:76,77` | `5bef35dc…` / 440,606,872 | **STALE**, out of scope: a Guard 4 diagnostic, not a matrix instrument, not run by this job |
+| `job3-validate.ps1:66` | `ffe86406…` | **STALE**, out of scope: the archived JOB 3 validator |
+| `azure-validate.ps1:55` | `e412a516…` (v1.0.48) | **STALE**, and newly visible because this sweep includes `scripts\`. Same class as the two above: that driver is not on any current path. **Not repointed**, for the same reason |
+| `released-versions.tsv:36–47` | twelve rows | **NOT PINS.** The ledger, which is the record; `1.4.4` is present at `548562c7…` |
+
+#### Version literals, the load-bearing subset
+
+```
+ClawFactory-Secure-Setup.iss:9    #define MyAppVersion   "1.4.4"
+ClawFactory-Secure-Setup.iss:16   #define StudioInstaller "ClawFactory-Studio-Setup-1.3.2.exe"
+setup.ps1:56                      $InstallerVersion      = '1.4.4'
+interim-v120-phase1.ps1           PIN.version            = '1.4.4'
+```
+
+All four agree. **`MANUAL_CHECKS_studio.md` is CURRENT** — header reads "for the
+v1.4.4 build" (line 5), check 6f names the installer version `1.4.4` (line 273) and
+Studio `1.3.2` (line 272). Box A's fix held. The `v1.4.0` / `v1.4.1` mentions at
+lines 245–247 and 411–413 are **historical narrative** and are correct as history.
+
+The `VERSION` class is intrinsically noisy — it matches section numbers, IP
+addresses, `Set-StrictMode -Version 3.0` and PowerShell `5.1`. Stated plainly
+rather than presenting a filtered list as though it were the raw one.
+
+#### The sixth class: stale VM-name defaults, unchanged from box A
+
+```
+validation/finish-and-park.ps1:27       $VmName = 'cfv-162'
+validation/interim-v120-job.ps1:31      $VmName = 'cfv-153'
+validation/interim-v120-validate.ps1:33 $VmName = 'cfv-153'
+validation/job3-validate.ps1:56         $VmName = 'cfv-152'
+validation/diag/g4-probe.ps1:52         $VmName = 'cfv-165'
+scripts/azure-validate.ps1:47           $VmName = "cfv-138"
+```
+
+**All six name boxes that no longer exist**, which section 4's estate listing proves
+independently, so **all six fail safe**: an `az` call against a deleted VM errors
+rather than quietly measuring the wrong machine. `-VmName` is passed explicitly on
+every invocation in this session. **Not fixed, for box A's reason:** repointing them
+makes them stale again the moment these boxes are torn down; the correct fix is to
+make the parameter mandatory, which is a behaviour change to six instruments and
+belongs in its own change. `interim-v140-relgate-box.ps1`, the driver this session
+actually uses, already has `[Parameter(Mandatory)]$VmName`.
+
+#### Byte counts, hosts and artifact paths
+
+**Byte counts.** 17 hits, 16 distinct: twelve ledger rows plus the five digest/byte
+pairs already classified above. No unexplained value.
+
+**Hosts.** 91 distinct DNS names, up from box A's 30 because `scripts\` and
+`setup.ps1` are in scope. No stale entry: the product hosts match the documented
+base and toolchain sets, and the remainder are deliberate probe targets, competitor
+provider endpoints used as controls, SMTP targets and infrastructure.
+
+**Artifact paths.** 9 distinct. Every driver default on a current path resolves to
+`Output\ClawFactory-Secure-Setup.exe` on the build machine or
+`C:\cfv\combined-setup.exe` on the box. The three versioned filenames
+(`…-v1.0.48.exe`, `…-v1.1.0.exe`, `ClawFactory-Studio-Setup-1.2.0.exe`) all sit in
+the three out-of-scope drivers already named above.
+
+### 3.8 Commits
+
+```
+53959d2  validation(phase 3): declare the SMTP-credential precondition PROMPT 15 requires
+c51b6c6  validation(by-hand): check 5d states its own precondition instead of assuming one
+72697f4  validation(providergate): PG.2a/PG.2b need the gate to have RUN; classify PG.3c/3d
+9f27bb4  validation(row 2): identify BOTH binaries by digest, and stage the control build
+b492769  validation: two new probes for section 14.11's CR census and #261's sample count
+9efbf5a  validation(driver): hoist the prior-artifact SAS URL alongside the other six
+```
+
+Every touched file is `i/lf w/lf` in `git ls-files --eol` before and after, so no
+edit re-materialised line endings. **The sweep instrument itself is not committed**
+— a throwaway, as in v1.4.3 and box A; committing it would imply a maintenance
+promise this job did not make.
+
+---
+
+## 4. TASK 0.4: the starting estate, unfiltered — and the plan
+
+### 4.1 The estate before anything was provisioned
+
+```
+=== az vm list -d, SUBSCRIPTION-WIDE ===        VM_EXIT=0   (no rows)
+=== az resource list, ALL RESOURCE GROUPS ===   RES_EXIT=0
+clawfactory-validation  clawfactoryvalc467             Microsoft.Storage/storageAccounts
+clawfactory-validation  bake-vmVNET                    Microsoft.Network/virtualNetworks
+clawfactory-validation  clawfactory-win11-baseline     Microsoft.Compute/images
+clawfactory-validation  clawfactory-win11-baseline-v2  Microsoft.Compute/images
+NetworkWatcherRG        NetworkWatcher_westus2         Microsoft.Network/networkWatchers
+clawfactory-signing     clawfactory-signing            Microsoft.CodeSigning/codeSigningAccounts
+=== disks (-g clawfactory-validation) ===  DISK_EXIT=0  empty
+=== nics, public-ips, nsgs (subscription-wide) ===  all exit 0, all empty
+```
+
+**Exactly the expected residual and nothing else.** The NetworkWatcher is Azure's
+own auto-created resource and the signing account is the build-time code-signing
+account; neither is validation estate and neither bills compute. **Zero VMs, zero
+disks, zero NICs, zero public IPs, zero NSGs.** Every exit code read, not inferred
+from empty output.
+
+`az disk list` was issued **with** `-g` deliberately: box A recorded that the
+subscription-wide form exits 2 with a required-argument error, whose empty output
+reads exactly like "no disks exist".
+
+### 4.2 The plan, recorded BEFORE `az vm create`
+
+**Two boxes, sequential, B then C.** They are run one after another rather than
+concurrently because PROMPT 15 permits **one `az vm run-command` at a time,
+subscription-wide**, and the driver polls the on-VM runner through `run-command`.
+Overlapping the two boxes would interleave two polling streams against that
+constraint.
+
+| | Box B — `cfv-180` | Box C — `cfv-181` |
+| --- | --- | --- |
+| Install | `-Provider later` | `-Provider claude`, licence host blocked |
+| Carries | matrix row 4, `PG.3f` | matrix row 2 + its prior-artifact control |
+| Also | TASK 3.1 CR census, TASK 3.2 `#261` samples, phase 3 (exercises the 0.2 fix) | checks `5a–5d` by hand |
+| Size / image | `Standard_D2s_v4`, `clawfactory-win11-baseline-v2` | same |
+
+**Phase order on box B, and why it is not negotiable:**
+
+1. `interim-v120-phase1.ps1 -Provider later` — the install. Everything needs it.
+2. `interim-v135-providergate.ps1 -DeferredProvider` — **matrix row 4**. Must run
+   while the box is still in its deferred state.
+3. `interim-v144-crcensus.ps1` — TASK 3.1.
+4. `interim-v144-attempts.ps1` — TASK 3.2.
+5. `interim-v120-phase3.ps1` — exercises the credential precondition on a real box.
+6. `interim-v135-providergate.ps1 -RunFullInstallControl` — **`PG.3f`. LAST**, because
+   its level-2 control re-runs the installer with `-Provider claude` and would
+   destroy the deferred state row 4 depends on.
+
+**Estimate, stated before it is spent:**
+
+| | |
+| --- | --- |
+| Wall clock | **5 to 6 hours** for both boxes, plus TASK 0 already spent |
+| Operator touches | **2 to 3**: one RDP login per box, plus one four-item by-hand batch |
+| Compute | two `Standard_D2s_v4` at roughly $0.10/hour, **well under $2** for both |
+
+**Does this job fit in one session? Yes, and the reason is that neither box needs a
+reboot.** Box A cost 5.5 hours across two days with five operator touches, three of
+which were reboot- and uninstall-driven. Boxes B and C carry no reboot pass, no
+uninstall branch and no full row-11 re-run, so the only unavoidable human step is
+the RDP login that starts each runner — auto-logon is deliberately not armed.
+
+**Box B is deleted before box C is provisioned**, so at most one VM bills at a time
+and the teardown of each is proven before the next exists.
+
+
+
+---
+
+*This close-out is written as the run proceeds and is committed after every phase,
+so an interruption at any point leaves an honest record rather than a missing one.*
