@@ -1,6 +1,6 @@
 # CLOSE-OUT: v1.4.4 validation, BOX A
 
-**Status: BOX A PARTIAL, PAUSED AT AN OPERATOR HANDOFF. cfv-179 is DEALLOCATED and not billing.** Rows 1,3,5,6,7,8,9,12,13 PASS; row 14 VOID; rows 10,11 and the RemoveAll branch await the operator.
+**Status: BOX A IN PROGRESS, day 2. cfv-179 RUNNING.** Rows 1,3,5,6,7,8,9,12,13 PASS; row 14 VOID; sections 14.8 and 14.9 PASS. Rows 10, 11, WR.5/WR.6, 14.10 and RemoveAll still owed.
 Written incrementally so an interrupted session leaves an honest record rather
 than nothing. Sections carry their own state. Anything not measured says so.
 
@@ -1595,3 +1595,129 @@ one box of four is not `done` if its scope spans the others.
 **A third, lower priority:** six drivers carry stale `$VmName` defaults naming
 deleted boxes. All fail safe. The correct fix is a mandatory parameter, not a
 repoint. Section 2.5a.
+
+---
+
+## 12. SECTIONS 14.8 and 14.9, day 2. **BOTH PASS** — and three defective revisions on the way
+
+```
+PASS=11 FAIL=0 VOID=0 INFO=0  (counted 11 of 11 recorded rows)
+positive controls registered=6 fired=6
+preconditions declared=1 met=1
+
+PHASE VERDICT: PASS. Every positive control fired and every precondition was met.
+BUNDLEBYTES_COMPLETE rc=0
+```
+
+### 12.1 Section 14.8: the bundled bytes on the box ARE the committed bytes
+
+```
+COMPARED=54  MATCH=54  MISMATCH=0  ABSENT=0  CR_BAD=0  CR_WAIVED_BINARY=3
+```
+
+**Every one of the 54 tracked files the `.iss` bundles has, on the installed
+machine, a SHA-256 identical to its committed blob at build commit `25945d5`, and
+CR=0 across all 51 text files.**
+
+The three CR-bearing files are `logo.png`, `lobster.ico` and `ClawChat.exe`, where
+`0x0D` is data rather than a line ending. **Their digest assertion still applies
+and passed**; only the CR assertion is waived, and the waiver is counted and named
+rather than silent.
+
+**The negative half, which is what makes the above mean anything:**
+
+```
+CANARY_ALTERED  sha=006a3631d5fe96682952e67eba2b69a9e64f76fff7ad16381883cdc7dfb5d232
+                (committed safety-rules.md is e70212603f2f...db7941 -- one appended byte, digest differs)
+CANARY_CR       cr=1     (a planted CR is reported)
+CANARY_ABSENT   present=False
+```
+
+**The CR canary is the one that matters most.** A CR counter that always returned
+zero would pass all 54 files identically and produce exactly this same clean
+result. It was planted and it was caught.
+
+**The manifest generator carries seven assertions of its own** and refused to emit
+twice before it produced a usable file. The v1.4.3 generator had three defects
+that all failed toward a full, confident, uniform answer, including one that
+produced 55 rows every one of which carried `e3b0c442…`, the SHA-256 of the empty
+string. This generator asserts that no row holds that digest, that no destination
+contains an unexpanded `{var}`, that destinations are unique, and that the tracked
+count is what the `.iss` says. **Its assertions fired on the real tree**, catching
+that the Studio installer is referenced through an Inno preprocessor macro
+`{#StudioInstaller}` rather than by filename.
+
+**54 is independent corroboration**: reached here by parsing the `.iss` and hashing
+git blobs, and matching the v1.4.3 count of 54 tracked bundled files reached by a
+different route.
+
+### 12.2 Section 14.9: the orchestrator prompt reaches the distro, CR=0
+
+```
+PATH_USED=/home/clawuser/.openclaw/agents/orchestrator/agent.md
+EXISTS=yes  BYTES=4277  CR=0  LINES=65
+SHA=f7f8163426790c05bbec090cc7efcfd83809a81531214fd26db68c6e4d12ec43
+OWNER=clawuser:clawuser MODE=644  PLACEHOLDER_HITS=0
+WHOAMI=clawuser UID=1000
+SOURCE_NAME_IN_DISTRO=0
+CTL_FIND_ABSENT=0  CTL_CR_COUNTER=1  CTL_ABSENT=ok
+```
+
+**The delivered file is byte-identical to its committed source.** `SHA` equals the
+blob digest of `resources/orchestrator-prompt.md` at `25945d5` exactly, which is
+also the value the v1.4.3 run recorded — the file is unchanged between releases.
+
+**The 65-line claim is confirmed arithmetically as well as by measurement.** The
+file is 65 lines, so a CRLF rendering would be exactly 65 bytes larger: 4342
+against 4277. The box delivers 4277.
+
+Four controls, because "CR=0" from a broken reader looks identical to "CR=0" from
+a correct one: the CR counter reports 1 on a file holding one CR, a sibling path
+that cannot exist reads absent, the search discriminates, and the read happened as
+`clawuser` uid 1000 rather than as root or SYSTEM.
+
+**The other three agents carry placeholders** at 997, 1000 and 1000 bytes, matching
+the install log's three `[bootstrap] … placeholder` warnings exactly. Consistent
+with the documented stub-agent behaviour; not a finding.
+
+### 12.3 THE INSTRUMENT FAILED THREE TIMES FIRST, AND ONE WOULD HAVE BEEN A FALSE SHIP-BLOCKER
+
+Recorded at length because it is the most transferable thing in this section.
+
+**Revision 1 — controls recorded as ordinary rows.** The three canaries were
+emitted with `Record` instead of `Register-Control`, so the phase ended with
+`positive controls registered=0` and the runner **correctly downgraded every PASS
+in it**: *"this phase registered NO positive control, so nothing it measured can be
+reported as a pass."* The underlying 14.8 numbers were already clean. They were not
+reportable, and the runner was right.
+
+**Revision 2 — the wrong subject, and this is the dangerous one.** The probe
+searched the whole distro filesystem for `orchestrator-prompt.md` and found
+nothing. **That filename never exists inside the distro by design**: `bootstrap.ps1`
+base64-streams the content to `~/.openclaw/agents/orchestrator/agent.md` and
+atomic-renames it. Reported as written, that reading would have said **"the
+orchestrator prompt never reaches the distro on v1.4.4"** — a false ship-blocker
+against entirely correct behaviour.
+
+**It VOIDed rather than FAILed, and that is the only reason the false reading never
+left this file.** `BB.3` and `BB.4` were written to record VOID when no digest could
+be read, because a measurement that could not be taken is not a product verdict.
+Had they been written to FAIL on a missing file, this close-out would carry a
+phantom regression.
+
+**PROMPT 15 already names this rule and I did not apply it:** *"NAME THE REAL
+SUBJECT. Where a control protects a specific location, the package must name that
+location's real filesystem or path and require the measurement there."* It was
+written after a Guard 4 probe answered YES on ext4 while the answer on the drvfs
+mount that granted workspaces actually use was NO. This is the same error in a
+different costume.
+
+**Revision 3 — `find / -xdev`.** The filesystem-wide search stopped at mount
+boundaries, so even a correctly-named file on another mount would have been missed.
+Fixed by naming the delivered path directly.
+
+**A fourth, caught before it ran:** the manifest generator initially used
+`git rev-parse <commit>:<path>`, which returns the blob **object id** — a SHA-1 over
+a header plus content — where the SHA-256 of the content was needed. It would have
+mismatched all 54 rows while looking authoritative. Caught by reading the code
+rather than by running it.
