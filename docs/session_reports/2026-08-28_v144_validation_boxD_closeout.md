@@ -1225,3 +1225,611 @@ at rc=4, so this is a discriminating control and not a decorative one.
 `clawfactory-fw.service` is named specifically because v1.4.1 deleted its script
 and left the unit enabled. It is now `LoadState=not-found`, `ActiveState=inactive`,
 no unit file on disk.
+
+---
+
+## 13. TASK 2.5: THE REINSTALL COMPLETES. This is the row that turns v1.4.1's NO into a yes
+
+v1.4.4 was installed a second time, on the same box, onto the distro the
+keep-Linux uninstall had emptied and left registered.
+
+```
+install-result.txt: INSTALLER_DONE=success
+CLAW_HOME=/home/clawuser
+EXISTS /home/clawuser/.openclaw/SOUL.md mode=444 owner=root:root
+WS_CAND /home/clawuser/.openclaw/SOUL.md sha=e70212603f2f91e6abf6db576c9535b1aaad60506e2fb075c199f18160db7941
+
+P1.5              PASS  install-result.txt reports success
+P1.2              PASS  Step-Preflight ran and passed (installer claim)
+P1.3.CTL          PASS  POSITIVE CONTROL: the enumeration can see a resource that IS there
+P1.3              PASS  All 34 required resources on disk (independent enumeration)
+P1.3b             PASS  Installer resource count and this probe agree
+P1.3c             PASS  CONTROL: absent resource must not be found
+P1.CHAN           PASS  POSITIVE CONTROL: the file-based WSL channel discriminates
+PIN.persona       PASS  Pin 1of7 persona.md
+PIN.soul          PASS  Pin 2of7 safety-rules.md (SOUL)
+PIN.soul.indistro PASS  Pin 2of7 SOUL as installed in distro
+PIN.soul.rootpin  PASS  Root-owned /etc/clawfactory/soul.sha256 matches pin
+PIN.workspaceSoul PASS  Pin 3of7 composed workspace SOUL matches pin
+PIN.studio.asar   PASS  Studio pin: the INSTALLED app.asar matches the build-time digest
+PIN.version       PASS  Installed version reports 1.4.4
+PIN.bundle        PASS  Bundle completeness (all 34 preflight resources shipped)
+
+PASS=15 FAIL=0 VOID=0 INFO=4  (counted 19 of 19 recorded rows)
+positive controls registered=2 fired=2
+PHASE VERDICT: PASS
+```
+
+**Identical to the first install on this box, and to box B's on a
+`-Provider later` box.** All 34 resources, all seven pins, version 1.4.4, and
+`clawuser` recreated with its root-owned frozen SOUL at mode 444.
+
+**On v1.4.1 this aborted at `Failed to create clawuser (exit=1)`**, because the
+keep-Linux teardown left `clawuser` alive: `deluser` refuses to remove an account
+that still owns a live process, exited 8, and the failure was swallowed by a
+`2>/dev/null`. That is card `#287`, and the v1.4.2 fix is the `XDG_RUNTIME_DIR` on
+the gateway stop plus the escalate-verify-report loop around `pkill`.
+
+**This row closes `#287` by its CONSEQUENCE rather than only by its symptom.**
+`UST.3i` measured that `clawuser` is gone; this measures that the thing its
+absence was supposed to enable actually works. The dialog's own promise —
+*"You can install ClawFactory again later and it will reuse the distro"* — is now
+a measurement rather than an assertion.
+
+**What this does NOT establish, stated rather than implied:** that a reinstall
+works after the OTHER branch. RemoveAll unregisters the distro, so a reinstall
+there builds a new one from the bundled rootfs, which is the path every clean
+install in this project already exercises.
+
+---
+
+## 14. WHERE BOX D STANDS. The split point was taken, as planned
+
+The plan recorded before `az vm create` (§4.2) named the split point as **after
+step 11, the reinstall**, and that is exactly where the run paused. The operator
+stepped away for the night after the uninstall dialog; the automated work through
+the reinstall was completed without him.
+
+### 14.1 Every row measured on box D
+
+| Row / item | Verdict | Evidence |
+| --- | --- | --- |
+| Install v1.4.4 clean, `-Provider claude` | **PASS** | §7 |
+| Phase 1, 34 resources + 7 pins + version | **PASS** 15/0/0/4 of 19 | §7 |
+| Sink credential from root tooling | **PASS** 6/6 | §8 |
+| **Matrix row 14**, precondition MET | **23/2/2/1 of 28** | §9 |
+| **`G2.10`** credential unreadable by agent uid | **PASS — CLOSED** | §11.1 |
+| **`S.4`** credential unreadable, post-reboot | **PASS — CLOSED** | §11.2 |
+| **`S.4leak`** scanned against the REAL secret | **PASS — CLOSED** | §11.2 |
+| `G2.3` / `G2.6` | **FAIL, rig-caused; product correct** | §9.2 |
+| `ST.1` broker refuses cleartext submission | **PASS** (a property, positively asserted) | §10 |
+| `ST.2`/`ST.3`/`ST.6` STARTTLS delivery | **VOID**, node ignores the system trust store | §10 |
+| **Before-state**, held and hashed | **PASS** 8/8 | §12.1 |
+| **The dialog** (TASK 3.1) | **correct**, quoted verbatim | §12.2 |
+| **Mojibake in this dialog** (TASK 3.2) | **ABSENT**, measured both ways | §12.2 |
+| **Keep-Linux read-back** (TASK 2.4) | **22 PASS / 1 FAIL / 1 INFO of 24** | §12.3 |
+| `UST.4a` | **FAIL — MY PROBE**, corrected verdict is PASS | §12.4 |
+| **`CLAWFACTORY_TEARDOWN_OK` + `READBACK`** (TASK 2.6) | **PASS** 7/8 | §12.5 |
+| **Next-boot check** (TASK 2.8) | **PASS** 6/7, both controls fired | §12.6 |
+| **Reinstall completes** (TASK 2.5) | **PASS** 15/0/0/4 of 19 | §13 |
+| **The negative half** (TASK 2.7) | **OWED** — needs one operator touch | §14.2 |
+| `#261` | **not touched**, by instruction | §16.3 |
+| `#198` | **VOID by design** | §16.4 |
+| `SP.8` | **not run** — not in box D's plan; not adjusted, retired or inverted | — |
+
+### 14.2 What box D still owes, and it is one item
+
+**TASK 2.7, the fault-injected negative half.** Everything for it is built,
+committed and dry-run:
+
+* `interim-v144-teardownfault.ps1 -Mode Inject` — makes one file under
+  `/etc/clawfactory` immutable, with two controls (the fault landed; a sibling
+  file in the same directory still deletes, so the refusal is the attribute and
+  not a broken `rm`).
+* the operator uninstalls a second time, choosing **No**, and reads the
+  incomplete-teardown dialog.
+* `interim-v144-teardownlog.ps1 -Expect INCOMPLETE` — requires
+  `CLAWFACTORY_TEARDOWN_INCOMPLETE`, a `READBACK` naming `/etc/clawfactory`, the
+  `In-distro teardown did NOT complete` ERROR line and the recovery instruction.
+* `interim-v144-teardownfault.ps1 -Mode Cleanup`.
+
+The box is **deallocated, not deleted**, so tomorrow costs one RDP login and one
+uninstall rather than a fresh install-plus-credential-plus-reboot rebuild:
+
+```
+DEALLOCATE_EXIT=0
+ProvisioningState/succeeded
+PowerState/deallocated
+```
+
+**Why this cannot be skipped or inferred:** a success marker that has never been
+observed to fail is indistinguishable from one that cannot fail. `TL.1` through
+`TL.4` prove the marker appears when the teardown succeeds; nothing yet proves it
+appears differently when the teardown does not. Card `#286`'s defect is precisely
+that success was logged *unconditionally*, so closing it on the happy path alone
+would repeat the reasoning error the card describes. `#286` is therefore held at
+**Review**, deliberately, with that reason recorded on the card.
+
+---
+
+## 15. TASK 8.2: INSTRUMENT DEFECTS, COUNTED AND TIMED
+
+Boxes A, B and C recorded this; three sessions of the data is worth having.
+
+### 15.1 The count
+
+| | Box A | Boxes B+C | Box D (to the split) |
+| --- | --- | --- | --- |
+| **Product defects found** | 1 (cosmetic) | **0** | **0** |
+| Instrument defects | 8 | 5 | **5** |
+| …that would have produced a **false finding** | 3 | 2 | **3** |
+| …caught **before** any box ran | 1 of 8 | 2 of 5 | **3 of 5** |
+| Probes written **before** provisioning | few | 4 of 7 | **4 of 5** |
+
+### 15.2 The five, each with when it was written and what caught it
+
+| # | Defect | Probe written | Caught by |
+| --- | --- | --- | --- |
+| 1 | canary-restore reported `match=True` against a baseline it had itself corrupted | **before provisioning** | **`git status --short`** — a check that did not share the instrument's state |
+| 2 | teardown-log marker regex anchored at line start; would have reported `NO_MARKER` on a **clean** teardown | **before provisioning** | a **dry-run against a rig carrying the real log line shape** rather than a simplified one |
+| 3 | three probes named transcripts in a shape the dispatcher never fetches, silently costing the second evidence channel | **before provisioning** | **reading the dispatcher before dispatching** |
+| 4 | the stale-default sweep is blind to regex-escaped literals, and the tree's one stale value is in that shape | **before provisioning** (six runs) | a **false FAIL from an unrelated probe** (`ST.0`), followed the whole way down |
+| 5 | `UST.4a` asserts a RemoveAll property on the keep-Linux branch | **before provisioning** | **refusing to file a defect off one reading**, then a measurement from the operator's own session |
+
+**Three of the five would have produced false findings**, and two of those were
+ship-blocker-shaped: #2 would have reported *"the teardown never reached its own
+read-back"* on a perfectly clean uninstall, and #5 would have reported *"the
+uninstaller leaves the application directory behind."*
+
+**Every one of the five was written before provisioning**, which is the first time
+that has been true — and three were caught before a VM existed. The box A
+prediction that defects written after hour six survive into the run did not get a
+chance to fire, because no probe was authored after hour six. That was the point.
+
+### 15.3 What the comparison shows, and one thing it does not
+
+**The clauses are working, and the shape of the remaining defects has changed.**
+Boxes A and B/C were losing probes to *wrong subject* and *wrong identifier*. Box
+D lost none to those: clause 1's discover-and-print is now built into the probes
+(`DISCOVERED_UNITS`, `DISCOVERED_SBIN`, the fenced list parser, the raw-reading
+dump before any verdict).
+
+What box D lost probes to instead is subtler and worth naming as the next
+clause-shaped lesson: **three of the five defects were wrong EXPECTATIONS attached
+to correct measurements.** `UST.4a` measured the right directory and asserted the
+wrong thing about it. `ST.0` measured the right list and compared it to a
+superseded value. The sweep searched the right files and could not see one syntax.
+None of those is fixed by discovering the subject harder.
+
+> **The measurement being right does not make the expectation right. State where
+> each expectation came from, and re-derive it when the thing it describes
+> changes.**
+
+That is the same failure as `ST.0`'s hard-coded parenthetical and the same failure
+as my three unescaped canaries.
+
+**And the honest line, for the fourth session running: the product looked better
+than my instruments.** Zero product defects against five instrument defects, three
+of which would have been false findings.
+
+---
+
+## 16. TASK 7: THE FITNESS-TO-PUBLISH POSITION. **The verdict is WITHHELD, and one item withholds it**
+
+Box D writes this because it is the last box and the verdict has to aggregate all
+four. **It cannot be given as a yes tonight**, and the reason is a single named,
+scheduled item rather than a doubt.
+
+Every claim below carries verbatim evidence. Anything argued rather than measured
+is labelled **INFERRED** in the sentence that makes the claim.
+
+### 16.1 What is PROVEN across boxes A, B, C and D, and would survive an audit
+
+All of it against one artifact: **v1.4.4, signed sha256
+`6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1`, 440,610,608
+bytes, build commit `25945d5`**, re-derived three ways on every box.
+
+| Claim | Where | Evidence |
+| --- | --- | --- |
+| The installer installs, completely and identically, across four boxes and three provider variants | A, B, C, D | `PASS 15/0/0/4 of 19` four times; 34 resources by independent enumeration; seven pins re-derived on the box |
+| It installs with the licence host unreachable, where the old licence-carrying build dies in 7 seconds under the identical block | C | row 2, `8/8`, 2 controls, 3 preconditions; both binaries pinned by digest **on the box** |
+| The provider gate is SKIPPED with a stated reason when the provider is deferred, and the install still completes | B | row 4, `5/5`, both halves |
+| The provider gate ABORTS the install loudly when the provider is unreachable, naming itself and telling the operator what to do | C | `PG.3f`, `16/16`, 7 of 7 controls — open since v1.3.5, closed |
+| All ten shipped Windows-side `.ps1` are CR-free and byte-identical to the committed blobs | B | CR census `15/15`, counter calibrated both directions, SET compared both directions |
+| The shipped wrappers execute | A | `WR.1/2/3/4/7/8/9` |
+| The kill switch, and its refusal to claim success unverified | A | `8I.1`, `8I.2` |
+| **The keep-Linux uninstall removes everything it installs**: 11 units → 0, **8 enablement symlinks → 0**, 17 helpers → 0, `clawuser` and its home gone, nft table gone, `/etc/clawfactory` and both retention maps gone, registry / HKLM / ProgramData / scheduled tasks gone, distro still registered | **D** | `22/1/1 of 24`, after-control fired; §12.3 |
+| **The teardown states what it left and the caller requires that statement** | **D** | `CLAWFACTORY_TEARDOWN_OK`, `READBACK units=0 sbin=0 enabled=0 left=[ ]`; §12.5 |
+| **Nothing ClawFactory installed runs at the next boot of the kept distro** | **D** | `NONE_LISTED`, `fw.service` ABSENT, no failed units, across a **proven** restart; §12.6 |
+| **A reinstall onto the emptied distro COMPLETES** — the v1.4.1 blocker is gone | **D** | `INSTALLER_DONE=success`, `clawuser` recreated; §13 |
+| The credential file is unreadable by the agent uid, and the real secret appears on none of eight surfaces | **D** | `G2.10`, `S.4`, `S.4leak` + `S.4ctl`; §11 |
+| `clawuser` has no route to SMTP at any destination, gmail included, with both controls | A, D | `G2.9`, `S.1` + three controls |
+| The agent cannot approve its own send through any of five channels | A, D | `G2.8`, `G2.8c` |
+| The broker refuses to submit a credential over an unencrypted transport | **D** | `ST.1`; §10 |
+| The uninstall dialog's copy is correct, honest and correctly rendered | **D** | §12.2, quoted verbatim from the operator's screen |
+
+### 16.2 What is recorded VOID or UNMEASURED, and why
+
+| Item | State | Why |
+| --- | --- | --- |
+| **`G2.6`** — after approval, if the source attachment is swapped, do the APPROVED bytes go | **UNMEASURED on every box in this project** | the broker refuses cleartext to the plain sink (correctly), and with a STARTTLS sink this node build will not read the system trust store: `NODE_TLS_VERDICT=REJECTED`. Card `#305`. **This is the largest single gap in the evidence** |
+| **`#198`** external delivery to a third-party mailbox | **VOID by design** | see §16.6 |
+| `G2.13` (phase 3's leak scan) | **VOID, correctly** | ran against the loopback sink credential; a scan for a password this harness invented minutes earlier measures nothing. The same claim IS measured against the real secret by `S.4leak` |
+| **TASK 2.7**, the fault-injected negative half | **OWED** | §14.2 — instrument built, dry-run, one operator touch |
+| `SP.8` | **not run on box D**, documented residual elsewhere | not in box D's plan; not adjusted, retired or inverted |
+| `#261` | **measured, no verdict taken** | §16.5 |
+| `PIN.rootfs` | INFO, a dead literal | nothing compares it post-install; unchanged since v1.4.3 |
+| Cross-account install | never measured | out of scope since JOB 3; v2 |
+| A reinstall after the **RemoveAll** branch | not attempted | RemoveAll unregisters the distro, so a reinstall there is the ordinary clean-install path every box already exercises. **INFERRED** that it therefore needs no separate row |
+
+### 16.3 What stands in the way
+
+**One thing: TASK 2.7.** Nothing else on the list above blocks a verdict —
+`G2.6` and `#261` are gaps to *disclose*, not gaps that stop a release, and the
+operator decides those. TASK 2.7 is different in kind: it is the negative half of
+a control this release **added**, and without it the release rests on a success
+marker that has never been seen to fail.
+
+### 16.4 THE VERDICT
+
+**WITHHELD.** Not "no", and not "yes" — the run paused at its planned split point
+with one specified item outstanding, and a yes must contain no argued premise.
+
+**What a yes would require, and it is small:** one operator touch — an RDP login,
+a fault injection that is already written and dry-run, one uninstall dialog, and a
+read-back. On the evidence in hand, everything v1.4.2, v1.4.3 and v1.4.4 changed
+is measured except that one row.
+
+**Stated plainly so it is not read as hedging:** across four boxes and this entire
+validation cycle, **zero product defects were found on v1.4.4**, and nothing
+measured is a regression. The only product-shaped finding in the whole cycle is
+box A's cosmetic encoding class, which is carded and is not in any dialog box D
+exercised.
+
+### 16.5 TASK 7.3(a): is v1.4.2's, v1.4.3's and v1.4.4's work now covered?
+
+| Release | Its change set | Covered? |
+| --- | --- | --- |
+| **v1.4.2** — the keep-Linux uninstall: eleven units disabled before deletion, seventeen helpers named, the drop-in directory, `/usr/local/bin/clawfactory-send`, `XDG_RUNTIME_DIR` on the gateway stop, the `deluser` escalate-verify-report loop, the `READBACK` line and terminal marker | **COVERED except one row.** §12.3, §12.5, §12.6, §13 measure every item. The uncovered row is the marker's FAILURE path (TASK 2.7) |
+| **v1.4.3** — line-ending re-materialisation, the Worktree-pin build gate, LF-normalising the teardown payload before transport | **COVERED.** Box B's CR census: all ten shipped `.ps1` at CR=0 and byte-identical to the repo at the commit under test. Box D adds the consequence: the transported teardown payload ran to completion and emitted its marker, which is exactly what the CRLF defect prevented on cfv-176 |
+| **v1.4.4** — the wrapper fixes (kill switch out of the structural table, the ninth interpolation build gate, the wrapper-execution phase) | **COVERED.** Box A: `8I.1`, `8I.2`, `WR.*`, sections 14.6/14.8/14.9/14.10; box B: the CR census closing 14.11's missing half |
+
+**Unmeasured and NOT attributable to any of the three:** `G2.6`, which predates
+all of them and has never been measured on any release.
+
+### 16.6 TASK 7.3(b): the mojibake class, as a decision for the operator
+
+**This is stated as a choice with costs, and no recommendation is made.**
+
+**What it is.** Five shipped `.ps1` are UTF-8 **without a BOM**, and Windows
+PowerShell 5.1 decodes a BOM-less `.ps1` as the ANSI codepage, so each em dash
+(`E2 80 94`) renders as three garbage characters. Seven occurrences are
+customer-visible: five in `rename-agent.ps1`'s dialog, two in `bootstrap.ps1` (one
+lands inside a written `agent.md`, one in a `WARN` line that reaches the console
+and the install log). The rest are in comments.
+
+**It is cosmetic.** Nothing about the sandbox, the firewall, the guards, the
+gateway or containment is implicated. The meaning survives; it looks broken.
+
+**It is customer-visible in a dialog whose job is explaining a decision** — the
+`rename-agent.ps1` dialog exists solely to explain why renaming is not supported
+yet.
+
+**Box D confirms it is NOT in the uninstall dialog**, measured both ways (§12.2).
+
+| Path | Cost |
+| --- | --- |
+| **Ship v1.4.4 as it is** | The defect ships. A customer's first impression of a considered explanation is that the software cannot render a dash. Zero engineering cost, zero schedule cost, and no measurement is invalidated |
+| **Fix it** | Re-saving five files as UTF-8-with-BOM is minutes of work. But it changes shipped bytes, which means **v1.4.5, a rebuild, a re-sign, and a re-validation** — and *"prior measurements do not transfer across a rebuild"* is the premise this entire cycle rests on. Concretely: all four boxes' results would be against a superseded artifact. Box A cost 5.5 hours, boxes B+C about 9, box D about 8. A full re-run is not required to be as thorough as the first, but the install, the pins, the bundled-bytes checks and the uninstall would all have to be retaken |
+| **Fix it and ALSO add the tenth build gate** (no shipped `.ps1` may contain a non-ASCII byte without a BOM) | Same rebuild cost, plus a byte-level gate that closes the class permanently rather than the instance. Card `#296` already specifies it |
+
+**No recommendation. The decision is the operator's.**
+
+### 16.7 TASK 7.3(c): `#261` as a written, accepted condition of shipping
+
+**Reported as prior measurement. No recommendation is made and no verdict is taken
+here — boxes B/C deliberately took none, and box D adds no third opinion.**
+
+**What was measured (boxes B/C, cfv-180, 96 attempts across 8 toolchain hosts, 12
+attempts each, as uid 1000, switch confirmed ON, with both controls firing in the
+same run — `api.anthropic.com` 12/12 must-connect and `example.org` 0/12
+must-not):**
+
+| Host | Connected |
+| --- | --- |
+| `clawhub.ai`, `objects.githubusercontent.com`, `raw.githubusercontent.com`, `registry.npmjs.org` | **12 / 12** |
+| `codeload.github.com` | 10 / 12 |
+| `api.clawhub.ai` | 9 / 12 |
+| `github.com` | 7 / 12 |
+| `api.github.com` | 6 / 12 |
+
+**Four of eight toolchain hosts answered on every attempt; four did not.** Every
+one of the eight answered at least once, so a working route was built to each —
+that is `#276`, and `#276` is closed.
+
+One incidental cross-check: `api.clawhub.ai` returned 11/12 and then 9/12 minutes
+apart on the same box with nothing changed between, which is a direct observation
+of the variability itself.
+
+**In the terms a release-notes reader needs:** with the software-source switch ON,
+a fetch from a GitHub-family host may intermittently fail and succeed on retry.
+The firewall holds a snapshot of resolved addresses while those services answer
+from a rotating pool, so an address that was allowed at refresh time may not be
+the address DNS returns moments later. *(That mechanism is **INFERRED** — it is
+consistent with the split, but nothing in any run measures the pool itself.)* A
+user sees an occasional failed download that works when retried. It does not
+affect the provider route, which is separately allowlisted and measured at 12/12.
+
+### 16.8 TASK 7.3(d): `#198`, VOID by design
+
+**`#198` is the only transmitting path in this suite and it was deliberately not
+run.** It is gated behind **both** a present credential **and**
+`-ExpectRealCredential`; that switch was not passed on any box in this cycle.
+
+`G2.198` records VOID with its reason on every run.
+
+**The reason it stays VOID rather than being closed:** it is a *receiving-provider*
+outcome, not a ClawFactory behaviour. When it was last exercised, Gmail accepted a
+real message with a `250 OK` and Microsoft silently filtered it inbound. Neither
+result measures anything about the product. Guard 2's delivery path — enqueue,
+approval, single-use approval, payload binding, receipt, staging purge — is proven
+end to end by the other rows, and the one assertion still owed inside it is
+`G2.6`, which is a transport problem in the rig (card `#305`) and not a delivery
+question.
+
+**Zero outbound email left this cycle.** `phase3b` was never run,
+`-ExpectRealCredential` was never passed, and the only SMTP destination reachable
+in phase 3 was the loopback sink at `127.0.0.1:2525`. The real credential existed
+on the box only during phase 4's post-reboot pass, which contains no send path at
+all.
+
+---
+
+## 17. THE FIVE CLAUSES, ANSWERED SPECIFICALLY
+
+**CLAUSE 1 — DISCOVER, DO NOT ASSUME, sharpened: discover the VALUE, and state
+what the calibration covered.**
+
+Answered, and it is the clause that shaped the probes most. `uninstate` **lists**
+`/etc/systemd/system/clawfactory-*`, `*.wants/clawfactory-*`,
+`/usr/local/sbin/clawfactory-*` and `/etc/clawfactory/*-ips.map`, prints the raw
+reading in full **before any verdict is taken**, and only then compares against an
+expectation quoted from `resources/uninstall.ps1`. Both directions of the set
+difference are separate counts. The teardown log's path was **discovered across
+every candidate profile** rather than taken from `$env:TEMP` — it lives in
+`clawadmin`'s temp and a SYSTEM-context read would have found nothing and reported
+`NO_LOG` on a box that has one. `interim-v144-fetchlist.ps1` reads its list from
+two independent sources rather than one.
+
+**What my calibration actually covered, stated because the clause now requires
+it:** the four probes were dry-run against 19 rigged inputs covering healthy,
+broken-reader, dead-systemd, no-restart, fault-did-not-land, no-marker,
+wrong-branch and both wrong-expectation directions. **It did not cover a
+regex-escaped literal**, which is exactly where the session's one real stale value
+turned out to be (§10.2). The clause caught what it was pointed at and missed what
+it was not.
+
+**CLAUSE 2 — CLASSIFY, DO NOT TEST FOR ABSENCE.**
+
+Answered. Three named, mutually exclusive, printed state sets:
+`NO_LOG | NO_MARKER | TEARDOWN_OK | TEARDOWN_INCOMPLETE | BOTH_MARKERS`;
+`NONE_LISTED | LISTED_NOT_ENABLED | SOME_ENABLED | QUERY_FAILED`;
+`ABSENT | PRESENT | PRESENT_FAILED | QUERY_FAILED`. The success state requires a
+positive marker. The dry-runs prove the classification discriminates: a log with
+**no** marker records `NO_MARKER` and FAILs rather than passing on the absence of
+the failure string, and a `systemctl` that cannot answer records `QUERY_FAILED`
+and VOIDs rather than reading as a clean box.
+
+**CLAUSE 3 — STATE WHEN THE MEASUREMENT IS TAKEN.**
+
+Answered. The before-state is a **held snapshot written to disk and compared**,
+not a memory. `nextboot` restarts the distro itself and proves it with a `boot_id`
+that changed, so the reading is known to be post-restart. The fault injection is
+scheduled **immediately before** the uninstall it enables rather than the night
+before, so its controls sit adjacent to the event they certify. `ST.4` verified
+the throwaway CA was gone **before** the reboot pass, so no later row was taken on
+a box trusting a test CA. Where a reading was taken in the wrong context it was
+**discarded rather than used**: the SYSTEM-context `HKCU` Lxss enumeration and
+`wsl.exe`'s `WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED` (§12.4).
+
+**CLAUSE 4 — DECLARE PRECONDITIONS PROMPT 15 ALREADY DECIDES.**
+
+Answered, and **confirmed met rather than assumed moot**. The phase-3 fix landed
+in the B/C session; box D is the first box to satisfy it rather than trip it:
+`G2.CRED PASS — PRECONDITION: an SMTP send credential is configured on this box`,
+`preconditions declared=1 met=1`. Box A reported `FAIL=7` here and box B reported
+a blanket VOID; box D reports real verdicts. The new probes declare their own:
+`UST.PRE.SNAP`, `UST.PRE.COMPLETE`, `TL.PRE.LOG`, `TL.PRE.BRANCH`, `FI.PRE`,
+`FI.C.PRE` — and `TL.PRE.BRANCH` is the one that matters most, because a marker
+read from a RemoveAll log would measure nothing this box exists to measure.
+
+**CLAUSE 5 — DO NOT FIX SHIPPED BYTES MID-VALIDATION.**
+
+Held. **No shipped byte was changed by this session.** The mojibake class stays
+carded as `#296`. The only in-run code change was to `interim-v144-uninstate.ps1`,
+a validation file that does not ship — and it was made specifically because the
+second uninstall later in this run re-exercises the fixed row on the same box,
+which validates it rather than shipping it unproven. `sinktls`'s stale literal was
+**carded rather than fixed** for the opposite reason: nothing left in this run
+would have exercised the fix.
+
+---
+
+## 18. TASK 8.4: END-OF-SESSION GATE
+
+### 18.1 Task accounting
+
+| Task | State |
+| --- | --- |
+| PROMPT 15 preamble, pasted in full, staleness checked | **DONE** — §0 |
+| Challenge duty | **DONE** — two material challenges raised and resolved BEFORE provisioning, §1 |
+| TASK 0.1 plan before `az vm create` | **DONE** — §4.2, including the split point actually taken |
+| TASK 0.2 stale-default sweep, canaried | **DONE** — §3; and **corrected** in §10.2 |
+| TASK 0.3 starting estate, unfiltered | **DONE** — §4.1 |
+| TASK 1 SMTP credential, all three rows | **DONE — ALL THREE CLOSED** — §11 |
+| TASK 1.3 zero outbound email | **HELD** — §16.8 |
+| TASK 1.4 sink credential must VOID, not synthetically pass | **HELD** — `G2.13` VOID, `S.4leak` real, §11.2 |
+| TASK 2.1 install clean | **DONE, PASS** — §7 |
+| TASK 2.2 before-state held | **DONE, PASS 8/8** — §12.1 |
+| TASK 2.3 uninstall through the real dialog, NO | **DONE** — §12.2 |
+| TASK 2.4 read back every held item | **DONE, 22/1/1 of 24** — §12.3 |
+| TASK 2.5 reinstall completes | **DONE, PASS** — §13 |
+| TASK 2.6 `CLAWFACTORY_TEARDOWN_OK` + `READBACK` | **DONE, PASS 7/8** — §12.5 |
+| **TASK 2.7 the negative half** | **OWED** — §14.2 |
+| TASK 2.8 next-boot check | **DONE, PASS 6/7** — §12.6 |
+| TASK 2.9 establish the cause of anything surviving, ask first | **DONE** — asked, and the operator's own reading settled it, §12.4 |
+| TASK 3.1 the rendered dialog by hand | **DONE** — §12.2 |
+| TASK 3.2 mojibake in this dialog | **DONE — measured ABSENT both ways** — §1.1, §12.2 |
+| TASK 4 operator handoffs | **DONE** — 3 cards, values substituted, no automated probe run while he was on the box |
+| TASK 5 standing traps | **DONE** — §18.5 |
+| TASK 6 teardown | **NOT YET** — box deallocated pending TASK 2.7 |
+| TASK 7 fitness statement | **WITHHELD, with the single gating item named** — §16 |
+| TASK 8.1 cards | **DONE** — §18.4 |
+| TASK 8.2 instrument-defect accounting | **DONE** — §15 |
+| TASK 8.3 close-out committed and printed | **this document** |
+
+### 18.2 Resource ledger
+
+| | |
+| --- | --- |
+| VMs provisioned | **1** — `cfv-182` |
+| VMs running now | **0** — deallocated, `PowerState/deallocated`, `DEALLOCATE_EXIT=0` |
+| VMs deleted | **0** — deliberately retained for TASK 2.7; deleting it would cost a full install + credential + reboot rebuild (~90 min) to regain a state that is one login away |
+| Concurrency | never more than one box existed |
+| Compute window | roughly 17:04 to 02:05, about **9 hours** at ~$0.10/h, so **about $0.90**, plus one OS disk overnight |
+| Licence slots | none consumed; no licence check exists since v1.4.0 |
+| Background tasks | all completed; **none running now** |
+| Persistent Monitors | **none started** |
+| Local WSL rigs | **none.** Nothing touched the build machine's own ClawFactory install. The two dry-runs that read it were caught and a `-WinRigJson` seam added so they no longer do (§5.4) |
+| Repo mutations outside the commits | **none.** Three sweep canaries injected into tracked files, all restored and proven byte-identical by hash; `git status --short` empty |
+| Outbound email | **NONE** — §16.8 |
+
+### 18.3 Credential hygiene
+
+**No password was generated, printed, requested or set by this session.**
+`az vm user update` was called **once, by the operator, at Card 1** — the one
+sanctioned use. The provider key was reported only as
+`provider key present (value never printed)`. The SMTP app password was typed by
+the operator directly into Studio and **never entered a script, a transcript or
+this session's context**; only its LENGTH (`secret configured, length=16`) reached
+a transcript. `cmdkey /list` was read for **target names only**. The
+`DISPATCH_SECRET` was read single-key by name and reported only as
+`present=True len=64 (value never printed)`. **No secret value appears in any
+evidence file, commit or message.**
+
+### 18.4 Cards, verified from the board after writing
+
+| Card | Before | After | Basis |
+| --- | --- | --- | --- |
+| `#284` teardown terminates before it finishes | Review | **done** | ran to completion, emitted `READBACK` + `CLAWFACTORY_TEARDOWN_OK`, corroborated by an independent enumeration |
+| `#285` four units never disabled, fail at every boot | Review | **done** | 8 enablement symlinks → 0; `NONE_LISTED` and `fw.service` ABSENT across a proven restart |
+| `#286` teardown output discarded, success logged unconditionally | Review | **Review, HELD** | positive half proven; the negative half is TASK 2.7. Closing on the happy path alone would repeat the card's own reasoning error. Reason recorded on the card |
+| `#287` `XDG_RUNTIME_DIR` / `deluser` cannot remove clawuser | Review | **done** | `clawuser` gone **and the reinstall completes** — closed by consequence, not only symptom |
+| `#288` bundled bytes must be committed bytes | Review | **done** | box B's CR census 15/15 + box D's transported teardown running to completion |
+| **`#303`** sweep blind to regex-escaped literals | — | **queued** | §10.2 |
+| **`#304`** `sinktls` `ST.0` asserts against the replaced seed host | — | **queued** | §10.1 |
+| **`#305`** `G2.6` never measured on any box | — | **queued** | §9.2, §10 |
+| **`#306`** app directory survives, holding the kept distro's VHDX | — | **idea** | §12.4, not a defect |
+
+`#293` (v1.4.4 built, not validated) is left at **Review**: box D is one row short
+of a verdict and moving it would overstate. `#261` and `#198` were **not touched**,
+by instruction.
+
+### 18.5 TASK 5's standing traps, each accounted for
+
+| Trap | Outcome |
+| --- | --- |
+| 1. never `az vm user update` after provisioning | **held** — called once, by the operator, at Card 1 |
+| 2. one `run-command` at a time, subscription-wide | **held** — every dispatch sequential |
+| 3. `run-command` is SYSTEM, cannot touch WSL, reads a different profile | **held, and it bit twice — both caught.** The `HKCU` Lxss read and `wsl.exe`'s refusal were named as artefacts and discarded (§12.4); the teardown log was found only because its path was discovered rather than assumed (§12.5) |
+| 4. `$( )` in an inline WSL payload comes back empty | **held** — every payload goes through the file channel and emits values as plain output |
+| 5. an errored `az`'s empty output is not evidence | **held, and it fired.** A `--query` with parens was mangled by `az.cmd`; the resulting `BACK_UP=False` was treated as an errored command, not as evidence, and re-read paren-free |
+| 6. a resource may still list after a successful delete | **not yet exercised** — teardown is pending TASK 2.7 |
+| 7. `H()` collides with `Get-History` | **held** — no single-letter function defined |
+| `SP.8` will FAIL, do not adjust | **held** — not run at all, and stated rather than left to look like a pass |
+
+### 18.6 Delta security sweep
+
+**No product code was changed by this session.** Committed: five new validation
+probes, one naming fix, one row correction in a validation file, and this
+close-out.
+
+* `interim-v144-uninstate.ps1`, `-teardownlog.ps1`, `-nextboot.ps1`,
+  `-teardownfault.ps1`, `-fetchlist.ps1` are **not bundled** and do not ship.
+* **Every injected fault was removed and the removal verified**: the three sweep
+  canaries restored byte-identically by hash with `git status` empty; `ST.4`
+  confirmed the throwaway CA and replacement sink gone before the reboot pass.
+  **One fault is deliberately still pending injection** — TASK 2.7's — and its
+  cleanup mode is written, dry-run and scheduled.
+* **The artifact validated is byte-identical** to the one built at `25945d5` and
+  signed as `6e655603…`, re-derived three ways on the box.
+* **Zero product defects found.** Nothing was fixed in shipped bytes, which is
+  clause 5.
+
+### 18.7 Delta bug review
+
+Five instrument defects, three of which would have produced false findings, two of
+those ship-blocker-shaped. Counted, timed and root-caused in §15. **Zero product
+defects.**
+
+### 18.8 Files changed
+
+```
+b701dda  validation(box D): four probes for the keep-Linux uninstall, all dry-run before provisioning
+28092c8  docs(closeout): box D TASK 0 -- two challenges raised and resolved, sweep canaried 12/12, plan before provisioning
+e497923  validation(box D): name the probe transcripts for the dispatcher's fetch convention
+b667748  docs(closeout): box D install PASS 15/0/0/4, both channels compared, sink credential in place
+5714626  docs(closeout): row 14 with a credential present -- G2.10 CLOSED, and the two FAILs are the broker refusing cleartext
+4403f69  docs(closeout)+validation: ST.0's FAIL root-caused to a stale literal, and my own sweep was blind to its shape
+dbf744e  docs(closeout)+validation: the keep-Linux uninstall MEASURED -- 22/1/1 of 24, and the one FAIL is my probe
+```
+
+plus this close-out's own commits. **No shipped byte was changed. No tag was
+created.**
+
+### 18.9 TASK 7.2: what is INFERRED rather than measured
+
+Labelled in place, and there are three:
+
+1. **§16.7** — that the four-of-eight `#261` intermittency split is *consistent
+   with* a rotating-address-pool mechanism. Nothing in any run measures the pool.
+   **INFERRED.**
+2. **§16.2** — that a reinstall after the **RemoveAll** branch needs no separate
+   row because it reduces to the ordinary clean-install path. **INFERRED**, though
+   the premise (RemoveAll unregisters the distro) is measured, by box A.
+3. **§12.4** — that the exclusive-open failure on `ext4.vhdx` indicates WSL
+   holding it. **INFERRED as to mechanism**; the SYSTEM context could equally
+   explain a failed exclusive open. The conclusion that matters — that the file is
+   the registered distro's backing disk — is **measured**, from
+   `BasePath=C:\Program Files\ClawFactory\WSL` read in the operator's own session.
+
+Everything else in this document is a reading.
+
+---
+
+## 19. WHAT THE NEXT SESSION INHERITS
+
+**One item, one operator touch, roughly an hour including the close-out.**
+
+1. Start the box: `az vm start -g clawfactory-validation -n cfv-182`, then confirm
+   the RDP rule still matches the build machine's live address before handing over
+   — it is a `/32` and the address can move.
+2. **Operator:** RDP to `cfv-182`, run `C:\cfv\start-runner.cmd` **elevated**
+   (NOT `wrapper.cmd`, which would re-run the install).
+3. `interim-v144-teardownfault.ps1 -Mode Inject` — two controls must fire.
+4. **Operator:** uninstall through Settings → Apps, **Yes** to Inno's dialog,
+   **No** to ClawFactory's, and read back the incomplete-teardown dialog verbatim.
+5. `interim-v144-teardownlog.ps1 -Expect INCOMPLETE` — requires
+   `CLAWFACTORY_TEARDOWN_INCOMPLETE`, a `READBACK` naming `/etc/clawfactory`, the
+   `In-distro teardown did NOT complete` ERROR line and the recovery instruction.
+6. `interim-v144-uninstate.ps1 -Mode After` — which also **validates the `UST.4a`
+   correction** made in §12.4 on the same box that motivated it.
+7. `interim-v144-teardownfault.ps1 -Mode Cleanup`.
+8. Teardown by explicit name, **NIC before public IP and NSG**, proven with an
+   unfiltered subscription-wide list.
+9. Move `#286` to done if and only if the run records `TEARDOWN_INCOMPLETE`, then
+   convert §16.4's withheld verdict into a yes or a no.
+
+**Do not** re-run anything already recorded here against this artifact: it is the
+same digest on the same box, and re-measuring it would spend an operator touch to
+learn nothing.
