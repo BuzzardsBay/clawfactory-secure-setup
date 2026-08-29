@@ -489,3 +489,150 @@ b701dda  validation(box D): four probes for the keep-Linux uninstall, all dry-ru
 
 All four files are `i/lf w/lf` in `git ls-files --eol`. `git status --short` is
 empty. **No shipped byte was changed.**
+
+---
+
+## 6. BOX PROVISIONED AND STAGED. All three derivations agree
+
+```
+[17:09:44]   uploaded combined-cfv-182.exe (440610608 bytes, confirmed at the service)
+[17:22:39] Staged, digest re-verified ON THE BOX. OK staged;
+           artifact=6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1 size=440610608
+[17:23:11]   WROTE wrapper=5201 runner=112 AutoAdminLogon=
+```
+
+**Derivation 1** by hand on the build machine (§2), **derivation 2** through blob
+storage with the byte count confirmed at the service on upload, **derivation 3**
+re-hashed on the box after a 440 MB transfer. The instruction was to stop if any
+differed. None did.
+
+`AutoAdminLogon=` is empty and was **asserted rather than set**. The driver arms no
+auto-logon, which is what makes the operator login the correct price of the
+PROMPT 15 credential rule rather than a defect to engineer around.
+
+**The RDP scope was verified twice, independently** — once by the driver's own
+read-back and once by a separate `az network nsg rule show` from this session,
+with this machine's live public address re-read at the same time rather than
+carried forward:
+
+```
+allow-rdp   67.164.251.99/32   3389   Allow   Inbound      NSG_EXIT=0
+ProvisioningState/succeeded, PowerState/running           VM_EXIT=0
+public IP: 20.69.122.150                                  IP_EXIT=0
+this machine's live public address, re-read: 67.164.251.99
+```
+
+Never `0.0.0.0/0`, and the /32 was checked against reality rather than against
+what it had been earlier.
+
+**On the admin credential.** `az vm create` requires a value, so the driver
+generates a random bootstrap password, passes it once and nulls it without
+printing it. The operator set their own at Card 1. **This session never called
+`az vm user update`, never generated, printed or requested a password, and never
+saw one.**
+
+### 6.1 Resources created, recorded now so teardown can be checked against them
+
+```
+cfv-182         Microsoft.Compute/virtualMachines
+cfv-182-osdisk  Microsoft.Compute/disks
+cfv-182VMNic    Microsoft.Network/networkInterfaces
+cfv-182-pip     Microsoft.Network/publicIPAddresses
+cfv-182-nsg     Microsoft.Network/networkSecurityGroups
+```
+
+Five resources. `az vm delete` removes only the first, so teardown sweeps the
+other four explicitly, **NIC first**, because it references the public IP and the
+NSG.
+
+---
+
+## 7. THE INSTALL, AND PHASE 1. **PASS, 15/0/0/4 of 19**
+
+The install ran in the operator's interactive session and was polled from here,
+one `run-command` at a time, reading the runner heartbeat separately from the
+install state so *"runner alive, job slow"* and *"runner dead"* stay
+distinguishable. Nine polls over roughly fourteen minutes:
+
+```
+poll 9/40  az_exit=0  17:52:52
+PHASE1_DONE=True
+SEED_OK=True
+RUNNER_HEARTBEAT=2026-08-28T23:55:52
+INSTALL_RESULT=INSTALLER_DONE=success
+LOG_TAIL:
+  2026-08-28 23:53:53.109   Need to restart Windows? Yes
+  2026-08-28 23:53:53.117   Will not restart Windows automatically.
+  2026-08-28 23:53:53.170   Log closed.
+```
+
+**Phase 1's verdicts:**
+
+```
+P1.5              PASS  install-result.txt reports success
+P1.2              PASS  Step-Preflight ran and passed (installer claim)
+P1.3.CTL          PASS  POSITIVE CONTROL: the enumeration can see a resource that IS there
+P1.3              PASS  All 34 required resources on disk (independent enumeration)
+P1.3b             PASS  Installer resource count and this probe agree
+P1.3c             PASS  CONTROL: absent resource must not be found
+P1.CHAN           PASS  POSITIVE CONTROL: the file-based WSL channel discriminates
+PIN.persona       PASS  Pin 1of7 persona.md
+PIN.soul          PASS  Pin 2of7 safety-rules.md (SOUL)
+PIN.soul.indistro PASS  Pin 2of7 SOUL as installed in distro
+PIN.soul.rootpin  PASS  Root-owned /etc/clawfactory/soul.sha256 matches pin
+PIN.workspaceSoul PASS  Pin 3of7 composed workspace SOUL matches pin
+PIN.studio.asar   PASS  Studio pin: the INSTALLED app.asar matches the build-time digest
+PIN.version       PASS  Installed version reports 1.4.4
+PIN.bundle        PASS  Bundle completeness (all 34 preflight resources shipped)
+
+PASS=15 FAIL=0 VOID=0 INFO=4  (counted 19 of 19 recorded rows)
+positive controls registered=2 fired=2
+PHASE VERDICT: PASS
+```
+
+**Evidence was retrieved through a byte-count gate, not read off the console:**
+
+```
+PULLED C:\cfv\phase1-out-probe.txt  vmBytes=11150 localBytes=11150 match=True
+PULLED C:\cfv\phase1-results.json   vmBytes=10426 localBytes=10426 match=True
+```
+
+**The two channels were COMPARED, not one trusted.** The results JSON tallies
+independently to `PASS 15, INFO 4, TOTAL_ROWS 19` with `controls registered=2
+fired=2` — identical to the transcript's own summary line.
+
+**This is a corroboration of box A's row 1, not a re-run of it, and is not
+reported as one.** Box A proved the clean install on `-Provider claude` on
+`cfv-179`; box B proved the same 34 resources and seven pins land on
+`-Provider later`. What box D adds is that the install this box's uninstall will
+be measured against is itself complete and pinned — which is the precondition for
+everything in §9 onward meaning anything.
+
+---
+
+## 8. THE SINK CREDENTIAL, WRITTEN BY ROOT TOOLING. **PASS 6/6**
+
+Per §1.2, phase 3 runs against a **loopback sink** credential so that the only
+code path in this validation that can transmit never has a real destination
+behind it.
+
+```
+SB.CHAN  PASS  POSITIVE CONTROL: the file-based WSL channel discriminates
+SB.1     PASS  SMTP sink credential written by the root tool, and the destination authorised with it
+SB.1b    PASS  The credential file is mode 600 root:root as measured on the box
+SB.2     PASS  Read-fetch allowlist carries the seeded destination outlook.office.com
+SB.3     PASS  Toolchain switch reads ON, with a nonzero live address count
+SB.4     PASS  Box state read back for the handover card
+
+CARD_TOOLCHAIN=ON addresses=28
+CARD_READFETCH=outlook.office.com
+CARD_SMTP=configured 127.0.0.1:2525 as clawfactory-validation
+
+PASS=6 FAIL=0 VOID=0 INFO=0  (counted 6 of 6)
+positive controls registered=1 fired=1
+PHASE VERDICT: PASS
+```
+
+`SB.1b` is worth separating from `SB.1`: *the credential was written* and *the
+file only root can read it* are different claims, and only the second is the one
+`G2.10` will go on to measure from the agent's side.
