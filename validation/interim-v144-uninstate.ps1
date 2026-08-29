@@ -383,7 +383,26 @@ $rows = @(
     @{ id='UST.3h'; n='the openclaw runtime is gone, binary and module tree';       v=(((Val $t 'OPENCLAW_BIN') -eq 'absent') -and ((Val $t 'OPENCLAW_MOD') -eq 'absent')); e="/usr/bin/openclaw = $(Val $t 'OPENCLAW_BIN') (before: $($b.openclawBin)); /usr/lib/node_modules/openclaw = $(Val $t 'OPENCLAW_MOD') (before: $($b.openclawMod))" },
     @{ id='UST.3i'; n='CLAWUSER IS GONE, and its home with it';                     v=(((Val $t 'CLAWUSER') -eq 'absent') -and ((Val $t 'CLAWUSER_HOME') -eq 'absent')); e="id clawuser = $(Val $t 'CLAWUSER') (before: $($b.clawuser)); /home/clawuser = $(Val $t 'CLAWUSER_HOME') (before: $($b.clawuserHome)). THIS IS THE ROW THE REINSTALL DEPENDS ON: on v1.4.1 a surviving clawuser aborted the next install at 'Failed to create clawuser (exit=1)'." },
     @{ id='UST.3j'; n='the state directories are gone';                             v=(((Val $t 'VARLIB_CF') -eq 'absent') -and ((Val $t 'USRLOCALLIB_CF') -eq 'absent')); e="/var/lib/clawfactory = $(Val $t 'VARLIB_CF') (before: $($b.varLibCf)); /usr/local/lib/clawfactory = $(Val $t 'USRLOCALLIB_CF') (before: $($b.usrLocalLibCf))" },
-    @{ id='UST.4a'; n='the Windows application directory is gone';                  v=(-not $win.appDir); e="C:\Program Files\ClawFactory = $($win.appDir) (before: $($b.win.appDir)). Keeping the Linux environment must not keep the product." },
+    # CORRECTED. The original row asserted `-not $win.appDir`, which is a
+    # RemoveAll property asserted on the KEEP-LINUX branch. On this branch the
+    # directory MUST survive: the Ubuntu registration's BasePath is
+    # C:\Program Files\ClawFactory\WSL and ext4.vhdx is the kept distro's backing
+    # disk, so deleting it would destroy the distro the user explicitly chose to
+    # keep -- the opposite of what the dialog promises. Left standing the row
+    # reads as "the uninstaller leaves the application directory behind", which
+    # is a ship-blocker-shaped claim about correct behaviour.
+    #
+    # The claim that IS load-bearing on this branch is that everything the
+    # INSTALLER put under {app} is gone. That is asserted directly, over an
+    # enumeration rather than over the directory's existence: the three things
+    # Inno placed there by name, plus a recursive count of every file under
+    # {app} that is not part of the WSL backing store. The surviving directory
+    # itself is not discarded -- it is reported as UST.4a2 INFO below, because
+    # it is card #306's subject and an assertion is not the place to hide it.
+    #
+    # cfv-182, run 1: FILE_COUNT=1 (ext4.vhdx only), DIR_COUNT=1 (WSL only),
+    # UNINS_EXE_LEFT=False SETUP_PS1_LEFT=False RESOURCES_DIR_LEFT=False.
+    @{ id='UST.4a'; n='everything the INSTALLER put under {app} is gone, the kept distro''s backing store excepted'; v=((-not $win.uninsExe) -and (-not $win.setupPs1) -and (-not $win.resourceDir) -and ($win.nonWslFileCount -eq 0)); e="unins000.exe = $($win.uninsExe) (before: $($b.win.uninsExe)); setup.ps1 = $($win.setupPs1) (before: $($b.win.setupPs1)); resources\ = $($win.resourceDir) (before: $($b.win.resourceDir)); files under {app} outside \WSL\ = $($win.nonWslFileCount) (before: $($b.win.nonWslFileCount)) [$(@($win.nonWslFiles) -join '; ')]. Keeping the Linux environment must not keep the PRODUCT; it must keep the distro's disk." },
     @{ id='UST.4b'; n='the uninstall registry entry is gone';                       v=($win.regKeyCount -eq 0); e="uninstall keys matching ClawFactory after = $($win.regKeyCount) [$(@($win.regKeys) -join '; ')] (before: $($b.win.regKeyCount) [$(@($b.win.regKeys) -join '; ')]). A stale entry leaves a dead Uninstall button in Settings." },
     @{ id='UST.4c'; n='HKLM\SOFTWARE\ClawFactory is gone';                          v=(-not $win.hklmProduct); e="HKLM:\SOFTWARE\ClawFactory = $($win.hklmProduct) (before: $($b.win.hklmProduct))" },
     @{ id='UST.4d'; n='ProgramData\ClawFactory is gone';                            v=(-not $win.programData); e="C:\ProgramData\ClawFactory = $($win.programData) (before: $($b.win.programData))" },
@@ -393,6 +412,15 @@ $rows = @(
 foreach ($r in $rows) { Record $r.id $r.n $(if ($r.v) { 'PASS' } else { 'FAIL' }) $r.e }
 
 Section "4. Reported as facts rather than asserted"
+# The surviving directory, reported rather than asserted. A user told "ClawFactory
+# Secure Setup was successfully removed from your computer" can still find a
+# C:\Program Files\ClawFactory folder holding ~6.8 GB. It is structurally
+# necessary and disclosed by implication in the dialog ("YES also unregisters the
+# Ubuntu distro and deletes its disk image (about 6 GB)"), so it is not a defect
+# -- but it is card #306's subject and it must stay visible in the evidence
+# rather than disappearing when the assertion above stopped naming it.
+Record 'UST.4a2' 'the {app} directory itself SURVIVES, holding the kept distro backing store' 'INFO' `
+    "C:\Program Files\ClawFactory = $($win.appDir) (before: $($b.win.appDir)); WSL\ext4.vhdx = $($win.wslVhdx) (before: $($b.win.wslVhdx)). This is REQUIRED on the keep-Linux branch, not a leftover: the Ubuntu registration's BasePath is this directory. Card #306."
 Record 'UST.6a' 'Credential Manager targets, target NAMES only' 'INFO' `
     "ClawFactory credential targets after = $($win.credCount) [$(@($win.credTargets) -join '; ')] (before: $($b.win.credCount) [$(@($b.win.credTargets) -join '; ')]). No credential value is read or printed by this probe."
 
