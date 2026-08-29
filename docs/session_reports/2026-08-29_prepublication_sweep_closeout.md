@@ -106,12 +106,41 @@ did): both readers return **the exposed value**, unchanged, and agree with each 
    place him. That is a small, decaying residue rather than a live exposure, and it is one more
    reason the current-tree redaction in 2a was worth doing on its own.
 
-### 2d. Publication gate, restated
+### 2d. Publication gate - stated too strongly, and revised on evidence
 
-**Do not publish until the re-read in 2c step 3 returns an address different from the
-baseline.** With that confirmed, the verdict stands as **SAFE AFTER CLEANUP IN THE CURRENT
-TREE** without the qualification Revision 1 had to carry, because the one item that genuinely
-remained in history will have been rendered meaningless rather than merely accepted.
+**Originally written:** *"Do not publish until the re-read in 2c step 3 returns an address
+different from the baseline."*
+
+**That was too strong, and the evidence for why came from this repository's own history.**
+The address was measured live and recorded on **eleven distinct dates between 2026-08-13 and
+2026-08-29** - 13th, 17th, 20th, 21st, 23rd, 24th, 25th, 26th, 27th, 28th, 29th - and is
+identical in all of them (`git log -S`, over public refs). **Seventeen days, eleven
+measurements, one value.** That is direct local evidence that this ISP's lease renews to the
+same address rather than a guess about a named provider's behaviour. An overnight outage is
+worth trying and may well work, but the odds are not the near-certainty the original wording
+implied, and a hard gate on a probabilistic mechanism could postpone the release indefinitely.
+
+**Revised position: attempt the rotation, verify it, and publish either way.**
+
+The residual if it does not rotate is smaller than the gate implied:
+
+- It is personal information, not a credential, and it is already redacted from the current
+  tree, so it appears only in superseded commit versions.
+- **The `/32` references do not describe the operator's own network posture.** In every
+  close-out the address is the *source* scope of an Azure NSG rule - the address permitted to
+  reach a validation VM's RDP port. It says nothing about any port being open at his home. A
+  reader who mistakes a source allowlist for an inbound posture would be reading it wrong.
+- The address is disclosed to every site he visits and every mail server he touches. Its
+  publication in a git history is a durability and name-association problem, not a novel
+  disclosure.
+- It decays on its own: the value stops describing his network the moment the lease does
+  eventually roll - a modem swap, a re-provisioning, an extended outage - after which the
+  historical record points at whoever holds it next.
+
+**What remains a genuine gate: nothing.** The credential is reclassified as never-used, the
+current tree is clean, and the IP rotation is a mitigation to attempt rather than a
+precondition. The verdict is **SAFE AFTER CLEANUP IN THE CURRENT TREE**, with the residue in
+2b/2c explicitly accepted.
 
 ---
 
