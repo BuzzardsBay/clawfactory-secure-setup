@@ -324,6 +324,14 @@ over a box that has already been run is not the same measurement as the first.
 Chat does not assert product behaviour from memory. Any claim in a chat session about what
 the product does, what ships, or how a user reaches it cites a repo file and line, a
 validation close-out, or the installer script. Otherwise it is labelled INFERRED.
+
+A CITATION PROVES THE PROVENANCE OF A SENTENCE, NOT THE PROVENANCE OF THE ARTEFACT.
+Before citing a file as evidence of what a user sees, establish that the file cited is the
+file that ships. For anything served, name the repository, branch and path the live surface
+is actually built from, and confirm the deployed bytes match. Do not read the nearest local
+copy with a plausible name. A stale copy answers every question you ask it, fluently and
+wrongly. The same applies to any artefact with more than one copy: a bundled file versus its
+repo original, a built installer versus its source, a vendored dependency versus upstream.
 ```
 
 **Why this one exists.** No rule governed it before. A false premise about the chat
@@ -333,3 +341,16 @@ argument about what a user experiences. It was caught only because the operator 
 direct question about his own product. Every other clause in this file guards a
 measurement; this one guards the sentences said between measurements, which had no guard at
 all. See `docs/FAILURE_CATALOGUE.md` entry 12.1.
+
+**Why the second paragraph exists.** Because the first one was obeyed and still produced a
+false claim. On 2026-08-29 a session asserted that `clawfactory.app` carried a broken
+ClawAgent download button, citing `docs/index.html:973` in this repository. The citation was
+accurate: that line said exactly that. The file was a stale, unpublished copy that serves
+nothing - `clawfactory.app` is built from `BuzzardsBay/clawfactory-site`, and this
+repository's Pages API returns 404. The claim was repeated four times and written into a
+close-out as a correction of the job brief, when the brief had been right. A cited claim is
+more dangerous than an uncited one, because the citation buys confidence that the reader has
+no cheap way to re-check. It was caught only when the operator said "fix the button" and
+fixing it required finding it. Acting on that instruction without finding it would most
+plausibly have meant re-uploading a ClawAgent installer that had been deliberately withdrawn
+as unsafe. See `docs/FAILURE_CATALOGUE.md` entry 12.3.

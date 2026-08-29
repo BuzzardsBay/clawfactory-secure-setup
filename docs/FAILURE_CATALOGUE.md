@@ -927,6 +927,68 @@ The corrected count and this history are both written into `docs/V1_5_BACKLOG.md
 third occurrence has somewhere to be checked against that is nearer to hand than a close-out
 section title.
 
+### 12.3 A citation that satisfied rule 18 to the letter and was still false, because the file cited was not the file that ships
+
+**Claimed.** That `clawfactory.app` carries a ClawAgent download button which resolves to a
+release page with no asset, and that publishing this repository would therefore fix only one
+of the site's two broken download links. Asserted in a chat session on 2026-08-29, repeated
+across four consecutive messages, and written into
+`docs/session_reports/2026-08-29_prepublication_sweep_closeout.md` as "Prompt corrections"
+item 1 - where it had the additional effect of **contradicting a premise in the job brief that
+was correct**, under a heading that exists specifically for correcting the brief.
+
+**True.** The live site is served from **`BuzzardsBay/clawfactory-site`**, not from this
+repository. `gh api repos/BuzzardsBay/clawfactory-secure-setup/pages` returns **404**;
+`gh api repos/BuzzardsBay/clawfactory-site/pages` returns
+`{"cname":"clawfactory.app","status":"built"}`, and that repository's `index.html` is
+byte-identical to what the domain serves. Every GitHub link on the live site:
+
+```
+3 x  https://github.com/BuzzardsBay/clawfactory-secure-setup/releases/latest
+1 x  https://github.com/BuzzardsBay/clawfactory-site
+```
+
+Three download links, one URL, no ClawAgent button anywhere. ClawAgent appears only as FAQ
+prose already stating it is superseded and unmaintained.
+
+**How it happened, and why the existing rule did not stop it.** Rule 18 and PROMPT 15 clause
+3 require that a chat claim about product behaviour cite a repo file and line. **The claim
+did.** It cited `docs/index.html:973`, that line said exactly what was claimed, and the
+citation was accurate. The file was a **stale, unpublished copy** last touched six days
+earlier that serves nothing - a fact this repository had already written down in
+`CHANGELOG.md:99`, which calls it *"the unpublished `docs/index.html`"*. The instrument
+introduced to prevent 12.1 was used correctly and produced a false claim anyway, because it
+verifies the **provenance of a sentence** and not the **provenance of the artefact the
+sentence sits in**.
+
+This is the Class 10 pattern arriving in Class 12: the remedy for an earlier defect carrying
+a defect of its own. It is worse than an uncited claim, because a citation buys confidence.
+Three sessions' worth of practice would have flagged "I think the site says X"; nothing
+flagged "`docs/index.html:973` says X".
+
+**A second cost, nearly paid.** Acting on "fix the button" without finding the button would
+most plausibly have meant re-uploading the ClawAgent installer to restore the download. Those
+binaries were deleted **deliberately**, on the operator's revised instruction, because the
+installer *"was not maintained and it was not safe to treat as sandboxed"* - recorded in
+`docs/session_reports/2026-08-29_doc_truth_and_clawagent_hazard_closeout.md` section 6. A
+false premise about a public surface was one inference away from republishing a withdrawn
+unsafe binary.
+
+**Changed.** Rule 18 gains the clause that this entry earned, added to
+`docs/VALIDATION_PREAMBLE.md` in the same commit:
+
+> **A citation proves the provenance of a sentence, not the provenance of the artefact.**
+> Before citing a file as evidence of what a user sees, establish that the file cited is the
+> file that ships. For anything served, that means naming the repository, branch and path
+> the live surface is actually built from and confirming the deployed bytes match - not
+> reading the nearest local copy with a plausible name. A stale copy answers every question
+> you ask it, fluently and wrongly.
+
+The general form, which is not limited to web pages: **the same question applies to any
+artefact with more than one copy** - a bundled file versus its repo original, a built
+installer versus its source, a vendored dependency versus upstream. Class 8 of this catalogue
+is the same failure at the byte level; this is it at the citation level.
+
 ---
 
 ## The instrument-defect record
