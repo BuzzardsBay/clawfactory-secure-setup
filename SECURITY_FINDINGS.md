@@ -1,6 +1,6 @@
 # ClawFactory Security Findings
 
-*Last updated: 2026-08-27. Applies to ClawFactory Secure Setup v1.4.4.*
+*Last updated: 2026-08-29. Applies to ClawFactory Secure Setup v1.4.4.*
 
 This document is for someone deciding whether to trust ClawFactory, not for someone who already has. It says what the product actually enforces, what it does not, and how we know the difference. Where a boundary is weaker than its name suggests, that is stated here rather than left for you to discover.
 
@@ -131,12 +131,13 @@ The user-facing wording is deliberately limited to match: *this covers deletion 
 
 **What changed in v1.4.4.** The quoting is fixed, and — the more important half — the script now measures. After it issues the stop it counts the agent's processes inside the sandbox and prints only what that count supports, per claim, with a non-zero exit when it cannot confirm. It can now report its own failure, which is the property it lacked.
 
-**Why it is here and not in the structural table.** Two reasons, and the first survives validation.
+**Why it is here and not in the structural table.** When this section was first written there were two reasons. Only one of them survived validation, and it is the one that matters.
 
-1. A kill switch is an action you take, not a boundary that holds. The structural table is for controls that hold *regardless of what the agent does*; a stopped process running as the agent's own identity can be started again by that identity. What the kill switch guarantees is that when you run it, it tells you the truth about what it managed to stop.
-2. **It has not been validated on a clean machine in this release.** The fix was proven on an installed v1.4.3 box by hand-patching that box, with the shipped script as a control that failed in the same run. That is real evidence and it is not the same as a clean-install measurement, and a claim does not enter the structural table on the strength of a hand-patched box.
+A kill switch is an action you take, not a boundary that holds. The structural table is for controls that hold *regardless of what the agent does*; a stopped process running as the agent's own identity can be started again by that identity. What the kill switch guarantees is that when you run it, it tells you the truth about what it managed to stop. That is a different kind of claim from the ones in that table, and it belongs here whatever the evidence behind it.
 
-**Status: fixed in v1.4.4, proven by hand-patch on an installed machine, not yet validated from a clean install.** Until it is, treat it as: it unmounts your granted folders, it attempts to stop the gateway and any running turn, and it will say so plainly if it could not.
+**The second reason has since expired, and it is recorded rather than deleted.** This section used to say the fix had not been validated on a clean machine, and that a claim does not enter the structural table on the strength of a hand-patched box. Both were true when written on 2026-08-27. **Both halves have now been measured from a clean install**, on the first of the four machines that validated v1.4.4: with a positive control confirming by two independent readers that the gateway was up beforehand, the script stopped a running gateway and turn; and with every one of its sandbox calls deliberately made to fail, it refused to claim success. It stays out of the structural table for the first reason alone.
+
+**Status: fixed in v1.4.4 and validated from a clean install.** It unmounts your granted folders, stops the gateway and any running turn, and counts what is still alive afterwards so it can tell you plainly if it could not stop something. It remains an action rather than a standing boundary.
 
 ### The build stamp is forgeable
 
