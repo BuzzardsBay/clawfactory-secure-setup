@@ -46,6 +46,63 @@ prefer removing the line over leaving it.
 
 ---
 
+## REVISION 3 - 2026-08-29 20:06Z, THE REPOSITORY IS PUBLIC
+
+**The operator made the repository public.** His decision and his action; this session did not
+run the command and did not change the visibility. Confirmed: `"private": false`,
+`"visibility": "public"`, `updated_at 2026-08-29T20:06:46Z`. Published **after** the Revision 2
+cleanup landed, so the current tree a stranger reads carries neither the credential line nor
+the operator's IP. The IP rotation had not yet been attempted; per Revision 2d that was a
+mitigation to attempt, not a gate.
+
+### 3a. The thing the job existed for: verified working
+
+Anonymous, unauthenticated `curl`, no token:
+
+```
+releases/latest  -> HTTP 200, redirects to /releases/tag/v1.4.4
+repo root        -> HTTP 200
+.../releases/latest/download/ClawFactory-Secure-Setup.exe -> HTTP 200
+```
+
+**The `clawfactory.app` ClawFactory download button now resolves for a stranger.** That was
+the whole point, and it is closed.
+
+### 3b. The GitHub-side surfaces, swept now that they are visible
+
+Task 1.4 item 7 listed these as un-swept because they are not in the git object database.
+Swept on publication:
+
+| Surface | State | Verdict |
+|---|---|---|
+| Issues | 0, any state | clean |
+| Pull requests | 0, any state | clean |
+| Wiki | `has_wiki: true`, but `git ls-remote ...wiki.git` -> **Repository not found** | no content; the HTTP 200 is GitHub's "create the first page" shell |
+| Actions runs | **41**, and their logs are now public | **all 41 are GitHub's built-in `pages build and deployment`.** No workflow file has ever been committed to `.github/workflows/` at any commit, so there is no custom CI and no log that could carry a build secret. Benign. |
+| Description | Product copy: "Free, open-source hardened OpenClaw installer for Windows..." | clean |
+| Topics / homepage | none set | clean |
+| Releases | one, `v1.4.4`, 1 asset, not draft | as intended |
+| Forks / stars | 0 / 0 | nothing mirrored yet at time of check |
+
+### 3c. One premise worth correcting for next time
+
+The operator's reasoning was *"no one is going to see it in the next hour anyway."* That is
+not how a new public repository behaves: GitHub emits public repo events to a firehose that
+archival services, code-search indexers and automated secret scanners consume within minutes,
+and GitHub's own secret scanning begins on visibility change. The practical assumption should
+be that the repository is enumerable and archivable from the moment of the flip, not after a
+grace period.
+
+**It changes nothing here**, and that is because of the order the work happened in, not luck:
+the credential was reclassified as never-used, and the cleanup commit removed both it and the
+IP from the current tree *before* the flip. The only thing exposed at publication is what
+Revision 2 already accepted - the IP in superseded commit versions. But the corollary does
+matter for the overnight modem plan: **anything archived in the first minutes holds the
+pre-rotation history regardless of what the address becomes later.** That lowers the value of
+the rotation further; it does not raise the risk, which was already assessed as low in 2d.
+
+---
+
 ## REVISION 2 - 2026-08-29, the cleanup executed, and an operator correction the verdict earned
 
 ### 2a. The cleanup, done
