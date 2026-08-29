@@ -612,20 +612,36 @@ minimum, enforced client-side at `scripts/azure-validate.ps1:181` - `az vm creat
 rejected it. This is the v1.0.4 validation attempt of 2026-05-06, before the move to Azure.
 **Checked against all 1034 public blobs: zero hits, with a positive control returning 179.**
 
-   **The `ClawTest` VM still exists on disk: `ClawTest.vdi`, 19,403,898,880 bytes (19.4 GB),
-   last modified 2026-04-27.** So this one credential is still the key to something real, and
-   it is the one file deliberately NOT deleted. Deleting the credential without the VM would
-   simply lock the operator out of 19.4 GB he cannot open.
+   **The `ClawTest` VM still exists on disk.** It is the one credential file deliberately NOT
+   deleted with the other nine: binning it alone would lock the operator out of a disk image he
+   still has.
 
-   **It is NOT running, and nothing anywhere is.** Stated explicitly because "still exists"
-   was misread as "still active", which is this close-out's wording problem and not the
-   operator's: `Get-Process VirtualBox*,VBox*` returns **none**; the machine's recorded
-   `lastStateChange` is **2026-05-06T14:49:38Z** and its newest `Logs\VBox.log` is
-   **2026-05-06 09:21**, so it has been powered off for nearly four months; it is a local
-   VirtualBox guest on the operator's own PC, so it bills nothing and is not internet-exposed;
-   and `az vm list` **with no resource-group filter, across the whole subscription**, returns
-   zero rows, so no Azure VM exists in any state. The only cost of the `ClawTest` VM is 19.4 GB
-   of disk.
+   **Corrected twice, both figures having been reported wrongly first:**
+
+   - **Footprint is 72,039,842,431 bytes (67.1 GB), not 19.4 GB.** The first number sized only
+     `ClawTest.vdi`. The folder also holds three snapshot disks
+     (`Snapshots\{7dbbdb04...}.vdi` at 31.9 GB, `{b458051d...}.vdi` at 9.4 GB, and a small
+     third) and three saved-memory `.sav` files totalling 11.2 GB. Registered snapshots:
+     *"Clean Windows 11 - ready to test"*, *"WSL1 installed ready to test clawfactory fix"*,
+     and *"Clean-Win11"* - the last described in its own metadata as the
+     *"Post-cleanup baseline 2026-05-06 ... used as revert target for validation loop"*.
+   - **State is `saved`, not powered off.** `VBoxManage showvminfo` reports
+     `VMState="saved"` - suspended with its RAM written to those `.sav` files, which is why
+     they exist. Saved is not running.
+
+   **Nothing is running, here or in Azure.** Stated explicitly because "still exists" was
+   misread as "still active", which is this close-out's wording problem and not the operator's:
+   `Get-Process VirtualBox*,VBox*` returns **none**; `lastStateChange` is
+   **2026-05-06T14:49:38Z** and the newest `Logs\VBox.log` is **2026-05-06 09:21**, so it has
+   been untouched for nearly four months; it is a local VirtualBox guest on the operator's own
+   PC, so it bills nothing and is not internet-exposed; and `az vm list` **with no
+   resource-group filter, across the whole subscription**, returns zero rows, so no Azure VM
+   exists in any state. The only cost of `ClawTest` is disk.
+
+   **Consequence for the removal command:** a machine in `saved` state cannot simply be
+   unregistered and deleted - the saved state must be discarded first, or VirtualBox refuses.
+   The command handed to the operator therefore runs `discardstate` before
+   `unregistervm --delete`.
 
 **3. Eight SAS-token files**, `.cfa-10{2,3,4}-sas.txt` and `.cfv-1{18,19,20,21,22}-sas.txt` in
 the profile root. Each holds one read-only download URL for an installer build in
@@ -637,7 +653,9 @@ the profile root. Each holds one read-only download URL for an installer build i
 
 **Disposition.** Files 1 and 3 are dead and were recommended for deletion; the delete command
 was refused by this session's tool-permission classifier and was therefore handed to the
-operator to run rather than worked around. File 2 is held pending a decision on the 19.4 GB VM.
+operator to run rather than worked around. **He ran it: all nine are confirmed gone** - a
+re-check found `.azure-clawfactory-creds` absent and zero `.cf*-sas.txt` remaining. File 2 is
+held until the `ClawTest` VM goes with it, which the operator has now authorised.
 
 ### The one thing the operator must do before anything else
 
