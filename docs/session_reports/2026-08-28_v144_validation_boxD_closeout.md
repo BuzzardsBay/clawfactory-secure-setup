@@ -739,3 +739,151 @@ and a transport refusal leaves it unmeasured rather than failed.
 two failing rows are caused by the rig, with the product behaving correctly in
 both.** The correct response is not to reinterpret the rows but to give them a
 sink the broker will talk to, which §10 does.
+
+---
+
+## 10. THE STARTTLS SINK: the refusal is confirmed as a PROPERTY, `G2.6` stays unmeasured
+
+`interim-v140-sinktls.ps1` exists to give the broker a sink it will talk to. Run
+on `cfv-182`:
+
+```
+ST.CHAN    PASS  POSITIVE CONTROL: the file-based WSL channel discriminates
+ST.0       FAIL  Toolchain switch restored to ON and the read-fetch list is back to the seeded entry only
+ST.1       PASS  The broker refuses to submit a credential over an unencrypted transport
+ST.2.CTL   PASS  POSITIVE CONTROL: the replacement sink is listening and speaks STARTTLS
+ST.2       VOID  A sink exists that the broker will accept, so delivery becomes measurable
+ST.3       VOID  Test 3 mechanism: approve executes the send and a receipt records it
+ST.6       VOID  Test 6: after a post-approval swap, the APPROVED bytes are the sent bytes
+ST.4       PASS  The throwaway CA and the replacement sink are gone, verified rather than assumed
+
+PASS=4 FAIL=1 VOID=3  (counted 8 of 8)
+positive controls registered=2 fired=2
+```
+
+**`ST.1` is the row that converts section 9.2 from an absence into a property.**
+The cleartext refusal is now recorded as a *positive* security assertion that
+passed, rather than as two rows that failed to produce a result.
+
+**`ST.2`/`ST.3`/`ST.6` VOID for a reason the probe anticipated in its own header:**
+
+```
+NODE_TLS_VERDICT=REJECTED unable to verify the first certificate; if the root CA is
+installed locally, try running Node.js with --use-system-ca
+```
+
+This node build does not read the system trust store, so a locally-trusted CA
+cannot make the broker accept the replacement sink. The probe says so and records
+VOID **with the reason** rather than as a Guard 2 failure, which is the correct
+call. It means **`G2.6` remains unmeasured on this box as on every previous one.**
+That is carried into the fitness statement as an explicit gap, not smoothed over.
+
+**`ST.4` PASS matters more than its position suggests:** the throwaway CA and the
+replacement sink are gone, verified rather than assumed, so the box does not enter
+the reboot pass trusting a test CA.
+
+### 10.1 `ST.0`'s FAIL is a STALE LITERAL IN THE INSTRUMENT, measured not guessed
+
+`ST.0` reported `readFetchIsSeededOnly=False` and explained it with a hard-coded
+parenthetical from a different run: *"(the operator added and removed
+docs.python.org during check 3 and check 5)"*. **No operator has touched Studio on
+this box.** An unexplained FAIL left standing is how a harmless result becomes a
+ship-blocker later, so the list was read rather than reasoned about.
+
+`interim-v144-fetchlist.ps1` reads it from **two independent directions**, the
+shipped control tool and the file the resolver actually reads, because a single
+reading cannot tell a stale file from a tool that misreports it:
+
+```
+FL> {"ok":true,"allow":[{"host":"outlook.office.com","addedAt":"2026-08-28T23:59:34.250Z"}],
+     "live":{"backend":"nftables","enforced":true,"addresses":18},
+     "toolchain":{"enabled":true,"live":{"enforced":true,"addresses":28},"unreadable":false}}
+FL> --FILE--
+FL> outlook.office.com
+FL> --END-FILE--
+
+TOOL_HOSTS count=1 [outlook.office.com]
+FILE_HOSTS count=1 [outlook.office.com]
+
+FL.CTL.READ  PASS  POSITIVE CONTROL: both readings had something to read
+FL.1         PASS  the control tool and the file the resolver reads agree
+FL.2         PASS  the seeded host is present
+FL.3         INFO  entries other than the seed: 0 []
+PASS=4 FAIL=0 VOID=0 INFO=1  (counted 5 of 5)
+```
+
+**The list IS seeded-only.** `ST.0`'s verdict is false, and the cause is one line:
+
+```
+validation/interim-v140-sinktls.ps1:65
+  $listOk = $fix.Out -match 'READ_FETCH_AFTER=www\.iana\.org$' -or ...
+```
+
+**`ST.0` asserts against `www.iana.org`, the seed host card `#282` deliberately
+replaced with `outlook.office.com`** because a host whose address set does not move
+cannot detect the stale-replay defect the seed exists to detect. The assertion was
+never updated. **Carded, not fixed:** it is a false FAIL in a probe that is not on
+box D's critical path, its cause is now measured and written down, and an
+unvalidated edit mid-run is the wrong trade.
+
+`FL.CTL.READ` is what makes `FL.1` mean anything: two empty readings from two
+absent sources would agree perfectly and prove nothing.
+
+### 10.2 INSTRUMENT DEFECT #4, IN MY OWN SWEEP: the one stale host was in the one shape the pattern could not see
+
+This is the most instructive finding of the session and it is a correction to
+section 3.
+
+My TASK 0.2 sweep reported the HOST class at **485 hits / 57 distinct** and I
+declared it clean, *"no stale entry"*, on the strength of a summary count with no
+per-value enumeration behind it. That is exactly the shape section 5.1 says a
+probe must never take: **a count with no listing beside it cannot be distinguished
+from a count over the wrong set.**
+
+The pattern required literal dots. The stale value is written into a PowerShell
+`-match` and is therefore **regex-escaped**:
+
+```
+tree-wide occurrences of 'iana' in scope: 5
+  stagebox.ps1:46        www.iana.org    comment, historical narrative of card #282  CURRENT as history
+  bootpath.ps1:42        www.iana.org    comment                                     CURRENT as history
+  bootpath.ps1:233,247   www.iana.org    a DELIBERATE stable-host control            CURRENT and correct
+  sinktls.ps1:65         www\.iana\.org  a LIVE ASSERTION                            STALE
+```
+
+**Four plain instances, all benign; one escaped instance, and it is both the only
+stale one and the only load-bearing one.** The sweep saw the four and was blind to
+the fifth.
+
+Re-run with a pattern tolerating an escaped dot:
+
+```
+BEFORE  HOST hits=485  distinct=57
+AFTER   HOST hits=538  distinct=71
+```
+
+**53 host literals tree-wide were invisible, across 14 additional distinct
+values.** Enumerated rather than summarised this time: 51 escaped literals across
+15 distinct values, being `api.anthropic.com`, `anthropic.com`, `api.github.com`,
+`registry.npmjs.org`, `raw.githubusercontent.com`, `clawhub.ai`, `api.clawhub.ai`,
+`smtp.gmail.com`, `smtp.office365.com`, `example.org` and `example.net` as
+deliberate negative controls, `neverssl.com`, `wikipedia.org`, `docs.python.org`.
+**Every one current and correct except `www\.iana\.org`.**
+
+**This is PROMPT 15's own canary rule, and I broke it.** It says in as many words:
+
+> *"A CANARY ONLY CERTIFIES THE PATTERN AGAINST THE SHAPE OF THE CANARY. Build the
+> canary to look like the thing you are afraid of missing, not like the things you
+> already know are there."*
+
+My three canaries were an HTML comment, a `.sh` here-doc and an uppercase digest.
+All three were unescaped plain values. I proved the sweep could see three shapes it
+had never been blind to, then declared clean a class containing the one value
+written in a fourth shape. **Six consecutive runs of this sweep have carried the
+same blind spot**, and it took a false FAIL from an unrelated probe to expose it.
+
+The transferable generalisation: **a value that is compared against is often
+written in the syntax of the comparison rather than in the syntax of the value.**
+A digest inside a `-match`, a path inside a regex, a version inside a
+`[ValidateSet]` are all the same class. The sweep instrument is a throwaway and is
+not committed, but this belongs in the next job card, and it is carded.
