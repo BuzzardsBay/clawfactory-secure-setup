@@ -8,7 +8,45 @@
 
 ---
 
-## VERDICT (Task 3.1)
+## REVISION 1 - 2026-08-29, same day, after the original verdict
+
+**The verdict below was downgraded from HISTORY IS CONTAMINATED to SAFE AFTER CLEANUP IN
+THE CURRENT TREE.** The original text is kept in place rather than rewritten, because an
+audit record that silently changes its own finding is worth less than one that shows what
+changed and why.
+
+**What changed.** The original classification of the credential as *live* rested on a stated
+inability to exclude reuse "from inside this repository". The operator supplied the fact that
+resolves it: **he has never used that username and password.** That is knowledge only he
+holds, and it is the correct source for it.
+
+**Corroborating evidence from the repo, found after the attestation and consistent with it:**
+`scripts/azure-validate.ps1` **never reads `C:\Users\bmcki\.azure-clawfactory-creds`.** A
+tree-wide grep returns only the `CLAUDE_ClawFactory.md` doc line and this close-out. The
+script prompts for the password at provisioning time with `Read-Host -AsSecureString`
+(line 173) and passes it to `az vm create --admin-password` (line 194). There is therefore
+**no code path by which that file's value could have reached any VM.** Whatever password the
+`cfv-*` boxes actually received was typed at the prompt, not read from that file.
+
+**Consequence.** The string is not a live secret and never was one. It is a plaintext
+password-shaped value for an account that was never created with it. The prompt's criterion
+for the third verdict - "a live secret exists in a commit that is not `HEAD`" - is no longer
+met.
+
+**What does NOT change.** The home IP, the subscription id and the rest of the personal and
+infrastructure information in Task 1.1 are all still present, and they are in historical
+commits as well as in `HEAD`. Redacting them in the current tree does not remove them from
+history. That residue is **accepted, not fixed**, and it is accepted precisely because none
+of it is a credential - which is the same reasoning that makes a history rewrite the wrong
+trade in Task 3.2, and that reasoning is unchanged.
+
+**One residual worth a line:** publishing a never-used password still discloses something
+small about how the operator constructs passwords. It is not a blocker; it is a reason to
+prefer removing the line over leaving it.
+
+---
+
+## VERDICT (Task 3.1) - AS ORIGINALLY WRITTEN, SUPERSEDED BY REVISION 1 ABOVE
 
 **HISTORY IS CONTAMINATED.**
 
@@ -18,7 +56,7 @@ A live credential exists in commits that are not `HEAD`, and also in `HEAD` itse
 |---|---|
 | File | `CLAUDE_ClawFactory.md` |
 | Line in `HEAD` | 1279 |
-| Redacted form | ``- **Creds:** `C:\Users\bmcki\.azure-clawfactory-creds` (clawadmin / [REDACTED - 20-char mixed-case password with a punctuation character])`` |
+| Redacted form | ``- **Creds:** `C:\Users\bmcki\.azure-clawfactory-creds` (clawadmin / [REDACTED - 22-char mixed-case password with a punctuation character])`` |
 | Commits carrying it | 9, spanning **2026-05-11 -> 2026-08-29** |
 | Earliest | `831b3e095f945b6922deab4b3af9df76d2546d4d` (2026-05-11, "docs: update CLAUDE.md and backlog to May 2026 state") |
 | Latest | `877ee511d5c2e39b0f71fb4901c593d0f5fe9648` (2026-08-29) - this is the blob `HEAD` carries |
@@ -154,7 +192,7 @@ is still scanned. Twelve pattern classes were run; the class set is recorded in
 |---|---|---|---|---|
 | 1 | **Provider API keys / tokens** | Prefix strings only | **Harmless** | `sk-ant-`, `sk-proj-`, `xai-`, `AIza` appear in `ClawFactory-Secure-Setup.iss` (the wizard's format-validation code), `CHANGELOG.md` and `docs/session_reports/API_KEY_WIZARD_2026-07-19.md`. The only "full-length" matches are the installer's own placeholders: `sk-ant-api03-XXXXXXXXXXXXXX`, `sk-proj-XXXXXXXXXXXXXXXXXXXX`, `xai-XXXXXXXXXXXXXXXXXXXX`. **Zero real key material in the public set.** |
 | 2 | **Private keys / certificates** | **None** | - | Zero matches for `-----BEGIN ... PRIVATE KEY-----`, `-----BEGIN CERTIFICATE-----`, `PuTTY-User-Key-File`. No `.pfx`, `.p12`, `.pem`, `.key`, `.crt`, `.cer` ever committed. |
-| 3 | **Passwords** | **ONE, live** | **LIVE SECRET** | `CLAUDE_ClawFactory.md:1279`, redacted at the top of this document. Nine blob versions, nine commits, 2026-05-11 -> 2026-08-29. |
+| 3 | **Passwords** | **ONE** | ~~**LIVE SECRET**~~ -> **DEAD: never used** (see Revision 1) | `CLAUDE_ClawFactory.md:1279`, redacted at the top of this document. Nine blob versions, nine commits, 2026-05-11 -> 2026-08-29. Classified live when written; downgraded on the operator's attestation that the pair was never used, corroborated by `scripts/azure-validate.ps1` having no read path to that file. |
 | 3b | Other password-shaped literals | 3 | **Dead / synthetic** | `password":"CFV-SYNTHETIC-SINK-NOT-A-SECRET-2026"` (a probe's deliberate sink), `apiKey": "<REDACTED>"` and `token": "<REDACTED>"` (already redacted in `CLAUDE_ClawFactory.md`), `Token="6595b64144ccf1df"` (a well-known Microsoft assembly publicKeyToken). |
 | 3c | **The validation SMTP app password** | **Not present** | - | Searched explicitly. Twenty-eight distinct prose references to it exist across the close-outs, every one of them recording that it was typed by Bret into the Studio panel by hand and entered no transcript, log or file. **The value itself appears nowhere.** Consistent with PROMPT 15: it is a deliberately KEPT throwaway and was not requested here. |
 | 4 | **`.env` files or their contents** | **None** | - | No `.env` path in any commit; zero `NAME_SECRET=value` / `*_PASSWORD=value` / `*_TOKEN=value` assignments in the public set. `C:\Users\bmcki\FrontierAI\.env` is *named* in `CLAUDE_ClawFactory.md` as a path; no content of it is present. |
@@ -357,8 +395,15 @@ methods - should ship as it stands.
 
 ### 3.1 Verdict
 
-**HISTORY IS CONTAMINATED**, as stated at the top. The credential is named there, redacted,
-with its 9 commits. No attempt was made to fix it, per the prompt.
+**SUPERSEDED BY REVISION 1: the verdict is SAFE AFTER CLEANUP IN THE CURRENT TREE.** The
+files to change are the table immediately below, which was originally written to argue that a
+current-tree cleanup would be *insufficient*. With the credential reclassified as never-used,
+that same table is now the sufficient list. Nothing in history needs touching - and the
+personal information that does remain in history is accepted rather than fixed, for the
+reasons in 3.2.
+
+*Original text, retained:* **HISTORY IS CONTAMINATED**, as stated at the top. The credential
+is named there, redacted, with its 9 commits. No attempt was made to fix it, per the prompt.
 
 For completeness, the *other* two verdicts and why neither applies: it is not SAFE TO PUBLISH
 AS IS, because of the credential and the home IP. It is not SAFE AFTER CLEANUP IN THE CURRENT
@@ -470,7 +515,63 @@ run the command.
 Four files were temporarily modified by the canary and restored byte-for-byte, verified by
 SHA-256; they are not in this commit and their hashes are unchanged.
 
+---
+
+## ADDENDUM (Revision 1) - what the credentials were actually for, and two off-repo finds
+
+Established after the original close-out, while answering the operator's question. **None of
+this is in the repository, so none of it changes the publication verdict** - it is recorded
+because it is the answer to "what are these for" and because the second file was not known to
+exist.
+
+**1. `C:\Users\bmcki\.azure-clawfactory-creds`** (`admin_user=clawadmin`, 22-char password,
+written 2026-05-06 12:45). The Windows local administrator account for the Azure validation
+VMs - the account an operator RDPs into a `cfv-*` box with, and the one auto-logon uses.
+`scripts/azure-validate.ps1:194` passes `--admin-username $AdminUser --admin-password $pw` to
+`az vm create`, with `$AdminUser` defaulting to `clawadmin`. **But the script never reads this
+file**; it prompts (line 173). The file was a note to self, and per the operator the value was
+never used. Verified identical to the `CLAUDE_ClawFactory.md:1279` value by direct comparison
+with a control that correctly reported DIFFER on a deliberately altered copy.
+
+**2. `C:\Users\bmcki\.clawtest-vm-creds`** (8-char user, 9-char password, written 2026-05-06
+08:29) - **not Azure at all.** It is the login for a **local VirtualBox VM named `ClawTest`**.
+Evidence: `validation-runs/v1.0.4-20260506T145651Z/REPORT.md:64` records
+`VBoxManage guestcontrol run` under that username, describing it as "a split-token admin";
+and `C:\Users\bmcki\VirtualBox VMs\ClawTest\` exists. Independent corroboration that it is not
+an Azure credential: the password is 9 characters, and Azure's Windows rule is a 12-character
+minimum, enforced client-side at `scripts/azure-validate.ps1:181` - `az vm create` would have
+rejected it. This is the v1.0.4 validation attempt of 2026-05-06, before the move to Azure.
+**Checked against all 1034 public blobs: zero hits, with a positive control returning 179.**
+
+   **The `ClawTest` VM still exists on disk: `ClawTest.vdi`, 19,403,898,880 bytes (19.4 GB),
+   last modified 2026-04-27.** So this one credential is still the key to something real, and
+   it is the one file deliberately NOT deleted. Deleting the credential without the VM would
+   simply lock the operator out of 19.4 GB he cannot open.
+
+   **It is NOT running, and nothing anywhere is.** Stated explicitly because "still exists"
+   was misread as "still active", which is this close-out's wording problem and not the
+   operator's: `Get-Process VirtualBox*,VBox*` returns **none**; the machine's recorded
+   `lastStateChange` is **2026-05-06T14:49:38Z** and its newest `Logs\VBox.log` is
+   **2026-05-06 09:21**, so it has been powered off for nearly four months; it is a local
+   VirtualBox guest on the operator's own PC, so it bills nothing and is not internet-exposed;
+   and `az vm list` **with no resource-group filter, across the whole subscription**, returns
+   zero rows, so no Azure VM exists in any state. The only cost of the `ClawTest` VM is 19.4 GB
+   of disk.
+
+**3. Eight SAS-token files**, `.cfa-10{2,3,4}-sas.txt` and `.cfv-1{18,19,20,21,22}-sas.txt` in
+the profile root. Each holds one read-only download URL for an installer build in
+`clawfactoryvalc467/installers`, e.g.
+`https://<account>.blob.core.windows.net/installers/ClawFactory-Secure-Setup-1.0.22.exe?se=...&sp=r&spr=https&sv=2026-04-06&sr=b&sig=...`
+- scoped `sp=r` (read), `sr=b` (single blob), `spr=https`. **All expired**; the latest is
+`se=2026-05-12`, three and a half months before this session. These are exactly the
+"SAS-signed installer URLs" `.gitignore` warns about; confirmed **none is tracked by git**.
+
+**Disposition.** Files 1 and 3 are dead and were recommended for deletion; the delete command
+was refused by this session's tool-permission classifier and was therefore handed to the
+operator to run rather than worked around. File 2 is held pending a decision on the 19.4 GB VM.
+
 ### The one thing the operator must do before anything else
 
-**Rotate the `clawadmin` password.** Then decide on the Task 2.2 redactions. Then, and only
-then, run the command in 3.3.
+~~Rotate the `clawadmin` password.~~ **Superseded by Revision 1: there is nothing to rotate.**
+The pair was never used, no VM exists, and no script reads the file. The remaining steps are
+the Task 2.2 redactions, then the command in 3.3 - run by the operator, not by this session.
