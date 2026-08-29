@@ -19,25 +19,29 @@ ever disagree, it wins. The record of what went wrong during development is in
 
 ## Read this before you download 6 GB
 
-**In this release you talk to the agent through a terminal.** The desktop icon opens
-a chat session in Windows Terminal. That is the primary way to use the product.
+**You talk to your agent in ClawChat, and you manage it in Studio. They are two
+different windows.** The desktop icon and the ClawChat entry in the Start Menu both
+open ClawChat, which is the chat interface.
 
-ClawFactory Studio ships and works, and it is where grants, approvals, web access and
-recovered files live. Four of its panels are real: **Workspace**, **Approvals**,
-**Web access** and **Recently deleted**. Seven are not in this release and say so on
-their own page: **Templates**, **Files**, **Activity**, **Chat**, **Agents**,
-**Skills** and **Settings**. Each of those seven renders a heading, the sentence
-`<Panel> is not part of this release.`, a line reading `Nothing here failed and
-nothing is misconfigured`, and a card listing the four panels you can use today.
+**ClawFactory Studio is the control panel, and seven of its eleven panels are not in
+this release.** Four are real and are where grants, approvals, web access and
+recovered files live: **Workspace**, **Approvals**, **Web access** and **Recently
+deleted**. The seven that are not in this release say so on their own page:
+**Templates**, **Files**, **Activity**, **Chat**, **Agents**, **Skills** and
+**Settings**. Each renders a heading, the sentence `<Panel> is not part of this
+release.`, a line reading `Nothing here failed and nothing is misconfigured`, and a
+card listing the four panels you can use today.
 
-Templates is the first item in the navigation, so it is likely the first thing you
-click. It is one of the seven.
+**Studio's own Chat panel is one of the seven.** Chat lives in ClawChat, not in
+Studio. And Templates is the first item in Studio's navigation, so it is likely the
+first thing you click, and it is one of the seven.
 
 This is stated here rather than left to be discovered after a 6 GB download and a
 20 minute install.
 
-*Source: box A close-out, section 14, matrix row 11 checks 9a to 9e, verified by hand
-over RDP with screenshots retained.*
+*Source for the panels: box A close-out, section 14, matrix row 11 checks 9a to 9e,
+verified by hand over RDP with screenshots retained. Source for the shortcuts: the
+`[Icons]` section of `ClawFactory-Secure-Setup.iss` at the build commit.*
 
 ---
 

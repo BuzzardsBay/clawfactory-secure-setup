@@ -28,11 +28,12 @@ which is the authority; if the two ever disagree, it wins.
 
 ## Three things to know before you download 440 MB
 
-**1. In this release you talk to the agent through a terminal.** The desktop icon
-opens a chat session in Windows Terminal. ClawFactory Studio ships and works, and four
-of its panels are real: Workspace, Approvals, Web access and Recently deleted. Seven
-are not in this release and say so on their own page: Templates, Files, Activity,
-Chat, Agents, Skills and Settings. Templates is the first item in the navigation.
+**1. Seven of Studio's eleven panels are not in this release.** You talk to your agent
+in ClawChat, which the desktop icon opens, and you manage it in ClawFactory Studio,
+which is a different window. Four Studio panels are real: Workspace, Approvals, Web
+access and Recently deleted. Seven say on their own page that they are not in this
+release: Templates, Files, Activity, Chat, Agents, Skills and Settings. Studio's own
+Chat panel is one of the seven, and Templates is the first item in its navigation.
 
 **2. Your data does reach your model provider.** That is what a hosted AI agent is.
 The sandbox runs on your machine; the model does not. What is gated by approval is
