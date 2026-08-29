@@ -774,7 +774,7 @@ card #274 status=done      card #275 status=done      card #276 status=done
 | VMs provisioned | one, `cfv-176`, `Standard_D2s_v4`, westus2, `clawfactory-win11-baseline-v2` |
 | VMs now | **none, subscription-wide** |
 | Orphans swept | OS disk, NIC, public IP, NSG — all deleted by explicit name, VM first then NIC |
-| RDP rule | `67.164.251.99/32`, a single `/32`, never `0.0.0.0/0`; gone with the NSG |
+| RDP rule | `<operator-ip-redacted>/32`, a single `/32`, never `0.0.0.0/0`; gone with the NSG |
 | Blobs | 6.98 GB reclaimed; evidence blobs retained, not billable compute |
 | Background tasks | none running |
 

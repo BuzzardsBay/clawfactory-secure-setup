@@ -535,7 +535,7 @@ the operator at provisioning with a password this session never held. RDP was
 scoped to a single `/32` for its whole life:
 
 ```
-{"access": "Allow", "port": "3389", "src": "67.164.251.99/32"}
+{"access": "Allow", "port": "3389", "src": "<operator-ip-redacted>/32"}
 ```
 
 **Starting state of the resource group**, taken before provisioning:

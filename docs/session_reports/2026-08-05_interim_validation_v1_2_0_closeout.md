@@ -404,7 +404,7 @@ handoff and include the resume command. `cfv-156` was deallocated twice while id
 total billed time was about two hours despite spanning a similar wall-clock window.
 
 **Temporary access opened and removed with the VM:** an NSG rule allowing RDP from
-`67.164.251.99/32` only, for Bret's credential-entry session. It never permitted any other
+`<operator-ip-redacted>/32` only, for Bret's credential-entry session. It never permitted any other
 source and died with the machine.
 
 ---

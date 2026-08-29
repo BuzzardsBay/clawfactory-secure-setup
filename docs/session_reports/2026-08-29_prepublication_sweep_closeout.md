@@ -46,7 +46,76 @@ prefer removing the line over leaving it.
 
 ---
 
-## VERDICT (Task 3.1) - AS ORIGINALLY WRITTEN, SUPERSEDED BY REVISION 1 ABOVE
+## REVISION 2 - 2026-08-29, the cleanup executed, and an operator correction the verdict earned
+
+### 2a. The cleanup, done
+
+- **`CLAUDE_ClawFactory.md` untracked** (`git rm --cached`) and added to `.gitignore` with a
+  comment recording why. **The file remains on disk** at its original path; only git has
+  stopped tracking it.
+- **The operator's public IP redacted to `<operator-ip-redacted>`: 28 occurrences across 13
+  tracked files.** Thirteen, not the twelve originally reported - this close-out itself had
+  become the thirteenth carrier by quoting the address three times while documenting it.
+  Verified with a control: the subject grep returns 0, and a positive control for the
+  replacement token returns 28. `git ls-files --eol` reports `i/lf w/lf` for all 13, so no
+  line-ending drift.
+
+### 2b. The correction, and what it is worth
+
+The operator's objection, in his words: *"That IP is in 12 files that are already committed.
+Redacting it now fixes the current tree but the old commits still hold it, and those become
+readable the moment the repo goes public. The verdict says safe after cleanup, and on the
+credentials it's right, but not on this."*
+
+**He is right about the label.** In fairness to the record, Revision 1 did state the substance
+- "they are in historical commits as well as in `HEAD` ... That residue is accepted, not
+fixed". But the verdict *name* the prompt supplies carries the gloss "Nothing in history needs
+touching", and applying that name to a state where personal information demonstrably does
+remain in history papers over exactly the thing a reader would want flagged. A correct body
+under a misleading heading is a defect, because the heading is what gets quoted.
+
+**And his fix is better than either option this session offered.** The choice presented was
+rewrite history (destroying the v1.4.4 provenance chain) or accept the exposure. He supplied a
+third: change the fact the data describes, so the historical record becomes inert. A leaked
+password is neutralised by rotating the password; a leaked dynamic IP is neutralised the same
+way. That the same move was not proposed here is a genuine gap in the analysis.
+
+### 2c. Where it needs qualifying, measured rather than asserted
+
+**Baseline, taken now, using the repo's own method** (`api.ipify.org`, per
+`validation/interim-v140-relgate-box.ps1:159`, cross-checked with `ifconfig.me/ip` as box D
+did): both readers return **the exposed value**, unchanged, and agree with each other.
+
+1. **"A few minutes" is likely to be too short.** Residential ISPs hand out addresses on DHCP
+   leases keyed to the modem, and a brief power-cycle usually re-acquires *the same* lease
+   because it has not expired. Hours, or overnight, materially improves the odds. This is a
+   probabilistic mechanism, not a command that returns success - which is why step 3 is not
+   optional.
+2. **The deterministic lever, if the outage does not work,** is changing the WAN-side MAC the
+   ISP sees - swapping or reconfiguring the router/modem. Not always possible with an
+   ISP-supplied gateway.
+3. **VERIFY, DO NOT ASSUME.** Re-read `api.ipify.org` afterwards and compare against the
+   baseline above. An unverified assumption that the address rotated is worse than no attempt,
+   because it retires a real concern on a guess. Same discipline as every other measurement in
+   this document: the control must actually fire.
+4. **It kills the forward risk, not the retrospective one.** Once the address changes, the
+   value in history points at whoever holds it next, and the *current* home network is no
+   longer identified - that is the whole of the practical risk and it is genuinely closed. What
+   survives is that the record still says this address was the operator's on given dates in
+   August 2026; anyone holding historical ISP-geolocation data for those dates could still
+   place him. That is a small, decaying residue rather than a live exposure, and it is one more
+   reason the current-tree redaction in 2a was worth doing on its own.
+
+### 2d. Publication gate, restated
+
+**Do not publish until the re-read in 2c step 3 returns an address different from the
+baseline.** With that confirmed, the verdict stands as **SAFE AFTER CLEANUP IN THE CURRENT
+TREE** without the qualification Revision 1 had to carry, because the one item that genuinely
+remained in history will have been rendered meaningless rather than merely accepted.
+
+---
+
+## VERDICT (Task 3.1) - AS ORIGINALLY WRITTEN, SUPERSEDED BY REVISIONS 1 AND 2 ABOVE
 
 **HISTORY IS CONTAMINATED.**
 
@@ -198,8 +267,8 @@ is still scanned. Twelve pattern classes were run; the class set is recorded in
 | 4 | **`.env` files or their contents** | **None** | - | No `.env` path in any commit; zero `NAME_SECRET=value` / `*_PASSWORD=value` / `*_TOKEN=value` assignments in the public set. `C:\Users\bmcki\FrontierAI\.env` is *named* in `CLAUDE_ClawFactory.md` as a path; no content of it is present. |
 | 5 | **Azure subscription id** | `43010359-...-10f6544b2978` | **Personal / infrastructure information** | `HEAD`: `CLAUDE_ClawFactory.md`, `REPORT.md`, `reports/AZURE_SIGNING_WIRED_20260706.md`, `docs/session_reports/HANDOFF_2026-08-20_card258.md`, and four `validation-runs/phase1-bake-*/log.md`. Not a credential on its own - it is not usable without an authenticated principal - but it is a durable identifier of the operator's Azure tenancy and an aid to anyone targeting it. |
 | 6 | **Resource group / VM / storage / signing names** | Many | **Personal / infrastructure information** | RG `clawfactory-validation` (westus2); storage account **`clawfactoryvalc467`** in 20+ files; images `clawfactory-win11-baseline` and `-v2`; signing account `clawfactory-signing`, cert profile `clawfactory-cert`, service principal `clawfactory-signing-sp`, endpoint `eus.codesigning.azure.net`; **~180 distinct `cfv-*` VM, NIC, NSG, pip and disk names**; admin usernames `clawadmin` and `cfvadmin`. All resources are torn down; the names remain a complete map of the operator's validation estate. |
-| 7 | **IP addresses** | 188 distinct | Mostly **harmless**, one **personal** | Harmless: `0.0.0.0`, `127.0.0.1`, RFC-5737 documentation addresses, ASN.1 OIDs that merely look like IPs (`1.3.6.1`, `2.5.29.19`), public resolvers (`1.1.1.1`, `8.8.8.8`, `9.9.9.9`), and the resolved allowlist sets for Anthropic (`160.79.104.10`), GitHub (`140.82.*`, `185.199.*`), Cloudflare (`104.16-21.*`, `172.6*`) and Canonical (`91.189.*`, `185.125.*`). Dead: ~30 ephemeral Azure `20.*`/`4.*`/`40.*` addresses of destroyed validation VMs, and `172.26.136.101` (a WSL NAT address). **Personal: `67.164.251.99`** - labelled in the material itself as "build machine public IP" and used as the RDP `/32` scope. See row 8. |
-| 8 | **Operator's home network address** | `67.164.251.99` | **PERSONAL INFORMATION** | Present in **12 files in `HEAD`**, all under `docs/session_reports/`: `2026-08-05_interim_validation_v1_2_0`, `2026-08-17_guard4_ground_truth`, `2026-08-19_switchprovider_and_validation`, `2026-08-23_v140_release_validation`, `2026-08-24_v140_validation_completion`, `2026-08-25_v141_validation`, `2026-08-26_v141_validation_closure`, `2026-08-27_v144_validation_boxA`, `2026-08-28_v144_validation_boxBC`, `2026-08-28_v144_validation_boxD`, `2026-08-29_v144_validation_boxD_completion`, `HANDOFF_2026-08-20_card258`. Several of them state in prose that it is the operator's own machine. This is the operator's residential IP, published against his real name, and it is the single worst item here after the credential. It is not a *secret* - it is *personal information*, and the distinction does not make it safe to publish. |
+| 7 | **IP addresses** | 188 distinct | Mostly **harmless**, one **personal** | Harmless: `0.0.0.0`, `127.0.0.1`, RFC-5737 documentation addresses, ASN.1 OIDs that merely look like IPs (`1.3.6.1`, `2.5.29.19`), public resolvers (`1.1.1.1`, `8.8.8.8`, `9.9.9.9`), and the resolved allowlist sets for Anthropic (`160.79.104.10`), GitHub (`140.82.*`, `185.199.*`), Cloudflare (`104.16-21.*`, `172.6*`) and Canonical (`91.189.*`, `185.125.*`). Dead: ~30 ephemeral Azure `20.*`/`4.*`/`40.*` addresses of destroyed validation VMs, and `172.26.136.101` (a WSL NAT address). **Personal: `<operator-ip-redacted>`** - labelled in the material itself as "build machine public IP" and used as the RDP `/32` scope. See row 8. |
+| 8 | **Operator's home network address** | `<operator-ip-redacted>` | **PERSONAL INFORMATION** | Present in **12 files in `HEAD`**, all under `docs/session_reports/`: `2026-08-05_interim_validation_v1_2_0`, `2026-08-17_guard4_ground_truth`, `2026-08-19_switchprovider_and_validation`, `2026-08-23_v140_release_validation`, `2026-08-24_v140_validation_completion`, `2026-08-25_v141_validation`, `2026-08-26_v141_validation_closure`, `2026-08-27_v144_validation_boxA`, `2026-08-28_v144_validation_boxBC`, `2026-08-28_v144_validation_boxD`, `2026-08-29_v144_validation_boxD_completion`, `HANDOFF_2026-08-20_card258`. Several of them state in prose that it is the operator's own machine. This is the operator's residential IP, published against his real name, and it is the single worst item here after the credential. It is not a *secret* - it is *personal information*, and the distinction does not make it safe to publish. |
 | 9 | **Hostnames / machine names** | **None sensitive** | - | Zero `DESKTOP-*`, `WIN-*` or `*.local` machine names. Every "hostname" hit is the product's own egress-allowlist vocabulary. The build machine's NetBIOS name (`Bret`) appears nowhere. |
 | 10 | **Email addresses** | 38 distinct | Mixed | **Personal:** `bmckinney1215@gmail.com` (also the author of 463 of 464 commits, so it is unavoidably public in the commit metadata), `bret@bretmckinney.com`, `hello@avitalresearch.com`. **Business, already public:** `support@clawfactory.app`, `licenses@clawfactory.app`, `hello@clawfactory.app`, `security@frontierholdingsllc.com`. **Validation mailboxes, throwaway:** `clawfactory.validation.0805@gmail.com`, `clawfactory.validation@hotmail.com`, `clawfactory.validation@outlook.com`, `agent@clawfactory.local`. **Harmless:** `*@example.com`, `*@example.invalid`, SSH KEX algorithm identifiers, and `128x128@2x.png`. |
 | 10b | **Cross-project disclosure** | `hello@avitalresearch.com` | **Personal / commercial** | It is the destination of the `support@clawfactory.app` forwarder, so a support email to ClawFactory publicly resolves to the operator's separate Avital Research venture. It is already in `CONTRIBUTING.md` and thrown in three error strings in `setup.ps1`, i.e. it already ships. Publishing does not change that; it is recorded so the choice is deliberate. |
@@ -376,7 +445,7 @@ The reasoning, in order of weight:
 
 Two things must change before they are published, and both are narrow:
 
-- **The home IP, `67.164.251.99`, in 12 files** - this is personal information about a
+- **The home IP, `<operator-ip-redacted>`, in 12 files** - this is personal information about a
   private individual at his home address, published under his real name. It has no audit
   value whatsoever: `<operator public IP, redacted>` carries exactly the same meaning in
   every one of the 12 places it appears. Replace it.

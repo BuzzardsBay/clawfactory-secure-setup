@@ -53,3 +53,10 @@ validation-runs/
 
 # Claude Code local state (scheduled task lock, etc.)
 .claude/
+
+# The operator's private working-context file. Never written to be read by anyone
+# else: it carried a plaintext VM admin credential (never used, but committed at
+# CLAUDE_ClawFactory.md:1279 from 2026-05-11), the Azure subscription id, Stripe
+# pricing and payout account, and the local paths of four other private projects.
+# Untracked in the 2026-08-29 pre-publication sweep. It stays on disk, out of git.
+CLAUDE_ClawFactory.md

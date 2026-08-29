@@ -182,10 +182,10 @@ an operator who cannot connect and a wasted touch:
 
 ```
 az network nsg rule show ... allow-rdp
-  allow-rdp  67.164.251.99/32  3389  Allow  Inbound  300      NSG_EXIT=0
+  allow-rdp  <operator-ip-redacted>/32  3389  Allow  Inbound  300      NSG_EXIT=0
 
-this machine, api.ipify.org   -> 67.164.251.99            LIVE_IP_EXIT=0
-this machine, ifconfig.me/ip  -> 67.164.251.99            SECOND_READER_EXIT=0
+this machine, api.ipify.org   -> <operator-ip-redacted>            LIVE_IP_EXIT=0
+this machine, ifconfig.me/ip  -> <operator-ip-redacted>            SECOND_READER_EXIT=0
 ```
 
 Two readers, one answer, and it equals the rule. Never `0.0.0.0/0`.

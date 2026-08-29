@@ -419,9 +419,9 @@ overnight, steps 8 to 10 tomorrow) and confirmed the RDP address.
 ```
 [14:32:42]   artifact verified: 6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1 (440610608 bytes), Authenticode Valid
 [14:32:43]   provider key present (value never printed)
-[14:32:43]   build machine public IP: 67.164.251.99
+[14:32:43]   build machine public IP: <operator-ip-redacted>
 [14:35:54] Provisioned.
-[14:35:57]   RDP rule confirmed by read-back: 67.164.251.99/32
+[14:35:57]   RDP rule confirmed by read-back: <operator-ip-redacted>/32
 [14:35:58]   public IP: 52.247.200.136
 [14:35:59]   agent: Ready
 [14:48:50] Staged, digest re-verified ON THE BOX. OK staged; artifact=6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1 size=440610608
@@ -442,7 +442,7 @@ read-back, and once afterwards by a separate `az network nsg rule show` from thi
 session:
 
 ```
-67.164.251.99/32   3389   Allow   Inbound
+<operator-ip-redacted>/32   3389   Allow   Inbound
 ```
 
 Never `0.0.0.0/0`.
@@ -1497,7 +1497,7 @@ set the admin password at Card 1. That is the expected and only intended use of
 `az vm user update` in this run: **this session never called it**, and it must not
 be called again.
 
-**RDP rule scope**, stated exactly as TASK 6 requires: `67.164.251.99/32`, port
+**RDP rule scope**, stated exactly as TASK 6 requires: `<operator-ip-redacted>/32`, port
 3389, Allow, Inbound, on `cfv-179-nsg`. Never `0.0.0.0/0`. Verified twice
 independently at creation and again at deallocation.
 
@@ -2288,7 +2288,7 @@ code not been checked, a parse failure would have read as "nothing found", which
 is precisely the answer the sweep was hoping for. Re-derived with a paren-free
 query and filtered locally: **0 resources remaining.**
 
-**RDP rule scope, as TASK 6 requires**: `67.164.251.99/32`, port 3389, Allow,
+**RDP rule scope, as TASK 6 requires**: `<operator-ip-redacted>/32`, port 3389, Allow,
 Inbound, on `cfv-179-nsg`. Never `0.0.0.0/0`. Created at provisioning, verified by
 read-back twice, and **deleted with the NSG.**
 

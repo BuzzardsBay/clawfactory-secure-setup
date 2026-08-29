@@ -565,7 +565,7 @@ product SAYS about itself, which is the one thing this release was supposed to h
 | Resource | State |
 | --- | --- |
 | cfv-174 | **TORN DOWN.** vm, nic, pip, nsg, disk, each by explicit name, every call exit 0 |
-| RDP rule | one rule, `67.164.251.99/32`, port 3389, created by read-back and confirmed still present after the reboot. No wider rule |
+| RDP rule | one rule, `<operator-ip-redacted>/32`, port 3389, created by read-back and confirmed still present after the reboot. No wider rule |
 | Throwaway CA | installed for one test and REMOVED, removal verified: `CA_STILL_PRESENT=no`, `SINK_STILL_RUNNING=no`. The box did not enter the reboot pass trusting a test CA |
 | Starting estate | verified clean before provisioning: storage account, VNET, two baseline images, zero VMs |
 

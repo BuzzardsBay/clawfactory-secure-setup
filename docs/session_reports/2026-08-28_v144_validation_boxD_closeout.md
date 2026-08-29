@@ -516,10 +516,10 @@ with this machine's live public address re-read at the same time rather than
 carried forward:
 
 ```
-allow-rdp   67.164.251.99/32   3389   Allow   Inbound      NSG_EXIT=0
+allow-rdp   <operator-ip-redacted>/32   3389   Allow   Inbound      NSG_EXIT=0
 ProvisioningState/succeeded, PowerState/running           VM_EXIT=0
 public IP: 20.69.122.150                                  IP_EXIT=0
-this machine's live public address, re-read: 67.164.251.99
+this machine's live public address, re-read: <operator-ip-redacted>
 ```
 
 Never `0.0.0.0/0`, and the /32 was checked against reality rather than against

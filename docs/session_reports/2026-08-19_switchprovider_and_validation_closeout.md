@@ -496,7 +496,7 @@ GitHub result as a toggle verdict.
 ## State to resume from
 
 - cfv-169 deallocated, disk retained, IP 40.64.120.61 Static, RDP rule scoped to
-  67.164.251.99/32.
+  <operator-ip-redacted>/32.
 - **The toolchain toggle was left ON** by the #261 diagnostic, not OFF. A resuming
   session must set its own precondition rather than assume the SP.9 end-state.
 - C:\cfv holds the runner, phaselib, wslchan and sp-prefix-fw.sh; all survived one

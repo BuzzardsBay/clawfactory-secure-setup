@@ -770,7 +770,7 @@ card #278  status=queued    (comment added)
 | VMs provisioned | one, `cfv-175`, `Standard_D2s_v4`, westus2 |
 | VMs now | **none, subscription-wide.** `VM_COUNT=0`, measured unfiltered |
 | Orphans swept | OS disk, NIC, public IP, NSG — all explicitly deleted, NIC first |
-| RDP rule | `67.164.251.99/32`, single `/32`, never `0.0.0.0/0`; gone with the NSG |
+| RDP rule | `<operator-ip-redacted>/32`, single `/32`, never `0.0.0.0/0`; gone with the NSG |
 | Residual | storage account, VNET, two baseline images — the documented expected set, nothing else |
 | Blobs | retained as evidence, not billable compute |
 | Background tasks | none running |

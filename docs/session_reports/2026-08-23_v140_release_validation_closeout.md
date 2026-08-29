@@ -355,7 +355,7 @@ one operator session of about ten minutes.
 | cfv-171 | torn down: vm, nic, pip, nsg, disk, each by explicit name, every call exit 0 |
 | cfv-172 | torn down the same way. Its install was spent and row 2 needed a clean box |
 | cfv-173 | torn down the same way, after its evidence was retrieved |
-| RDP | one rule, `67.164.251.99/32`, port 3389, read back and confirmed. No wider rule on the NSG |
+| RDP | one rule, `<operator-ip-redacted>/32`, port 3389, read back and confirmed. No wider rule on the NSG |
 | Studio 1.3.1 | new signed artifact, in `resources/` and in the Studio repo's release dir |
 
 Teardown was proven by an UNFILTERED resource list, polled until ARM's eventual consistency

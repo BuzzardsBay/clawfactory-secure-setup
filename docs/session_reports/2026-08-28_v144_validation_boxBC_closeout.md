@@ -591,9 +591,9 @@ outbound email, and `-ExpectRealCredential` is not passed on either box.**
 ```
 [11:23:55]   artifact verified: 6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1 (440610608 bytes), Authenticode Valid
 [11:23:57]   provider key present (value never printed)
-[11:23:57]   build machine public IP: 67.164.251.99
+[11:23:57]   build machine public IP: <operator-ip-redacted>
 [11:26:37] Provisioned.
-[11:26:40]   RDP rule confirmed by read-back: 67.164.251.99/32
+[11:26:40]   RDP rule confirmed by read-back: <operator-ip-redacted>/32
 [11:26:42]   public IP: 20.98.84.133
 [11:26:43]   agent: Ready
 [11:38:41] Staged, digest re-verified ON THE BOX. OK staged; artifact=6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1 size=440610608
@@ -614,7 +614,7 @@ PROMPT 15 credential rule rather than a defect to engineer around.
 read-back and once by a separate `az network nsg rule show` from this session:
 
 ```
-67.164.251.99/32   3389   Allow   Inbound      NSG_EXIT=0
+<operator-ip-redacted>/32   3389   Allow   Inbound      NSG_EXIT=0
 ProvisioningState/succeeded, PowerState/running  VM_EXIT=0
 ```
 
@@ -1225,7 +1225,7 @@ before upload and re-verified on the box after transfer.
 ```
 [13:03:28]   artifact verified: 6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1 (440610608 bytes), Authenticode Valid
 [13:03:28]   prior artifact verified: 67619df79179db11e76454e9734de244a51128b37c55f66071213c98f72719a9 (440525520 bytes)
-[13:06:13]   RDP rule confirmed by read-back: 67.164.251.99/32
+[13:06:13]   RDP rule confirmed by read-back: <operator-ip-redacted>/32
 [13:06:14]   public IP: 20.230.156.24
 [13:28:22] Staged, digest re-verified ON THE BOX. OK staged;
            artifact=6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1 size=440610608
@@ -1241,7 +1241,7 @@ checked there.
 RDP scope verified twice again, independently:
 
 ```
-67.164.251.99/32   3389   Allow   Inbound      NSG_EXIT=0
+<operator-ip-redacted>/32   3389   Allow   Inbound      NSG_EXIT=0
 ProvisioningState/succeeded, PowerState/running  VM_EXIT=0
 ```
 
@@ -1262,8 +1262,8 @@ runner, and that login is Card 2 step 3 either way.
 
 On restart, the public IP, the RDP rule and this machine's own address were all
 **re-read rather than carried forward**. The IP was unchanged (`Static`/`Standard`
-SKU), the rule still read `67.164.251.99/32`, and the build machine's live address
-read `67.164.251.99` — so the /32 was checked against reality rather than against
+SKU), the rule still read `<operator-ip-redacted>/32`, and the build machine's live address
+read `<operator-ip-redacted>` — so the /32 was checked against reality rather than against
 what it had been earlier.
 
 ---
