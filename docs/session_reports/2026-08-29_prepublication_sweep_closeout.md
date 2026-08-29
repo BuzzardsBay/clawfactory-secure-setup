@@ -46,6 +46,80 @@ prefer removing the line over leaving it.
 
 ---
 
+## REVISION 4 - 2026-08-29. Prompt correction 1 was WRONG. The prompt was right.
+
+**Retracted in full: the claim, repeated across four consecutive chat messages and recorded
+in "Prompt corrections" item 1, that `clawfactory.app` carries a ClawAgent download button
+which lands on an empty release page.** There is no such button and there never was one on
+the live site.
+
+### 4a. The error, and its cause
+
+I read `docs/index.html` **inside this repository** and asserted its contents as the live
+site, without first establishing which repository serves `clawfactory.app`. It does not.
+
+```
+gh api repos/BuzzardsBay/clawfactory-secure-setup/pages -> 404 Not Found
+gh api repos/BuzzardsBay/clawfactory-site/pages        -> {"cname":"clawfactory.app","status":"built"}
+```
+
+`clawfactory.app` is served from **`BuzzardsBay/clawfactory-site`**, whose `index.html`
+(44,274 bytes) is byte-identical to what the domain returns. The copy in this repository is
+39,955 bytes, last touched 2026-08-23, six days behind, and **serves nothing**. This
+repository's own `CHANGELOG.md:99` already called it *"the unpublished `docs/index.html`"* -
+the fact was written down and I did not read it.
+
+**Every GitHub link on the live site:**
+
+```
+3 x  https://github.com/BuzzardsBay/clawfactory-secure-setup/releases/latest
+1 x  https://github.com/BuzzardsBay/clawfactory-site
+```
+
+Three download links, all to the same URL, which now returns HTTP 200. **The original job
+brief's premise - "both download buttons" point at `clawfactory-secure-setup/releases/latest`
+- was accurate. My correction of it was the error.** ClawAgent appears on the live site only
+as FAQ prose already stating it is *"superseded, it is not maintained"*; a previous session
+had handled it correctly.
+
+### 4b. What the real defect was, and the fix applied
+
+Not a broken button on the site. A **stale, unpublished, and as of today public** marketing
+page sitting in this repository, which:
+
+- advertised a ClawAgent download at `clawagent-setup/releases/latest` that had been
+  **deliberately deleted** as unsafe - the release bodies now read *"Superseded and
+  unsupported. Do not rely on any security claim in this release"*, and the asset removal is
+  recorded in `docs/session_reports/2026-08-29_doc_truth_and_clawagent_hazard_closeout.md`
+  section 6, with the reason: *"It was not maintained and it was not safe to treat as
+  sandboxed."*
+- contradicted the live site on licensing and version claims;
+- carried a `CNAME` for `clawfactory.app`, a domain this repository does not serve - a latent
+  conflict with `clawfactory-site` had Pages ever been enabled here.
+
+**Fix: `docs/index.html` and `docs/CNAME` removed from this repository.** Nothing references
+them outside close-out records. The live site is untouched and needs no change.
+
+**What was explicitly NOT done: the ClawAgent binaries were not re-uploaded.** "Fix the
+button" could have been read as restoring the download. Re-publishing a knowingly unmaintained
+installer that the operator withdrew on safety grounds is not a fix, and the archive at
+`C:\Users\bmcki\ClawAgent-asset-archive-2026-08-29\` exists to make that reversible by the
+operator's decision, not by inference from a two-word instruction.
+
+### 4c. The lesson, which the preamble already contained
+
+PROMPT 15 clause 3, added in the v1.4.4 cycle: *"Chat does not assert product behaviour from
+memory. Any claim in a chat session about what the product does, what ships, or how a user
+reaches it cites a repo file and line, a validation close-out, or the installer script.
+Otherwise it is labelled INFERRED."* I cited a repo file and line - `docs/index.html:973` -
+and it was the wrong file. **Citing a line is not the same as verifying the artefact that line
+belongs to is the one in production.** The clause needs the stronger form, and
+`docs/FAILURE_CATALOGUE.md` should carry it: *a citation must establish that the file cited is
+the file that ships.* This one was caught only because the operator said "fix the button" and
+the fix required finding the button.
+
+---
+
 ## REVISION 3 - 2026-08-29 20:06Z, THE REPOSITORY IS PUBLIC
 
 **The operator made the repository public.** His decision and his action; this session did not
