@@ -887,3 +887,341 @@ written in the syntax of the comparison rather than in the syntax of the value.*
 A digest inside a `-match`, a path inside a regex, a version inside a
 `[ValidateSet]` are all the same class. The sweep instrument is a throwaway and is
 not committed, but this belongs in the next job card, and it is carded.
+
+---
+
+## 11. TASK 1 IS COMPLETE. All three of box A's owed credential rows are CLOSED
+
+The three rows box A VOIDed for one cause — no credential — now carry real
+verdicts, and they were taken in the two-stage order section 1.2 set out so that
+the box never held a real credential and a live send path at the same time.
+
+### 11.1 `G2.10`, taken against the sink credential
+
+```
+G2.10   PASS  Test 10: credential file unreadable by the agent uid
+G2.10c  PASS  CONTROL: a world-readable config IS readable by the agent
+```
+
+On `cfv-179` this row FAILed **while its own control passed**, which box A read
+correctly as the reader working and the subject being absent. With the file
+present the permission boundary exists and is measured from the agent's side: the
+agent uid is refused and a world-readable config in the same directory is not, so
+the denial is a boundary rather than a missing file.
+
+### 11.2 `S.4` and `S.4leak`, taken against the REAL credential, post-reboot
+
+The operator entered the kept throwaway in Studio (Approvals → Email settings).
+The panel reported it back without the secret, which is the documented design:
+
+```
+Currently sending as clawfactory.validation.0805@gmail.com
+via smtp.gmail.com:587 - signed in as clawfactory.validation.0805@gmail.com
+Your password is stored where only the system account can read it. It is not
+shown here and cannot be retrieved from this screen.
+Saved. Your agent can now queue email through smtp.gmail.com, for your approval only.
+```
+
+Phase 4, post-reboot pass:
+
+```
+S.CHAN.POSTREBOOT    PASS  POSITIVE CONTROL: the file-based WSL channel discriminates
+S.1.POSTREBOOT       PASS  No route to SMTP for uid 1000 at any destination
+S.1ctlA.POSTREBOOT   PASS  CONTROL (must succeed): allowlisted 443 connects
+S.1ctlB.POSTREBOOT   PASS  CONTROL (must fail): non-allowlisted 443 blocked
+S.1ctlC.POSTREBOOT   PASS  CONTROL (must succeed): the probe can observe a real listener
+S.4.POSTREBOOT       PASS  Credential unreadable by the agent uid
+S.4leak.POSTREBOOT   PASS  Credential value absent from logs, receipts, errors, process listing
+S.4ctl.POSTREBOOT    PASS  CONTROL: scanner finds the secret in the credential file itself
+
+PASS=8 FAIL=0 VOID=0 INFO=0  (counted 8 of 8 recorded rows)
+PHASE VERDICT: PASS
+```
+
+**`S.4leak` is a REAL verdict, not a synthetic one, and that is the whole point of
+TASK 1.4.** The host was read rather than assumed:
+
+```
+CREDSTAT /etc/clawfactory/send-credential.json mode=600 owner=root:root
+CREDHOST=smtp.gmail.com
+secret configured, length=16
+SCAN /var/lib/clawfactory hits=0     SCAN /var/log hits=0
+SCAN /home/clawuser hits=0           SCAN /tmp hits=0
+SCAN /etc/systemd hits=0             SCAN journal hits=0
+SCAN ps hits=0                       SCAN env-of-broker hits=0
+CONTROL_SCANNER_WORKS
+```
+
+Eight surfaces, zero hits, **and a control proving the scanner is not blind** — a
+zero-hit scan from a scanner that cannot find the secret where it legitimately
+lives would be a false pass. Only the LENGTH of the secret ever reached a
+transcript; the value did not.
+
+Had the sink credential still been in place, `S.4leak` would have recorded VOID
+with the reason *"the configured credential points at the loopback sink, so it is
+synthetic"* — which is exactly the defect TASK 1.4 names, and it is the reason the
+real credential had to be present for this pass and absent for phase 3.
+
+**Zero outbound email.** `phase3b` was not run, `-ExpectRealCredential` was not
+passed, `G2.198` recorded VOID with its reason, and the only SMTP destination
+anywhere in phase 3 was the loopback sink.
+
+---
+
+## 12. THE HEADLINE: THE KEEP-LINUX UNINSTALL
+
+### 12.1 The before-state, held and hashed. **PASS 8/8**
+
+```
+DISCOVERED_UNITS   fenced=True count=11  [clawfactory-allow-providers.service
+  clawfactory-allow-providers.timer clawfactory-egress-refresh.service
+  clawfactory-fw.service clawfactory-proxy.service clawfactory-quarantine-gc.service
+  clawfactory-quarantine-gc.timer clawfactory-quarantine.service
+  clawfactory-send-gc.service clawfactory-send-gc.timer clawfactory-send.service]
+DISCOVERED_ENABLED fenced=True count=8   [5 x multi-user.target.wants + 3 x timers.target.wants]
+DISCOVERED_SBIN    fenced=True count=17  [all seventeen]
+DISCOVERED_MAPS    fenced=True count=2   [/etc/clawfactory/read-fetch-ips.map
+                                          /etc/clawfactory/toolchain-ips.map]
+held snapshot written to C:\cfv\uninstate-before.json (3818 bytes)
+
+PASS=8 FAIL=0 VOID=0 INFO=0  positive controls registered=3 fired=3
+```
+
+**`UST.1a` and `UST.1b` settle something on their own, before the uninstall even
+runs.** The uninstaller's eleven-unit `CF_UNITS` list and its seventeen-helper `rm`
+list are **exactly** the set the installer places — zero differences in either
+direction. That is v1.4.2's completeness claim verified from the installer's side.
+A difference in the `onBoxNotDerived` direction would have been the v1.4.2 defect
+class recurring, because the drift backstop deletes the FILE and leaves the
+ENABLEMENT.
+
+### 12.2 The dialog, quoted as the operator saw it. **The copy is correct**
+
+Two dialogs fire. Inno's *"Are you sure you want to completely remove…"* first,
+answered **Yes**; then ClawFactory's own, answered **No**:
+
+```
+                         ClawFactory Uninstall
+
+  Also remove the Ubuntu Linux distro that ClawFactory created?
+
+  ClawFactory is removed from this machine either way: the agent, its
+  configuration and plugins, clawuser's home directory, the OpenClaw
+  runtime, and every ClawFactory service and firewall rule.
+
+  YES also unregisters the Ubuntu distro and deletes its disk image (about 6 GB).
+  Choose this unless something else on this machine uses that distro.
+
+  NO leaves the now-empty Ubuntu distro registered, so anything else that
+  shares it keeps working. You can install ClawFactory again later and it
+  will reuse the distro.
+
+  Your ClawChat conversation history is stored on Windows, under
+  %APPDATA%\ClawChat, and neither choice deletes it.
+
+                                          [ Yes ]   [ No ]
+```
+
+**TASK 3.1, by hand, from the operator's screen:**
+
+| Check | Result |
+| --- | --- |
+| mid-sentence wrap | **none** — every paragraph wraps at word boundaries. v1.4.2 made each paragraph one logical line and let MessageBox wrap, which removed the defect as a class rather than re-tuning it |
+| wider than the screen | **no**, fully contained, nothing cut off |
+| Yes still the default button | **yes**, focused — consistent with `MessageBoxDefaultButton::Button1`. The default button and the `/SILENT` default must select the same branch, and they do |
+| wording | matches `resources/uninstall.ps1:106-110` **word for word** |
+
+**TASK 3.2: the mojibake class is ABSENT from this dialog, measured from both
+directions.** Predicted from the bytes before the box existed
+(`resources/uninstall.ps1` carries zero non-ASCII bytes, section 1.1) and
+confirmed on screen: `clawuser's` renders with a correct apostrophe,
+`%APPDATA%\ClawChat` is intact, and the copy contains **no em dashes at all** —
+it uses colons and full stops throughout. The job card's premise was wrong about
+this dialog and is now wrong by measurement rather than by argument.
+
+*One correction to the record, in the instrument not the product:* box A's §18.1
+transcription of this dialog dropped an "and" — it quoted *"the OpenClaw runtime,
+every ClawFactory service"*. The shipped bytes and this render both read *"the
+OpenClaw runtime, **and** every ClawFactory service and firewall rule."*
+
+The uninstall then reported, unqualified:
+
+```
+ClawFactory Secure Setup was successfully removed from your computer.
+```
+
+Worth noting against box A, which saw the *"Some elements could not be removed"*
+variant because ClawChat was running. Here the message is the unqualified one.
+
+### 12.3 The read-back. Every held item, measured. **22 PASS, 1 FAIL, 1 INFO of 24**
+
+```
+UST.CHAN.After        PASS  POSITIVE CONTROL: the file-based WSL channel discriminates
+UST.CTL.FENCE.After   PASS  POSITIVE CONTROL: every list the reader was asked for was actually emitted
+UST.CTL.AFTER         PASS  POSITIVE CONTROL: the reader still answers present for things that ARE present, AFTER the uninstall
+UST.CTL.NEG2          PASS  NEGATIVE CONTROL: a path that has never existed still reads absent
+UST.PRE.SNAP          PASS  PRECONDITION: the held BEFORE snapshot exists
+UST.3z                PASS  the snapshot being compared against is a BEFORE snapshot
+UST.PRE.COMPLETE      PASS  PRECONDITION: the held snapshot recorded a COMPLETE install
+
+UST.3a  PASS  the eleven unit FILES are gone                         11 -> 0
+UST.3b  PASS  every ENABLEMENT symlink is gone, not just the files    8 -> 0
+UST.3c  PASS  the seventeen /usr/local/sbin helpers are gone         17 -> 0
+UST.3d  PASS  /usr/local/bin/clawfactory-send is gone
+UST.3e  PASS  the allow-providers drop-in DIRECTORY is gone
+UST.3f  PASS  /etc/clawfactory is gone, and the retention maps with it   2 maps -> 0
+UST.3g  PASS  THE FIREWALL TABLE IS GONE
+UST.3h  PASS  the openclaw runtime is gone, binary and module tree
+UST.3i  PASS  CLAWUSER IS GONE, and its home with it
+UST.3j  PASS  the state directories are gone
+UST.4a  FAIL  the Windows application directory is gone
+UST.4b  PASS  the uninstall registry entry is gone
+UST.4c  PASS  HKLM\SOFTWARE\ClawFactory is gone
+UST.4d  PASS  ProgramData\ClawFactory is gone
+UST.4e  PASS  the scheduled tasks are gone
+UST.5   PASS  the distro is STILL REGISTERED, which is what this branch promises
+UST.6a  INFO  Credential Manager targets, target NAMES only
+
+PASS=22 FAIL=1 VOID=0 INFO=1  (counted 24 of 24 recorded rows)
+positive controls registered=3 fired=3   preconditions declared=2 met=2
+```
+
+**`UST.CTL.AFTER` is the row that makes the other twenty-one mean anything.** A
+reader that had broken and now answered "absent" to everything would have produced
+an identical-looking clean sweep. It was proven, after the uninstall, still able to
+see `/etc` and `/bin/bash`, and still able to report a never-existent path as
+absent.
+
+**`UST.3b` and `UST.3i` are the two v1.4.2 rows that matter most.** Eight
+enablement symlinks went to zero — an enabled unit pointing at a deleted script is
+a failed unit in the journal at every future boot of a machine whose owner
+believes the product is gone, and that is card `#285`'s exact defect. And
+`clawuser` is gone with its home, which is card `#287` and the precondition for
+the reinstall.
+
+### 12.4 The single FAIL is MY PROBE, and the correct verdict is the opposite
+
+`UST.4a` asserts *"the Windows application directory is gone"*. It is **a
+RemoveAll property asserted on the keep-Linux branch**, and left uncorrected it
+reads as *"the uninstaller leaves the application directory behind"* — a
+ship-blocker-shaped claim about correct behaviour. Root-caused by measurement, in
+three steps.
+
+**What is actually left:**
+
+```
+APPDIR_EXISTS=True
+FILE_COUNT=1
+  LEFT C:\Program Files\ClawFactory\WSL\ext4.vhdx  6784286720 bytes
+DIR_COUNT=1
+  LEFTDIR C:\Program Files\ClawFactory\WSL
+PROC_COUNT=0                 <- no ClawChat/ClawFactory/Studio process is running
+CTL_WINDIR=True  CTL_NEVER=False    <- the reader discriminates in both directions
+```
+
+**What the installer put there is gone:**
+
+```
+UNINS_EXE_LEFT=False        SETUP_PS1_LEFT=False        RESOURCES_DIR_LEFT=False
+```
+
+**And the decisive reading, which had to come from the operator's session because
+the distro is registered to `clawadmin` and `run-command` is SYSTEM:**
+
+```
+Ubuntu  BasePath=C:\Program Files\ClawFactory\WSL
+  NAME      STATE       VERSION
+* Ubuntu    Stopped     2
+```
+
+**The residual file is the kept distro's own backing disk.** A registered WSL
+distro must have its VHDX; deleting it would destroy the distro the user
+explicitly chose to keep, which is the opposite of what the dialog promises. The
+dialog even prices it — *"YES also unregisters the Ubuntu distro and deletes its
+disk image (about 6 GB)"* — so a ~6.8 GB image surviving a NO is the documented
+behaviour.
+
+**This is not box A's residual.** That one was a running `ClawChat.exe` the OS
+refused to delete; here `PROC_COUNT=0` and the cause is entirely different.
+
+Two SYSTEM-context readings in the same diagnostic were **discarded rather than
+used**: the `HKCU` Lxss enumeration returned nothing, and `wsl.exe` answered
+`Running WSL as local system is not supported. Error code:
+Wsl/WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED`. Both are standing trap 3 — the artefact
+that produced box C's false "Studio is not installed" claim. Named as artefacts,
+not results.
+
+**Corrected verdict for row `UST.4a`: the keep-Linux uninstall removed everything
+it installed under `{app}`, and the only survivor is the kept distro's backing
+store, which must survive.** The probe row was fixed rather than carded, because
+the second uninstall later in this run exercises the fixed row on this same box
+and therefore validates it.
+
+**One product observation, not a defect, worth carding:** after *"ClawFactory
+Secure Setup was successfully removed from your computer"*, a directory named
+`C:\Program Files\ClawFactory` remains, holding 6.8 GB. It is disclosed by
+implication in the dialog and it is structurally necessary, but a user who goes
+looking will find a ClawFactory folder after being told ClawFactory was removed.
+Same family as box A's `#300`.
+
+### 12.5 TASK 2.6: the teardown log. **PASS 7/8, and the log was DISCOVERED**
+
+```
+USING_LOG=C:\Users\clawadmin\AppData\Local\Temp\ClawFactory-Uninstall.log
+BRANCH_STATE=KEEP_LINUX
+STATE=TEARDOWN_OK   (NO_LOG | NO_MARKER | TEARDOWN_OK | TEARDOWN_INCOMPLETE | BOTH_MARKERS)
+READBACK_PARSED units=0 sbin=0 enabled=0 left='[]'
+
+TL.PRE.LOG     PASS  PRECONDITION: an uninstall log was found on this box
+TL.CTL.SEARCH  PASS  POSITIVE CONTROL: search target is searchable (the uninstall log)
+TL.PRE.BRANCH  PASS  PRECONDITION: the uninstaller took the KEEP-LINUX branch
+TL.1           PASS  the teardown reports state TEARDOWN_OK
+TL.2           PASS  the teardown printed a parseable READBACK line naming what it left
+TL.3           PASS  the READBACK reports units=0 sbin=0 enabled=0 left=[ ]
+TL.4           PASS  the Windows side logged the success sentence only because the marker was present
+TL.6           INFO  the in-distro teardown exit code, reported as a fact
+
+PASS=7 FAIL=0 VOID=0 INFO=1  controls 1/1  preconditions 2/2
+```
+
+**The log path was discovered across every candidate profile rather than taken
+from `$env:TEMP`.** It lives in `clawadmin`'s temp; anything dispatched through
+`run-command` runs as SYSTEM and would have looked in a different directory
+entirely and found nothing — reporting NO_LOG on a box that has one.
+
+**`TL.3` is card `#286`'s claim, met exactly**, and it is independently
+corroborated: the uninstaller's own in-distro read-back says `units=0 sbin=0
+enabled=0 left=[ ]`, and `interim-v144-uninstate.ps1 -Mode After` measured the same
+four subjects from outside and agrees. Two instruments, one answer.
+
+**`TL.4` is the row that detects the pre-v1.4.2 defect specifically**: the Windows
+side now logs *"verified by read-back inside the distro"* only because the marker
+was present, where the old code logged *"In-distro ClawFactory artifacts removed"*
+unconditionally.
+
+### 12.6 TASK 2.8: the next boot of the kept distro. **PASS 6/7**
+
+```
+NB.CHAN         PASS  POSITIVE CONTROL: the file-based WSL channel discriminates
+NB.CTL.RESTART  PASS  POSITIVE CONTROL: the distro really restarted: its boot_id changed
+NB.CTL.QUERY    PASS  POSITIVE CONTROL: systemctl list-unit-files can actually answer on this distro
+NB.1            PASS  systemctl list-unit-files 'clawfactory-*' returns nothing enabled at the next boot
+NB.2            PASS  clawfactory-fw.service is neither present nor failed
+NB.3            PASS  no ClawFactory unit is in the failed state after the restart
+NB.4            INFO  what this boot journal says about ClawFactory, reported as a fact
+
+CFUNIT_STATE=NONE_LISTED   FW_STATE=ABSENT
+PASS=6 FAIL=0 VOID=0 INFO=1  positive controls registered=3 fired=3
+```
+
+**Both controls are what make this row a result rather than a shrug.**
+`NB.CTL.RESTART` proves the distro genuinely restarted — without it an unchanged
+unit list proves only that nothing happened. `NB.CTL.QUERY` proves `systemctl`
+could answer at all, by finding rows for a glob that must match on any Ubuntu: a
+`systemctl` that cannot reach a running systemd prints nothing, and *"nothing is
+enabled"* then reads exactly like a clean box. The dry-run rig for that case VOIDs
+at rc=4, so this is a discriminating control and not a decorative one.
+
+`clawfactory-fw.service` is named specifically because v1.4.1 deleted its script
+and left the unit enabled. It is now `LoadState=not-found`, `ActiveState=inactive`,
+no unit file on disk.

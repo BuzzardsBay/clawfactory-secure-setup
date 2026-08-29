@@ -180,6 +180,22 @@ function Get-WinState {
     }
     $s = [ordered]@{}
     $s.appDir = [bool](Test-Path -LiteralPath 'C:\Program Files\ClawFactory')
+    # THE THREE THINGS INNO ACTUALLY INSTALLED UNDER {app}, read separately from
+    # the directory itself. On the KEEP-LINUX branch the directory MUST survive:
+    # the Ubuntu registration's BasePath is C:\Program Files\ClawFactory\WSL and
+    # ext4.vhdx is the kept distro's backing disk. Asserting "the directory is
+    # gone" is a RemoveAll property, and on this branch it reads as "the
+    # uninstaller left the application directory behind" when the truth is that
+    # deleting it would destroy the distro the user chose to keep. Measured on
+    # cfv-182: BasePath=C:\Program Files\ClawFactory\WSL, wsl -l -v shows Ubuntu.
+    $s.uninsExe    = [bool](Test-Path -LiteralPath 'C:\Program Files\ClawFactory\unins000.exe')
+    $s.setupPs1    = [bool](Test-Path -LiteralPath 'C:\Program Files\ClawFactory\setup.ps1')
+    $s.resourceDir = [bool](Test-Path -LiteralPath 'C:\Program Files\ClawFactory\resources')
+    $s.wslVhdx     = [bool](Test-Path -LiteralPath 'C:\Program Files\ClawFactory\WSL\ext4.vhdx')
+    $leftover = @(Get-ChildItem -LiteralPath 'C:\Program Files\ClawFactory' -Recurse -File -ErrorAction SilentlyContinue |
+                  Where-Object { $_.FullName -notlike '*\WSL\*' } | ForEach-Object { $_.FullName })
+    $s.nonWslFiles     = @($leftover)
+    $s.nonWslFileCount = @($leftover).Count
     $keys = @()
     foreach ($h in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
                      'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
