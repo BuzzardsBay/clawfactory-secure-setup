@@ -1,8 +1,13 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Security vulnerability (private)
+  - name: Security vulnerability (do not file publicly)
     url: https://github.com/BuzzardsBay/clawfactory-secure-setup/blob/main/SECURITY.md
-    about: Do not file security issues publicly. Email support@clawfactory.app - see SECURITY.md.
-  - name: Purchase / licensing
-    url: https://clawfactory.app
-    about: Buy a license or ask pre-sales questions at clawfactory.app.
+    about: >-
+      Email support@clawfactory.app instead of opening an issue. SECURITY.md says what to
+      include. A vulnerability filed as a public issue is disclosed to everyone the moment
+      you submit it.
+  - name: Release notes, residuals and known limitations
+    url: https://github.com/BuzzardsBay/clawfactory-secure-setup/blob/v1.4.4/docs/RELEASE_NOTES_v1.4.4.md
+    about: >-
+      What v1.4.4 enforces, what it does not, the three disclosures, and every residual
+      that is known. Worth reading before filing.

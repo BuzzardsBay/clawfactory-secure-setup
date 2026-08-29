@@ -1,0 +1,40 @@
+name: Question or feedback
+description: Ask something, or say something that is not a defect
+title: "[Question] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Not everything is a defect. Questions are welcome, so is an opinion about how the
+        product behaves, and so is telling us that something in the documentation reads as
+        more flattering than the facts support.
+
+        **Do not paste an API key, or any part of one.** This repository is public.
+
+        For a **security vulnerability**, email `support@clawfactory.app` rather than
+        filing here. See
+        [SECURITY.md](https://github.com/BuzzardsBay/clawfactory-secure-setup/blob/main/SECURITY.md).
+
+        **Three things are already known and published:**
+        [the unmeasured approval guarantee](https://github.com/BuzzardsBay/clawfactory-secure-setup/blob/v1.4.4/docs/RELEASE_NOTES_v1.4.4.md#1-one-approval-guarantee-has-never-been-measured-on-any-release),
+        [intermittent GitHub fetches with the software source switch on](https://github.com/BuzzardsBay/clawfactory-secure-setup/blob/v1.4.4/docs/RELEASE_NOTES_v1.4.4.md#2-with-the-software-source-switch-on-github-fetches-can-fail-and-succeed-on-retry),
+        and
+        [garbled em dashes in five shipped scripts](https://github.com/BuzzardsBay/clawfactory-secure-setup/blob/v1.4.4/docs/RELEASE_NOTES_v1.4.4.md#3-five-shipped-scripts-render-em-dashes-as-garbage-in-seven-places).
+
+        ClawFactory is a free personal project under Apache-2.0. There is nothing to buy
+        and there is no support arrangement. Issues are read. A reply is not guaranteed.
+
+  - type: textarea
+    id: body
+    attributes:
+      label: What is on your mind?
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: ClawFactory version
+      description: Optional, and only if the question is about a specific version.
+      placeholder: "1.4.4"

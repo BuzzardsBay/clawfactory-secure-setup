@@ -1,0 +1,183 @@
+name: Install failure
+description: The installer did not finish, or finished and reported failure
+title: "[Install] "
+labels: ["install"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Before you write anything: do not paste secrets
+
+        **Do not paste an API key, a provider key, or any part of one, anywhere in this
+        issue.** This repository is public and an issue cannot be truly unpublished once
+        it is filed. **The install log is not a safe thing to attach either.** It contains
+        Windows paths, your Windows account name and your machine name, and you may not
+        want those public. Give the log's path, not the log.
+
+        If you believe you have found a **security vulnerability**, do not file it here at
+        all. Email `support@clawfactory.app` instead. See
+        [SECURITY.md](https://github.com/BuzzardsBay/clawfactory-secure-setup/blob/main/SECURITY.md).
+
+        ---
+
+        ## Three things are already known and published
+
+        1. **[One approval guarantee has never been measured](https://github.com/BuzzardsBay/clawfactory-secure-setup/blob/v1.4.4/docs/RELEASE_NOTES_v1.4.4.md#1-one-approval-guarantee-has-never-been-measured-on-any-release).**
+        2. **[With the software source switch on, GitHub fetches can fail and succeed on retry](https://github.com/BuzzardsBay/clawfactory-secure-setup/blob/v1.4.4/docs/RELEASE_NOTES_v1.4.4.md#2-with-the-software-source-switch-on-github-fetches-can-fail-and-succeed-on-retry).**
+        3. **[Five shipped scripts render em dashes as garbage in seven places](https://github.com/BuzzardsBay/clawfactory-secure-setup/blob/v1.4.4/docs/RELEASE_NOTES_v1.4.4.md#3-five-shipped-scripts-render-em-dashes-as-garbage-in-seven-places).**
+
+        None of the three stops an install. The full lists are the
+        [v1.4.4 release notes](https://github.com/BuzzardsBay/clawfactory-secure-setup/blob/v1.4.4/docs/RELEASE_NOTES_v1.4.4.md)
+        and
+        [SECURITY_FINDINGS.md](https://github.com/BuzzardsBay/clawfactory-secure-setup/blob/v1.4.4/SECURITY_FINDINGS.md).
+
+        ---
+
+        ## Six things that look like a failed install and are not
+
+        Please check these first. Each is documented behaviour.
+
+        - **It rebooted the machine partway through.** That is expected when Windows
+          features have to be enabled. It resumes on its own after you log back in. Give
+          it time before deciding it died.
+        - **It has been running a long time.** Allow 10 to 20 minutes, and longer on a
+          slow disk. A bundled 6 GB Linux image is being unpacked.
+        - **It was not run as administrator.** Administrator privileges are required.
+          Right-click the downloaded file and choose Run as administrator.
+        - **SmartScreen said "Unknown publisher".** The released binary is Authenticode
+          signed and timestamped. Verify the SHA-256 published on the
+          [release page](https://github.com/BuzzardsBay/clawfactory-secure-setup/releases/tag/v1.4.4)
+          before choosing to run it. A build you compiled yourself is unsigned and will
+          always warn.
+        - **Hardware virtualization is off in firmware.** The installer falls back to WSL1
+          automatically rather than failing. Some behaviour differs, and that is noted in
+          the README under Known limitations.
+        - **Not enough disk.** 50 GB free is the stated requirement, and 8 GB RAM is the
+          stated minimum.
+
+        ---
+
+        ClawFactory is a free personal project under Apache-2.0. There is nothing to buy
+        and there is no support arrangement. Issues are read. A reply is not guaranteed,
+        and neither is a fix.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before filing
+      options:
+        - label: I have read the six items above and none of them explains what I saw.
+          required: true
+        - label: There is no API key, or any part of one, in what I am about to submit.
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: ClawFactory version
+      description: The installer filename you downloaded, or the version shown in the wizard.
+      placeholder: "ClawFactory-Secure-Setup.exe, v1.4.4"
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: Press Windows+R, type `winver`, and copy the version and build line.
+      placeholder: "Windows 11 Home 24H2, build 26100.1742"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: wsl_present
+    attributes:
+      label: Was WSL2 already installed on this machine before you ran the installer?
+      description: >-
+        Open PowerShell and run `wsl --status`. If the command is not recognised, WSL was
+        not present.
+      options:
+        - "No, WSL was not present"
+        - "Yes, WSL2 was already installed and I already had at least one distro"
+        - "Yes, WSL was installed but I had no distros"
+        - "I do not know"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: managed
+    attributes:
+      label: Is this machine managed by a company or a school?
+      description: >-
+        Domain joined, Intune enrolled, or otherwise under an IT policy. Policy commonly
+        blocks enabling Windows features, which this installer has to do.
+      options:
+        - "No, it is my own machine"
+        - "Yes, it is managed"
+        - "I do not know"
+    validations:
+      required: true
+
+  - type: input
+    id: step
+    attributes:
+      label: Which step did it stop on?
+      description: >-
+        The wizard shows a step name in its status line, and the last line of the install
+        log names one too. Copy it if you can, and describe it if you cannot.
+      placeholder: "Step 12, Egress firewall"
+    validations:
+      required: true
+
+  - type: input
+    id: exit_code
+    attributes:
+      label: Exit code, or the failure line
+      description: >-
+        `%ProgramData%\ClawFactory\install-result.txt` holds the installer's own verdict.
+        Paste that one line, or the exit code if you have it.
+      placeholder: "INSTALLER_DONE=failure"
+
+  - type: input
+    id: duration
+    attributes:
+      label: How long did it run before it failed?
+      placeholder: "About 8 minutes"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: rebooted
+    attributes:
+      label: Did it reboot before it failed?
+      options:
+        - "No reboot happened"
+        - "It rebooted and then failed after I logged back in"
+        - "It rebooted and never resumed"
+        - "I do not know"
+    validations:
+      required: true
+
+  - type: textarea
+    id: error_text
+    attributes:
+      label: The exact text of any error
+      description: >-
+        Copy it rather than describing it, and check it for keys, paths and machine names
+        before you submit.
+      render: text
+
+  - type: input
+    id: log_path
+    attributes:
+      label: Install log path
+      description: >-
+        The path only. Do not paste the log. It is normally
+        `%ProgramData%\ClawFactory\install.log`. If yours is somewhere else, say where.
+      placeholder: '%ProgramData%\ClawFactory\install.log'
+
+  - type: textarea
+    id: anything_else
+    attributes:
+      label: Anything else
+      description: Optional.

@@ -1,0 +1,149 @@
+name: Bug report
+description: Something ClawFactory does is wrong, or it stopped working after it was installed
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Before you write anything: do not paste secrets
+
+        **Do not paste an API key, a provider key, or any part of one, anywhere in this
+        issue.** This repository is public and an issue cannot be truly unpublished once
+        it is filed. **The install log is not a safe thing to attach either.** It contains
+        Windows paths, your Windows account name and your machine name, and you may not
+        want those public. Give the log's path, not the log. If a maintainer needs the
+        contents, that request can be made and you can decide then.
+
+        If you believe you have found a **security vulnerability**, do not file it here at
+        all. Email `support@clawfactory.app` instead. See
+        [SECURITY.md](https://github.com/BuzzardsBay/clawfactory-secure-setup/blob/main/SECURITY.md).
+
+        ---
+
+        ## Three things are already known and published
+
+        If you have hit one of these, it is not a new report and there is no need to write
+        it up.
+
+        1. **[One approval guarantee has never been measured](https://github.com/BuzzardsBay/clawfactory-secure-setup/blob/v1.4.4/docs/RELEASE_NOTES_v1.4.4.md#1-one-approval-guarantee-has-never-been-measured-on-any-release).**
+           If an approved message's source attachment is rewritten before the message is
+           sent, nothing establishes which bytes go.
+        2. **[With the software source switch on, GitHub fetches can fail and succeed on retry](https://github.com/BuzzardsBay/clawfactory-secure-setup/blob/v1.4.4/docs/RELEASE_NOTES_v1.4.4.md#2-with-the-software-source-switch-on-github-fetches-can-fail-and-succeed-on-retry).**
+           Measured, intermittent, and it does not affect the route to your model provider.
+        3. **[Five shipped scripts render em dashes as garbage in seven places](https://github.com/BuzzardsBay/clawfactory-secure-setup/blob/v1.4.4/docs/RELEASE_NOTES_v1.4.4.md#3-five-shipped-scripts-render-em-dashes-as-garbage-in-seven-places).**
+           Cosmetic. Mostly in the dialog that explains why renaming your assistant is not
+           supported yet. Fix is scheduled for v1.5.
+
+        The longer lists are the
+        [v1.4.4 release notes](https://github.com/BuzzardsBay/clawfactory-secure-setup/blob/v1.4.4/docs/RELEASE_NOTES_v1.4.4.md)
+        and
+        [SECURITY_FINDINGS.md](https://github.com/BuzzardsBay/clawfactory-secure-setup/blob/v1.4.4/SECURITY_FINDINGS.md).
+
+        ---
+
+        ClawFactory is a free personal project under Apache-2.0. There is nothing to buy
+        and there is no support arrangement. Issues are read. A reply is not guaranteed,
+        and neither is a fix.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before filing
+      options:
+        - label: I have read the three disclosures above and this is not one of them.
+          required: true
+        - label: There is no API key, or any part of one, in what I am about to submit.
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: ClawFactory version
+      description: >-
+        Windows Settings, Installed apps. The entry reads "ClawFactory Secure Setup
+        version 1.4.4" or similar. The installer filename you downloaded is also fine.
+      placeholder: "1.4.4"
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: Press Windows+R, type `winver`, and copy the version and build line.
+      placeholder: "Windows 11 Home 24H2, build 26100.1742"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_kind
+    attributes:
+      label: Was this a clean install or an upgrade?
+      options:
+        - Clean install, ClawFactory had never been on this machine
+        - Clean install, but ClawFactory had been installed and uninstalled before
+        - Upgrade over an existing ClawFactory install
+        - I do not know
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did the problem appear?
+      options:
+        - ClawChat, the window the desktop icon opens
+        - ClawFactory Studio, the separate workbench window
+        - The installer
+        - The uninstaller
+        - A Start Menu tool (Kill Switch, Switch AI Provider, Rename Your Assistant, Dashboard)
+        - Somewhere else, described below
+    validations:
+      required: true
+
+  - type: input
+    id: which_tool
+    attributes:
+      label: If it was a Start Menu tool, which one?
+      placeholder: "Switch AI Provider"
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+      description: What you did, and what the product did.
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: error_text
+    attributes:
+      label: The exact text of any error
+      description: >-
+        Copy it rather than describing it, and check it for keys, paths and machine names
+        before you submit. Leave this empty if there was no error message.
+      render: text
+
+  - type: input
+    id: log_path
+    attributes:
+      label: Install log path
+      description: >-
+        The path only. Do not paste the log. It is normally
+        `%ProgramData%\ClawFactory\install.log`. If yours is somewhere else, say where.
+        The uninstaller writes to `%TEMP%\ClawFactory-Uninstall.log` instead.
+      placeholder: '%ProgramData%\ClawFactory\install.log'
+
+  - type: textarea
+    id: anything_else
+    attributes:
+      label: Anything else
+      description: Optional.
