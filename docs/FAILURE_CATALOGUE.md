@@ -830,6 +830,66 @@ confirmed empty before the first dispatch.
 
 ---
 
+## Class 12: an assertion made with no instrument at all
+
+Every class above is a defect in something built to measure. This one is a defect in a
+sentence said between measurements. The project had eleven classes of rule governing
+probes, controls, gates and run plans, and none governing what is claimed in a chat
+session about the product itself, which is where the operator actually receives most of
+what he knows about it.
+
+### 12.1 A false claim about the chat surface, asserted from memory and never measured
+
+**Claimed.** That the ClawFactory desktop icon launches a chat session in Windows
+Terminal. Stated in `README.md` line 53, which **is bundled into the installer**
+(`ClawFactory-Secure-Setup.iss:46`) and **carries its own Start Menu shortcut**
+(`ClawFactory-Secure-Setup.iss:186`), so a customer could open the false sentence without
+ever visiting GitHub. Stated again in `CLAUDE_ClawFactory.md` section 14.4, which is where
+the README sentence came from. Restated in a chat session, and from there into a handoff
+document, and from there used as a premise in a product argument about what a user
+experiences in their first minute.
+
+**True.** The `[Icons]` section of the installer script has always been the answer and
+takes ten seconds to read. `{commondesktop}\ClawFactory` and `{group}\ClawChat` both carry
+`Filename: {app}\ClawChat.exe`. The icon opens ClawChat, a desktop chat window. No
+`[Icons]` entry names `wt.exe` or any terminal. `grep` for `wt.exe` over the `.iss` and
+over `launcher.ps1` returns nothing. Even `launcher.ps1`, which no shortcut invokes, opens
+a **browser**, not a terminal.
+
+**How it propagated.** Not by measurement. Every step in the chain was a restatement of the
+step before it, and no step consulted the installer script. The documentation defect
+(Class 6) is the ordinary half of this. The new half is that the false sentence was then
+spoken in conversation, where nothing in this catalogue's practices applied to it, and
+conversation is faster and more trusted than documentation.
+
+**Found by.** The operator asking a direct question about his own product. Not by a probe,
+not by a gate, not by a sweep. There was no instrument pointed at this, which is the entry.
+
+**Aggravating detail.** When the claim was finally corrected, correcting it surfaced three
+further stale facts in the same fifteen lines: that `launcher.ps1` is run by the desktop
+shortcut, which stopped being true when the icon was repointed at ClawChat; a poll timeout
+documented as 15 seconds that the parameter block sets to 120; and two whole steps missing
+from the description. The sentence had been wrong long enough for the paragraph around it
+to rot, and nothing had ever read it against the script.
+
+**Changed.** A clause added to `docs/VALIDATION_PREAMBLE.md`, which is the file every
+ClawFactory job now pastes its preamble from:
+
+> **Chat does not assert product behaviour from memory.** Any claim in a chat session
+> about what the product does, what ships, or how a user reaches it cites a repo file and
+> line, a validation close-out, or the installer script. **Otherwise it is labelled
+> INFERRED.**
+
+**The second-order rule, from the correction rather than the defect.** The correction was
+first made in two places. A tree-wide census afterwards found the same claim standing in
+`SUPPORT_MATRIX.md`, in seven separate customer-facing answers, telling every non-technical
+persona to skip the desktop icon and use a Linux terminal instead. **A claim removed from
+the place it was noticed is not a claim removed.** That is the WHO half of the dependency
+census, applied to sentences instead of to code, and it is the same rule that Class 8 and
+the toolchain-hostname defect produced.
+
+---
+
 ## The instrument-defect record
 
 This is the most transferable thing in the project, and it is the least flattering.
@@ -956,6 +1016,14 @@ above, and each is applied mechanically rather than remembered.
 17. **A summary sentence above a table is a claim about every row underneath it.**
     Where a row cannot meet it, the row carries its own method in its own cell.
     Entry 6.6.
+18. **Chat does not assert product behaviour from memory.** Any claim in a chat session
+    about what the product does, what ships, or how a user reaches it cites a repo file
+    and line, a close-out, or the installer script. Otherwise it is labelled INFERRED.
+    Every other rule here governs an instrument; this one governs the sentences said
+    between measurements, which had no guard at all. Entry 12.1.
+19. **A claim removed from the place it was noticed is not a claim removed.** The WHO
+    half of the dependency census applies to sentences, not only to code. Entry 12.1,
+    and Class 8.
 
 ---
 
