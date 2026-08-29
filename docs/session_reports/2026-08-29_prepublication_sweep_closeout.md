@@ -654,8 +654,28 @@ the profile root. Each holds one read-only download URL for an installer build i
 **Disposition.** Files 1 and 3 are dead and were recommended for deletion; the delete command
 was refused by this session's tool-permission classifier and was therefore handed to the
 operator to run rather than worked around. **He ran it: all nine are confirmed gone** - a
-re-check found `.azure-clawfactory-creds` absent and zero `.cf*-sas.txt` remaining. File 2 is
-held until the `ClawTest` VM goes with it, which the operator has now authorised.
+re-check found `.azure-clawfactory-creds` absent and zero `.cf*-sas.txt` remaining.
+
+**File 2 and the `ClawTest` VM: deleted on the operator's instruction, 2026-08-29.** Recorded
+because the documented removal command was wrong and needed two repairs in flight:
+
+1. `unregistervm ClawTest --delete` **failed** with `VBOX_E_OBJECT_IN_USE` - *"Cannot close
+   medium ...{b458051d}.vdi because it has 1 child media"*. The three disks form a chain
+   (`ClawTest.vdi` -> `{b458051d}.vdi` -> `{7dbbdb04}.vdi`) and VirtualBox will not release a
+   parent while a child is open. The VM was left unregistered but 67.1 GB stayed on disk - a
+   half-done state that looks finished if the exit code is not checked. It exits 1; PROMPT 15's
+   "check the exit code of EVERY call" is what caught it.
+2. The repair is `closemedium disk <uuid> --delete` **leaf-first**: `{7dbbdb04}`, then
+   `{b458051d}`, then the base. All three returned exit 0 and `list hdds` then returned nothing.
+   A residual sweep removed the three `.sav` memory files (11.2 GB), four `.nvram` files, the
+   `.vbox` definitions and the logs.
+
+**Verified by free space, not by the absence of an error:** C: went from 1,414.0 GB to
+1,481.1 GB free, a delta of **67.1 GB**, matching the measured footprint. `list vms` returns
+nothing, the folder is gone, and `.clawtest-vm-creds` is gone. Note also that the PowerShell
+5.1 `NativeCommandError` noise around each `closemedium` was progress output on stderr, not a
+failure - the recorded trap about not redirecting a native command's stderr under
+`ErrorActionPreference` applies exactly here, and the exit codes are what were read.
 
 ### The one thing the operator must do before anything else
 
