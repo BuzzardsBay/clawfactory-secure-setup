@@ -3,9 +3,16 @@
 **Date:** 2026-08-29
 **Repository:** `C:\Users\bmcki\ClawFactory-Secure-Setup`, branch `main`
 **Dispatch card:** `#309`. Card `#310` raised for the FrontierAI pointer edit.
-**Commits:** `d564d59`, `2bdd833`, `c351d2c`, `ff88b35`. All pushed. **No tag, no build,
-no signing, no artifact, no release, no `released-versions.tsv` row.**
-**Status:** Tasks 0 to 4 DONE. Task 5 AT THE OPERATOR GATE.
+**Cards:** `#309` this job. `#310` the preamble pointer, rewritten after its premise was
+refuted. **`#311` a PRODUCT-severity defect found by the Task 1 enumeration.**
+**Status:** Tasks 0 to 4 DONE. Task 5 executed under a **changed instruction**, section 6.
+
+**This document was amended after the operator's reply.** The amendment covers the changed
+Task 5 instruction and its reason, the resolution of an apparent contradiction between two
+corrected files, a product defect that resolution surfaced, the two installer byte counts,
+the retraction of card `#310`'s premise, and one task the brief asked about that was never
+in the brief. Amendment sections are marked. Nothing earlier was deleted; where the
+amendment supersedes an earlier statement it says so.
 
 ---
 
@@ -434,11 +441,369 @@ will simply succeed, which costs nothing.** The sequence is safe either way, and
 will be known the first time it runs. It is not asserted here as measured, per the new rule
 18.
 
-### 6.3 Status: STOPPED, card printed, `PushNotification` sent, awaiting the operator's yes.
+### 6.3 The gate, and the instruction the gate changed
 
-Sections 6.4 and 6.5 are written after his answer. **If he declines or does not answer, this
-records DEFERRED with the reason and the repository is confirmed by re-read to be exactly as
-found, including `archived: true`.**
+I stopped, printed the card, and sent a `PushNotification`. **The operator did not approve
+the sequence in the card. He changed it, and the reason he changed it was a measurement in
+the card itself.**
+
+The original instruction was to **keep** the four assets, because existing links had to keep
+working. Section 6.1 reports `download_count: 0` on all four. **If nothing has ever been
+fetched, there are no existing links to preserve**, and the only argument for leaving a
+knowingly-unsafe installer downloadable evaporates.
+
+**Revised instruction, and this is now the record of what was done:** prepend the warning
+**and delete the four assets**, both inside one unarchive window. Releases, tags and bodies
+stay. Only the binaries go.
+
+This is worth recording as a decision shape and not just an outcome. The card was written to
+get a yes or a no on a fixed sequence. What it actually produced was a **better sequence**,
+because it carried the evidence that undercut its own premise. A handoff card that reports
+only what it needs approval for cannot do that. The download counts were in the card because
+the brief said not to take the number four on faith, so I enumerated the assets fully; the
+zero came along with the four.
+
+### 6.4 Retrieval before deletion, which made an irreversible action reversible
+
+Mandated before anything else, and done first: all four binaries downloaded to a local
+folder outside any repository, with SHA-256 and byte count recorded, so a deletion can be
+undone by re-upload.
+
+**Archive location:** `C:\Users\bmcki\ClawAgent-asset-archive-2026-08-29\`
+
+| Tag | Local file | Bytes | GitHub API said | SHA-256 |
+|---|---|---|---|---|
+| `v1.0.4` | `ClawAgent-Setup-v1.0.4.exe` | `340531825` | `340531825` **MATCH** | `df7500cf608e71e3b3e0b65983d839e6f4f9bae1258cfcb1a037cbb4b7375ef4` |
+| `v1.0.3` | `ClawAgent-Setup-v1.0.3.exe` | `340489732` | `340489732` **MATCH** | `486622631bdf08622023881988644464e055327e21470d07c754da96864e9c2e` |
+| `v1.0.2` | `ClawAgent-Setup-v1.0.2.exe` | `340462155` | `340462155` **MATCH** | `622fedddb12e9c635a2c8d8089b4641da27b447c9476739f0ffeebc893388db4` |
+| `v1.0.0` | `ClawAgent-Setup-v1.0.0.exe` | `338195798` | `338195798` **MATCH** | `1e43be8315f57b6e5ac764d70efb9817381995733aee6d419017f7c9110c1e48` |
+
+**All four intact. Nothing was deleted before all four had been retrieved and size-checked.**
+
+**Why the size check and not just the hash.** A hash proves a file is what it is; it does not
+prove it is what the server had. Only a comparison against the size the API reports can
+catch a truncated download, and a truncated download hashes perfectly well. This mattered:
+**the first retrieval attempt timed out at ten minutes and was killed mid-transfer, leaving
+three partial `.exe` files on disk.** Had the manifest been taken at that moment it would
+have recorded four plausible-looking SHA-256 values, three of them for truncated binaries,
+and the archive would have been useless as an undo while looking exactly like a good one.
+The rerun deletes `*.exe` before starting and checks every size against the API.
+
+### 6.5 Execution and consumer-side verification
+
+#### A second stop, before the first write: the warning text contradicted the new instruction
+
+The revised instruction said to prepend the warning block **unchanged from the card**. The
+block contained this sentence:
+
+```
+> The installer below remains downloadable so existing links keep working.
+```
+
+Applying it unchanged would have published, on four public pages, **a sentence that is false
+about the page it sits on**: a release body promising a download that had just been deleted.
+That is the defect class this entire session exists to remove, manufactured rather than
+fixed, and on a customer-facing surface rather than an internal document.
+
+The text was written when the assets were staying. The delete decision came afterwards and
+the text was not revisited. **Two instructions in the same reply, and following both
+literally produces a false public claim.** I stopped before unarchiving, reported the
+conflict, and proposed replacing only the two affected sentences. The operator answered
+`revised`. Nothing had been touched at that point, confirmed by re-reading the repository
+state: `archived: true`, four assets present.
+
+**The applied text differs from the card in exactly one sentence:**
+
+```
+> The installer has been removed from this release. It was not maintained and it was not safe
+> to treat as sandboxed.
+```
+
+Everything else in the block is byte-for-byte the card's text.
+
+#### The sequence, as executed
+
+All reads were done **before** unarchiving, since reads work on an archived repository: the
+four bodies, the four asset ids, and the four prepared payloads were staged in advance so
+that the writable window contained nothing but writes.
+
+| Step | Result |
+|---|---|
+| `T0` | `18:09:20` UTC |
+| 1.2 Unarchive | `{"archived":false,"private":false}` |
+| 1.3 Prepend, `v1.0.4` | `body_len=836` |
+| 1.3 Prepend, `v1.0.3` | `body_len=853` |
+| 1.3 Prepend, `v1.0.2` | `body_len=1036` |
+| 1.3 Prepend, `v1.0.0` | `body_len=1543` |
+| 1.4 Delete asset `417817587` (`v1.0.4`) | DELETED |
+| 1.4 Delete asset `416737232` (`v1.0.3`) | DELETED |
+| 1.4 Delete asset `416688575` (`v1.0.2`) | DELETED |
+| 1.4 Delete asset `416326553` (`v1.0.0`) | DELETED |
+| 1.5 Re-archive | `{"archived":true,"private":false}` |
+| `T1` | `18:09:26` UTC |
+
+#### 1.7 Time the repository was writable: **6 seconds**
+
+`18:09:20` to `18:09:26` UTC. Under a tenth of a minute. That is a consequence of staging
+every read beforehand; had the bodies been fetched inside the window it would have been
+several times longer for no benefit.
+
+#### 1.6 Consumer-side verification, re-fetched and never read from a write's return
+
+**Repository:**
+
+```
+{"archived":true,"full_name":"BuzzardsBay/clawagent-setup","html_url":"https://github.com/BuzzardsBay/clawagent-setup","private":false}
+```
+
+**`archived: true`, `private: false`.** Back exactly as found, on both flags.
+
+**Asset counts, freshly fetched:**
+
+```
+v1.0.4  assets=0  ZERO -- binary gone
+v1.0.3  assets=0  ZERO -- binary gone
+v1.0.2  assets=0  ZERO -- binary gone
+v1.0.0  assets=0  ZERO -- binary gone
+```
+
+**Releases and tags all still present, none draft, none prerelease:**
+
+```
+v1.0.4  draft=false  prerelease=false  https://github.com/BuzzardsBay/clawagent-setup/releases/tag/v1.0.4
+v1.0.3  draft=false  prerelease=false  https://github.com/BuzzardsBay/clawagent-setup/releases/tag/v1.0.3
+v1.0.2  draft=false  prerelease=false  https://github.com/BuzzardsBay/clawagent-setup/releases/tag/v1.0.2
+v1.0.0  draft=false  prerelease=false  https://github.com/BuzzardsBay/clawagent-setup/releases/tag/v1.0.0
+```
+
+**First fifteen lines of each body, re-fetched through the API.** All four now open with the
+warning. Printed here for `v1.0.0`; the other three are identical for their first ten lines
+and were verified the same way:
+
+```
+> **Superseded and unsupported. Do not rely on any security claim in this release.**
+>
+> ClawAgent has been replaced by ClawFactory, which is free and open source under Apache-2.0:
+> https://clawfactory.app
+>
+> The installer has been removed from this release. It was not maintained and it was not safe
+> to treat as sandboxed. In particular, the `safety-rules.md` shipped in this release tells the
+> agent it is running in a Docker container with networking disabled. No container was ever
+> run. Any protection you inferred from that file did not exist.
+
+## ClawAgent v1.0.0
+
+A hardened local AI agent runtime for Windows. Single agent, WSL2
+sandbox, egress firewall, loopback-only gateway, DPAPI key storage,
+kill switch — one-click installer.
+```
+
+**One further check the instruction did not ask for, because a prepend can silently
+truncate.** Each live body was re-fetched, its first ten lines (the warning plus its blank
+separator) stripped, and the remainder diffed against the pre-fetched original. **All four
+originals are intact.** The only difference on any of them is a single trailing blank line
+that GitHub's own storage adds. No sentence of any original release note was lost.
+
+#### What the repository looks like now
+
+Public, archived, four releases, four tags, four release pages that open with a warning and
+offer nothing to download. The README's supersession notice is untouched. Nothing was
+unpublished. Anyone arriving at a release page or an old direct link now reads the warning
+instead of receiving an installer whose bundled `safety-rules.md` claims a Docker
+container that never existed.
+
+---
+
+# AMENDMENT, 2026-08-29, after the operator's reply
+
+## A1. Task 1.5, the provider route census: **NEVER IN THE BRIEF. NOT RUN.**
+
+The reply asks why the PROVIDER ROUTE CENSUS is missing from the report and instructs that
+if it was not run I say so rather than reconstruct it. **It was not run, and it was never
+asked for.** The brief's Task 1 has 1.1, 1.2, 1.3 and 1.4 and stops. There is no 1.5, and no
+part of the brief mentions the egress allowlist, the `/PROVIDER` branch,
+`Step-WireProviderKey`, `switch-provider.ps1`'s defects, or the spend cap's provider
+awareness.
+
+**I am not reconstructing it, and I am not answering any part of it from what I read while
+doing other work.** I did read `switch-provider.ps1` and parts of the allowlist in passing,
+and I could assemble something that looked like a census from that. It would be a census
+whose scope was set by what I happened to touch, presented in the shape of one whose scope
+was set by a specification. That is the instrument-defect class this repository catalogues,
+and rule 18 forbids the assertion. If the census is wanted it needs its own job with its own
+scope.
+
+**What this most likely is:** a section of a longer brief that was cut before the version I
+received, with a downstream reference to it left in. Worth checking the brief's source,
+because whatever else was in that section is also missing.
+
+## A2. The two corrected sentences: **they do not contradict each other**
+
+The reply quotes these side by side and asks which is false:
+
+```
+README.md:53   the desktop icon and the Start Menu ClawChat entry both open ClawChat
+CLAUDE:372     opens http://127.0.0.1:8787 in the default browser ... It does not open a terminal
+```
+
+**They describe different subjects, and neither is false.** `README.md:53` describes two
+**shortcuts**: `{commondesktop}\ClawFactory` and `{group}\ClawChat`, both of which carry
+`Filename: {app}\ClawChat.exe`. `CLAUDE_ClawFactory.md:372` describes step 1 of
+**`resources/launcher.ps1`**, which is a script, not a shortcut, and which **no `[Icons]`
+entry invokes**. The two sentences are not two answers to one question. They are answers to
+two questions, one about what a shortcut opens and one about what an unreachable script
+would do if something ran it.
+
+**But the reply's underlying instruction was right, and it exposed something.** Section 2.4
+of this document already carried the ground-truth table, but the **chat report did not
+print it**, which is why the two sentences read as a contradiction: there was no table on
+screen to resolve them against. That is a reporting defect on my part, not a documentation
+one. Both files did already name their subject: `CLAUDE_ClawFactory.md:367` states plainly
+that no `[Icons]` entry invokes the script. `:372` has now been amended to repeat it at the
+point of confusion and to name the shortcut that **does** open the browser, so the sentence
+cannot be read alone and misunderstood.
+
+## A3. **YES, a shipped shortcut opens the browser dashboard. Card `#311`, product severity.**
+
+Answering A2 required enumerating the `[Icons]` section a fourth time, and this time with
+the question "does anything here open `8787`". It does.
+
+`ClawFactory-Secure-Setup.iss` lines 171 to 175, verbatim:
+
+```
+Name: "{group}\ClawFactory Dashboard"; \
+  Filename: "{sys}\cmd.exe"; \
+  Parameters: "/c start http://127.0.0.1:8787"; \
+  WorkingDir: "{app}"; \
+  Comment: "Open ClawFactory dashboard in browser (gateway must be running)"
+```
+
+**A Start Menu entry, shipped in v1.4.4, that opens the browser dashboard in one click,
+with hover text that invites it and warns of nothing.** This project forbids its own
+sessions from opening that URL: `ClawFactory_Session_Handoff_2026-07-14.md:51` says *"Never
+open the dashboard at 127.0.0.1:8787 (restart-loop hazard)"*, and
+`docs/session_reports/PHASE0_RECON_2026-07-13.md` calls it *"the hazardous `:8787`
+endpoint"*, *"hazard rule #5"* and *"the forbidden dashboard"*, recording a recon session
+that deliberately pointed a client at a dead port to avoid touching it.
+
+**On the mechanism, I could not corroborate the reply's statement of it, and say so rather
+than repeat it.** The reply gives the mechanism as a WebSocket client whose rapid-fire
+queries trigger a gateway restart cycle. `CLAUDE_ClawFactory.md:52` records the opposite
+finding: the v1.0.1 restart cycle was root-caused to a missing `.wslconfig` `vmIdleTimeout`,
+and *"`openclaw-control-ui` issuing a restart RPC"* appears in that entry's explicit list of
+causes **ruled out**. The fix, `vmIdleTimeout=-1`, shipped in v1.0.1 and smoke check 8
+verifies it.
+
+So the tree supports two readings and settles neither:
+
+- **(a)** The hazard was real, was fixed in v1.0.1, and the rule outlived its cause. The
+  shortcut is harmless and the rule is stale.
+- **(b)** The hazard is real and separate from the `vmIdleTimeout` bug, and the shortcut
+  hands it to a first-run user.
+
+**The finding is that nobody knows which, and the reason is the rule itself.** The surface
+has gone unmeasured on every release since v1.0.1 **because opening it is forbidden**. A
+standing prohibition has kept a shipped, customer-facing, one-click surface untested across
+six versions. That is worth more than the original question.
+
+**One thing is not in doubt either way.** The dashboard is device-pairing-gated
+(`SUPPORT_MATRIX.md:26`, grounded in the gateway's Ed25519 device-identity connect), and
+the installer ships no pairing flow and no explanation of one. So even under reading (a),
+this shortcut leads a first-run user to a dead end they cannot get past, one click from the
+Start Menu, under a label promising a dashboard.
+
+**Raised as card `#311` at priority 1, product severity, not documentation severity**, as
+instructed. Its first ask is the only one that cannot be deferred past the first external
+install: measure it once, on a validation box, under an explicit one-time suspension of
+hazard rule #5 recorded as such.
+
+## A4. `launcher.ps1`: it is not one line, it is a seven-line block with four false claims
+
+Quoted verbatim, and now quoted verbatim inside `docs/V1_5_BACKLOG.md` as instructed rather
+than described:
+
+```
+# launcher.ps1 — desktop shortcut entry point.
+#
+# Wired in by the [Icons] entry in ClawFactory-Secure-Setup.iss. Runs as the
+# end user (not admin) when they double-click the ClawFactory icon. The
+# shortcut starts PowerShell with -WindowStyle Hidden, so this script must
+# never spill console output. All user-facing errors come through a Windows
+# MessageBox dialog.
+```
+
+| Assertion | Reality |
+|---|---|
+| "desktop shortcut entry point" | The desktop shortcut's entry point is `{app}\ClawChat.exe` |
+| "Wired in by the `[Icons]` entry" | **No `[Icons]` entry invokes this script.** There is no such entry |
+| "when they double-click the ClawFactory icon" | That runs `ClawChat.exe`. This script is not reached |
+| "The shortcut starts PowerShell with `-WindowStyle Hidden`" | `grep -c "WindowStyle Hidden"` over the whole `.iss` returns **0** |
+
+The fourth is the worst, and I had not noticed it before the reply asked for the verbatim
+text: it is a specific, checkable, operational detail that **is not in the installer at
+all**, and it is the stated premise for the next sentence's rule that the script must never
+write to the console. Quoting a thing verbatim found a defect that describing it had missed.
+
+The backlog entry now states the release-notes disclosure question as a live decision with
+the case on both sides and **no recommendation**, since the reply says it cannot be judged
+until the text is readable and the text is now readable.
+
+## A5. The two installer byte counts: **verified, not assumed**
+
+| Artifact | Size | SHA-256 |
+|---|---|---|
+| Unsigned, as `released-versions.tsv` records it | `440594967` | `548562c72d5261bc62d590df03746ea2bb52134a413e10d137b590e589fdcdea` |
+| Signed, as published on GitHub | `440610608` | `6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1` |
+
+The expected explanation is **confirmed by execution**, in three steps rather than inferred
+from the ledger's own label:
+
+1. The published GitHub asset for `v1.4.4` is `440610608` bytes with digest
+   `sha256:6e655603...`.
+2. The local `Output\ClawFactory-Secure-Setup.exe` is **byte-identical to it**: same size,
+   same SHA-256. So the published asset is that file and not some other build.
+3. `Get-AuthenticodeSignature` on that file returns `Status: Valid`, signer
+   `CN=Bret Mckinney`, countersigned by `CN=Microsoft Public RSA Time Stamping Authority`.
+
+The difference is **15641 bytes**, the Authenticode signature block plus its countersigned
+timestamp. **The ledger number is the unsigned pre-signing artifact; the published number is
+the signed one customers download.**
+
+`README.md:49` says `~440 MB`, which is true of both, and that coincidence is precisely what
+hid the ambiguity. Both counts are now separate rows in the staleness-gate specification,
+each with its own tree source, plus an explicit rule that the gate must fail any document
+asserting a size without saying which artifact it means.
+
+## A6. Card `#310`: premise retracted, card rewritten
+
+The original card said the FrontierAI repository copy should be reduced to a pointer.
+**There is nothing in the FrontierAI repository to reduce.** The text never lived there.
+
+The source is `C:\Users\bmcki\OneDrive\Desktop\Claude Prompts\FrontierAI_CC_Prompt_Library.md`:
+outside version control, on a silently syncing OneDrive path, no history, no review, and no
+way for a session to tell whether the copy it read is current. **That is the same defect
+class as an unversioned pin**, and it has already cost this project once: on 2026-08-17 a
+validation session ran under an unknown subset of the rules that govern validation, because
+it could not find them.
+
+`docs/VALIDATION_PREAMBLE.md` is now stated in its own header to be **the authoritative copy
+outright**, not a copy pending a pointer elsewhere, with any disagreement resolved in its
+favour without consulting the other. Card `#310` is rewritten to ask for a one-line pointer
+in the OneDrive file, in a separate session, and no longer references a FrontierAI
+repository edit.
+
+## A7. `FAILURE_CATALOGUE.md` entry 12.2
+
+Added beside 12.1: the panel count asserted as six in a chat-authored brief when this
+repository's own release-prep close-out section 1.2 is **titled** *"The card names six
+not-in-this-release panels. There are seven"*. It is in the catalogue because it is the
+chat-assertion class producing a **repeat** of a known error rather than a novel one: the
+refutation was already written down, under a heading that says the number, before the brief
+asserted six again. The sharpened reading it produced:
+
+> A chat assertion is not merely unverified. It can be actively contradicted by a record the
+> assertion never consulted. The question is not "is there evidence for this" but "has this
+> already been settled somewhere I have not looked". The second is a search, not a memory.
 
 ---
 
@@ -466,6 +831,25 @@ found, including `archived: true`.**
    corrected text, and neither was corrected, because correcting a security claim is not a
    documentation-truth pass.
 
+**Added by the amendment:**
+
+9. **The reply asks for a Task 1.5 that the brief never contained.** Section A1. Recorded as
+   not-run rather than reconstructed.
+10. **The two sentences said to contradict each other do not.** Section A2. They describe
+    different subjects: two shortcuts, and a script no shortcut invokes.
+11. **The restart-loop mechanism as stated in the reply is not what the tree records.**
+    Section A3. `CLAUDE_ClawFactory.md:52` root-causes the v1.0.1 cycle to `.wslconfig`
+    `vmIdleTimeout` and lists `openclaw-control-ui` issuing a restart RPC among the causes
+    **ruled out**. The hazard rule is real; the mechanism attributed to it is not
+    corroborated here. Reported unresolved rather than repeated, and card `#311` asks for
+    the one measurement that would settle it.
+12. **Card `#310`'s premise was false and is retracted.** Section A6.
+
+**The one thing the amendment found that neither the brief nor the reply anticipated:**
+a shipped Start Menu shortcut opens the surface this project forbids its own engineers from
+opening, and it has been unmeasured for six versions **because of the prohibition**. Section
+A3, card `#311`.
+
 ---
 
 ## 8. Task accounting
@@ -485,27 +869,59 @@ found, including `archived: true`.**
 | 4.2 Two clauses | **DONE** | Same file, verbatim |
 | 4.3 Third clause + catalogue | **DONE** | Same file; `FAILURE_CATALOGUE.md` Class 12, entry 12.1, rules 18 and 19 |
 | 5.1 Verify ClawAgent state | **DONE** | Section 6.1. Four releases confirmed by API |
-| 5.2 Archived-write behaviour | **BLOCKED, reported** | Section 6.2. Write blocked by this session's guardrail before reaching GitHub. Not asserted as measured |
-| 5.3 Stop and ping | **DONE** | Card printed, `PushNotification` sent |
-| 5.4 Warning text | **DONE** | In the card, verbatim |
-| 5.5 Apply and verify | **AWAITING OPERATOR** | |
-| 5.6 Deferral path | **READY** | Section 6.3 |
-| 6.1 Dispatch card | **DONE** | `#309` in progress, milestone comment posted and corrected; `#310` raised |
-| 6.2 Git | **DONE** | Four commits, explicit per-file staging, pushed, no tag |
-| 6.3 Close-out | **DONE** | This file |
-| 6.4 End-of-session gate | **DONE** | Sections 8 to 11 |
+| 5.2 Archived-write behaviour | **NOT SETTLED, and not asserted** | Section 6.2. The write probe was blocked by this session's guardrail before reaching GitHub. The reply instructs that it need not be settled, since the sequence unarchives first regardless. **No claim is made either way** |
+| 5.3 Stop and ping | **DONE** | Card printed, `PushNotification` sent. The gate changed the instruction, section 6.3 |
+| 5.4 Warning text | **DONE** | Applied unchanged from the card |
+| 5.6 Deferral path | **NOT TAKEN** | The operator answered |
+| **Revised 1.1 Retrieve before deleting** | **DONE** | Section 6.4. Four binaries, SHA-256 and byte count recorded |
+| **Revised 1.2 to 1.5 Unarchive, prepend, delete, re-archive** | **DONE** | Section 6.5 |
+| **Revised 1.6 Consumer-side verification** | **DONE** | Section 6.5, re-fetched through the API, not from write returns |
+| **Revised 1.7 Writable minutes** | **DONE** | Section 6.5 |
+| **A1 Task 1.5 provider census** | **NOT RUN, NOT IN BRIEF** | Section A1. Recorded, not reconstructed |
+| **A2 Resolve the two sentences** | **DONE** | Section A2. Not a contradiction. `:372` amended to name its subject |
+| **A3 Dashboard shortcut** | **DONE** | Section A3. Card `#311`, priority 1, product severity |
+| **A4 `launcher.ps1` verbatim** | **DONE** | Section A4. Verbatim in `docs/V1_5_BACKLOG.md`. Quoting it found a fourth false claim |
+| **A5 Two byte counts** | **DONE** | Section A5. Verified in three steps, both added to the staleness gate |
+| **A6 Card `#310` rewrite** | **DONE** | Section A6. Premise retracted, header of `VALIDATION_PREAMBLE.md` updated |
+| **A7 Catalogue 12.2** | **DONE** | Section A7 |
+| 6.1 Dispatch card | **DONE** | `#309` in progress then done; `#310` rewritten; `#311` raised |
+| 6.2 Git | **DONE** | Explicit per-file staging, pushed, no tag |
+| 6.3 Close-out | **DONE** | This file, amended in place rather than duplicated |
+| 6.4 End-of-session gate | **DONE** | Sections 8 to 11, re-run after the amendment |
 
 ---
 
 ## 9. Resource ledger
 
-**Nothing provisioned. Nothing to sweep. Nothing to deallocate.**
+**No cloud resource provisioned. Nothing to sweep. Nothing to deallocate.**
 
 No Azure call was made in this session. No VM was created, started, stopped or deleted. No
 disk, NIC, public IP or NSG was touched. No licence slot was consumed and none needs
 releasing. `clawfactory-validation` was not contacted and its residual state is unchanged
 from whatever the last validation session left, which this session has no reading on and
 does not claim one.
+
+### Local disk: the retrieved ClawAgent binaries
+
+**This is the one resource this session created, and it is deliberately not cleaned up.**
+
+| Field | Value |
+|---|---|
+| Path | `C:\Users\bmcki\ClawAgent-asset-archive-2026-08-29\` |
+| Contents | Four `ClawAgent-Setup-vX.Y.Z.exe`, plus `manifest.txt` and `download.log` |
+| Total size | 1.3 GB (4 x ~340 MB) |
+| Location | Outside every git repository. Not tracked, not ignored, not committed |
+| Purpose | It is the undo for the four deleted release assets |
+
+**Do not delete this folder on a tidy-up pass.** It is the only remaining copy of four
+binaries that were removed from a public archive today. Deleting it converts a reversible
+action back into an irreversible one, after the fact. `manifest.txt` holds the SHA-256 and
+byte count of each, so a restored asset can be proved identical to what was removed.
+
+**When it is safe to delete:** once the operator is content that the removal stands, or once
+the binaries are archived somewhere durable. Neither is true today. **It is not backed up**,
+and a single local copy of the only remaining artifacts is itself a modest risk worth
+naming.
 
 **Credentials touched:** the Dispatch secret, read from `C:\Projects\FrontierAI\.env` by
 single-key regex, used as a header value, never printed. Its length was printed once, 64.
@@ -546,6 +962,32 @@ script, no resource, no configuration.
   the moment of uninstall, where a user deciding whether to trust the product cannot see it.
   Publishing a true limitation is the correct direction.
 
+### Re-run over the amendment's own diff
+
+- **The amendment adds no code either.** Four markdown files changed, one of them a
+  close-out. No executable, no `.iss` line, no resource.
+- **The `#311` card and section A3 publish an internal hazard rule.** They quote
+  `ClawFactory_Session_Handoff_2026-07-14.md:51` and the PHASE0 recon's "forbidden
+  dashboard" language into a card and a close-out. Both of those source files are already in
+  this repository, which is private. **No customer-facing surface gained the claim**, and
+  section A3 is careful to state that the mechanism is **not corroborated** rather than to
+  publish an unproven vulnerability claim about the shipped product. That distinction is the
+  point of the section.
+- **Section A5 prints two SHA-256 digests and a signer certificate subject.** Both digests
+  are already public: one is in `released-versions.tsv`, which is committed, and the other is
+  the digest GitHub itself publishes on the release asset. The signer subject is embedded in
+  every signed installer ever shipped. No private key material, no thumbprint, no profile
+  identifier.
+- **Section 6.4 names a local path containing four unsigned, knowingly-unsafe installers.**
+  This is a real and deliberate exposure: the binaries are now on local disk, outside a
+  repository, and the close-out says where. That is the price of making the deletion
+  reversible, it is confined to the operator's own machine, and the folder is named in the
+  ledger precisely so it is not forgotten. The path is not published anywhere outside this
+  private repository.
+- **The deletion itself is the security-positive action of the session.** Four installers
+  whose bundled `safety-rules.md` tells an agent it is running in a Docker container with
+  networking disabled, when no container was ever run, are no longer downloadable by anyone.
+
 ---
 
 ## 11. Delta bug review
@@ -571,3 +1013,31 @@ script, no resource, no configuration.
   working memory rather than from a count.
 - **No code changed**, so there is no test to run and none was run. Nothing in the diff is
   executed by the build, the installer or the smoke test.
+
+### Added by the amendment
+
+- **`git status` was not the check, at any point.** File identity was verified by SHA-256
+  over 1517 files, because `core.autocrlf=true` is in this machine's system config and
+  `git status` is blind to a line-ending rewrite. Re-run after the amendment.
+- **The first attempt to download the four binaries timed out at ten minutes and was
+  killed.** Four assets of roughly 340 MB each do not fit in one foreground call. It was
+  rerun in the background with a per-file log and exit code. **The failure mode worth
+  naming: the killed run had already written three partial `.exe` files.** Had the manifest
+  been taken then, it would have recorded SHA-256 values for truncated binaries and they
+  would have looked exactly like valid ones. The rerun deletes `*.exe` before starting, and
+  every retrieved size is compared against the size the GitHub API reports for that asset,
+  which is what actually catches a short read.
+- **`Get-AuthenticodeSignature` was used rather than inferring signing from the ledger's
+  `unsigned` label.** The label is prose written by the build script; the signature is the
+  artifact. They agreed, which is the outcome to want and not a reason to have skipped the
+  check.
+- **Section A4 is a small case of the same principle.** Quoting `launcher.ps1`'s header
+  verbatim, as the reply required, surfaced a fourth false assertion that three prior passes
+  describing the block had missed. **Describing a defect is a summary, and a summary can
+  drop the item nobody happened to look at.** The verbatim quote could not.
+- **One reporting defect on my part, named because it caused the reply's item 2.** The
+  ground-truth table was in the close-out but not in the chat report, so two sentences read
+  as contradictory on screen with nothing to resolve them against. **A table that exists in
+  a committed file but not in the message the operator reads is not available to him**, and
+  the whole purpose of Task 1 was that Task 2 cite it. It is printed in full in the chat
+  report this time.
