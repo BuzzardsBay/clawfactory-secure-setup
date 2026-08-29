@@ -50,7 +50,7 @@ And the boundary that travels with all of them: **this covers email. It is not a
 2. Right-click → **Run as administrator**.
 3. Walk the wizard: provider → API key → security acknowledgement → Install.
 4. Wait 10–20 minutes. The installer reboots once if WSL2 features need DISM enable, then auto-resumes.
-5. Done. Desktop icon launches a chat session in Windows Terminal.
+5. Done. The desktop icon and the Start Menu **ClawChat** entry both open ClawChat, the chat window. ClawFactory Studio, the control panel, is a separate window.
 
 ## Security
 

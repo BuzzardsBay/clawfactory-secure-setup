@@ -364,17 +364,19 @@ Each PowerShell script in the installer flow + post-install + ongoing-operations
 
 ### 14.4 resources/launcher.ps1
 
-**Preconditions**: install completed, gateway service unit exists. Run by desktop shortcut as Windows user (not admin).
+**Preconditions**: install completed, gateway runtime available. **No `[Icons]` entry invokes this script.** It is bundled (`ClawFactory-Secure-Setup.iss:55`) but no shortcut runs it: the desktop icon and the Start Menu `ClawChat` entry both carry `Filename: {app}\ClawChat.exe`. Today it is reached only by direct invocation, e.g. `validation/interim-v144-wrappers.ps1`. Its own header comment still calls it "the desktop shortcut entry point" and is stale for the same reason.
 
 **User context**: Windows user (no admin). WSL operations as `clawuser`.
 
 **Outputs / side effects**:
-1. HTTP-probes `127.0.0.1:8787/status`. If 200, opens chat in Windows Terminal (or PowerShell fallback) and exits.
+1. HTTP-probes `127.0.0.1:8787/status`. If 200, logs `ALREADY_RUNNING`, opens `http://127.0.0.1:8787` in the **default browser** (`Open-Dashboard` → `Start-Process $DashboardUrl`) and exits. **It does not open a terminal.**
 2. If not responding, calls `Start-Gateway` (3-tier fallback: systemd → `openclaw gateway start` → `nohup setsid openclaw gateway run`).
-3. Polls `/status` for `$TimeoutSec` seconds (default 15s). On 200, opens chat. On timeout, shows failure dialog.
+2r. Replays active workspace grants by dot-sourcing `clawfactory-grants.ps1`. Fully wrapped in try/catch — a broken or absent grants library is logged and skipped, never fatal to the launch.
+2a. Starts `{app}\ClawChat.exe` if present (`Test-Path` guarded, so dev-tree runs without a bundled ClawChat still work).
+3. Polls `/status` every `$PollSec` seconds for up to `$TimeoutSec` seconds (default **120s**, raised from 15s in v1.0.42 to cover the ~67s 2-vCPU cold start). On 200, logs `STARTED` and opens the dashboard. On timeout, logs `TIMEOUT` and shows the failure dialog.
 4. Logs `STARTED` / `ALREADY_RUNNING` / `TIMEOUT` to `%ProgramData%\ClawFactory\launcher.log`.
 
-**State files**: writes `launcher.log`. No state changes to openclaw config.
+**State files**: writes `launcher.log`; the grant replay appends to `grants-audit.log`. No state changes to openclaw config.
 
 ### 14.5 resources/switch-provider.ps1
 
