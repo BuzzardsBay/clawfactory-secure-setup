@@ -1,7 +1,7 @@
 # ClawFactory: what was wrong, and how it was found
 
 *Companion to [`SECURITY_FINDINGS.md`](../SECURITY_FINDINGS.md). Covers development
-through v1.4.3.*
+through v1.4.4, the first release of this product to be published.*
 
 Most projects publish what works. This document publishes what did not, because in a
 security product the more useful question is not "what does it claim" but "what did
@@ -112,13 +112,96 @@ and then read the machine back against a snapshot captured before the uninstall
 started, rather than reading the log. The log and the machine disagreed.
 
 **Changed.** The teardown's output is now captured and checked, the marker is
-conditional, and the log carries a read-back line stating what is left. The
-validation for the following release requires the negative half as well: a
-deliberately injected fault must produce a failure in the log and a message to the
-user, or the marker is not evidence.
+conditional, and the log carries a read-back line stating what is left.
+
+**Confirmed, in the direction that matters, before v1.4.4 was published.** The fix
+above was only ever observed succeeding, and a marker that has only ever succeeded is
+exactly what this class is about. So the failure was manufactured: a single file
+inside the sandbox was made undeletable, the uninstall was run through the real
+dialog by hand, and the product was watched. It logged the incomplete state, named
+what it had left behind, showed the user a dialog saying the Linux cleanup did not
+finish, and told them the command to finish it by hand.
+
+**The line that justifies the whole exercise** is that on that run the in-distro
+cleanup **exited zero while leaving files behind**. An uninstaller that had merely
+checked the exit code, which is the obvious fix and the one a reviewer would most
+likely have accepted, would have reported unqualified success. The requirement that
+the terminal marker be present *as well* is the only thing standing between that run
+and a false success, and it is now measured rather than argued.
+
+The injected fault was then removed, and the same directory removal the product had
+attempted succeeded immediately, which is what rules out the reading that the
+teardown could never have removed it at all.
 
 **This one reached a release.** It is the reason the release that contained it was
 refused, and the reason this catalogue exists in the shape it does.
+
+### 2.2 A kill switch that printed a success banner over two commands that had failed
+
+**Claimed.** A Start Menu item that stops everything: it unmounts your granted
+folders, stops the local gateway, and kills any running agent turn. It was listed as
+a **proven structural guarantee** in the security document, and it printed a banner
+saying the gateway was stopped and any running turn killed.
+
+**True.** It stopped nothing inside the sandbox. Both of the commands it sent in died
+on a quoting fault, the script ignored their exit codes, and it printed the banner
+regardless, over a gateway that was still answering and an agent process that was
+still alive. Only the third action, unmounting the folders, worked. **This was true
+of every release of the product from the first.**
+
+**Found by.** A validation pass that executed the shipped script itself. The suite
+had, until that day, extracted the shell fragments these Windows scripts build and
+run *those*, so a defect in the wrapper that builds them was invisible to it by
+construction. The first run that executed the wrappers found this and one other
+ship-blocker in the same hour, and both had been present for months.
+
+**Changed.** The quoting is fixed, and the more important half is that the script now
+**measures**: after issuing the stop it counts the agent's processes inside the
+sandbox and prints only what that count supports, per claim, exiting non-zero when it
+cannot confirm. It can now report its own failure, which is the property it lacked.
+
+The claim was moved as well as the code. The row was **removed from the structural
+table** rather than marked fixed, because a kill switch is an action you take and not
+a boundary that holds, and it now has a residual section of its own that says what it
+does and does not promise. A wrapper-execution phase was added to the suite, and both
+halves of the fixed switch were then measured from a clean install: it stops a
+running gateway and turn, and with every sandbox call made to fail it refuses to
+claim success.
+
+**The rewrite's own first two verifiers were also wrong**, and it is worth recording
+which way. Both read the process count into a shell variable through a channel that
+silently empties such assignments, so the script could not verify and **said so**,
+exiting non-zero. A false "could not verify" is a bug, and it was fixed. A false
+"everything is stopped" is the defect that had shipped for months. The discipline the
+rewrite introduced caught the rewrite's own bug.
+
+### 2.3 A provider switch broken by the explanatory comments of the commit that fixed something else
+
+**Claimed.** A Start Menu item that switches the agent's model provider: it updates
+the stored key, adjusts the firewall allowlist, and restarts the local gateway.
+
+**True.** It exited with an error before changing anything, **for every provider**.
+An earlier commit had added four explanatory comments mentioning a variable by name.
+Under the strict-mode setting the script runs with, the interpreter expands variables
+inside those comment lines, the variable does not exist at that point, and the script
+dies. **The prose added to explain a fix is what broke the file.** It failed safely,
+leaving the firewall untouched, but the function did not work at all.
+
+**Found by.** The same pass as 2.2, on the same day, for the same reason: it was the
+first run that executed the shipped scripts rather than fragments extracted from
+them.
+
+**Changed.** The four references were escaped, and the script now completes, applies
+its firewall change, and leaves the software-source address set untouched. A ninth
+build gate was added that parses every shipped script at build time and fails the
+build if any of them references a variable the file never defines. That gate is the
+class fix; the four escapes are the instance.
+
+**A second correction rode along.** The same script had printed an unconditional
+success line claiming a local model was running. It now prints a warning when that
+model is not actually installed, and says the firewall change still applies either
+way. That correction proved itself on a real failure rather than a rigged one: the
+model genuinely could not install on the validation machine, and the script said so.
 
 ---
 
@@ -205,6 +288,56 @@ an unrelated warning printed minutes earlier.
 **Changed.** Waiters are now armed on strings verified absent first. No measurement
 was affected by this one; it is here because the class matters more than the cost.
 
+### 3.6 Two empty readings agreeing perfectly, reported as verification
+
+**Claimed.** Two files were moved out of the way before a run, and the transcript
+recorded that each archived copy was identical to the original.
+
+**True.** Nothing had been compared. The one-letter helper written to compute the
+digests shared its name with a built-in command, and the built-in won every call, so
+the helper returned nothing every time. The identity check was therefore comparing
+nothing against nothing, which is always true. **Two empty readings agreed perfectly
+and were reported as verification.**
+
+**Found by.** Reading the error output that arrived beside the result, rather than
+only the result. The result looked clean; the exception naming the built-in was in
+the same response.
+
+**Changed.** Re-verified with a properly named function and, more to the point, with
+**two controls on the instrument itself**: that a digest of a real file is 64
+characters and looks like one, and that a digest of a missing file returns the string
+`ABSENT` rather than nothing. A function that returns nothing and a function that
+returns `ABSENT` are different instruments, and only the second can be trusted to
+report a mismatch.
+
+The two archives were then reported to **different standards, and labelled as such**.
+One had been copied, so the original survived and a digest-to-digest comparison was
+possible. The other had been moved, so its pre-move digest can never be recovered;
+its identity rests on four properties recorded by an independent read-only pass before
+the move, all four of which matched. That is weaker than a digest comparison and it
+is written down as weaker rather than presented as one.
+
+The name collision was already on this project's standing list of traps, contributed
+by an earlier session. It was violated by the person who had written it down, the day
+after writing it down.
+
+### 3.7 A command that exited zero and returned half its output
+
+**Claimed.** A product log was retrieved from a validation machine for the record.
+
+**True.** The transport truncates its output at a size limit, silently. The command
+exited zero, the retrieval looked successful, and the file that came back was
+incomplete.
+
+**Found by.** Checking the decoded byte count against the size the machine had
+already reported for the same file, rather than trusting a command that exited zero.
+
+**Changed.** The log was retrieved in pieces and reassembled, and the result verified
+byte-identical to the copy on the machine by digest before the machine was destroyed.
+The general rule was already standing practice for errors: **an errored command's
+empty output is not evidence.** This extends it: a *successful* command's truncated
+output is not evidence either, and it is harder to see.
+
 ---
 
 ## Class 4: ship-blockers manufactured by miscalibrated instruments
@@ -243,6 +376,103 @@ where the code could have been produced.
 **Changed.** The real cause was found and fixed, and the retracted diagnosis was left
 in the record rather than quietly replaced. A retracted diagnosis is data about how
 much a diagnosis is worth before it is tested.
+
+### 4.3 An assertion left stale while the measurement beside it was corrected
+
+**Claimed.** A close-out and the job card that followed it both recorded that a
+failing check had been corrected.
+
+**True.** Only half of it had. The check reads a machine and then decides. The
+**reading** had been enriched, and the **decision** had not been touched. The row
+still asserted that the whole Windows application directory is gone, on the uninstall
+branch where the user has explicitly chosen to keep the Linux environment whose disk
+image lives inside that directory. Run as written it would have failed again,
+identically, and read as **"the uninstaller leaves the application directory behind"**,
+which is a ship-blocker-shaped claim about correct behaviour.
+
+**Found by.** Reading the file before running it, prompted by the card asserting that
+a correction existed. A card saying a thing was fixed is not evidence that it was.
+
+**Changed.** The row now asserts what is actually load-bearing on that branch: the
+three artifacts the installer places by name are gone, **and** a recursive count of
+every file under that directory outside the sandbox's backing store is zero. On the
+machine it was corrected against, that count went from 56 to 0.
+
+**It was calibrated in four directions before it measured anything**, and two of the
+four are the ones that matter. One rig proves the row was not merely *inverted* into
+a check that passes only when the directory survives, which would be a different
+wrong answer rather than a fix. Another proves the row is not satisfied by the three
+named files alone, which is **the short-list defect of entry 8.1 reproduced in
+miniature inside the instrument**: a check that names a subset of its subject reports
+a clean sweep over the wrong set.
+
+The surviving directory did not vanish from the record when the assertion stopped
+naming it. It became an informational row and a card of its own, because an assertion
+is not the place to hide a fact.
+
+### 4.4 A log that appends, and a run plan that did not know it
+
+**Claimed.** Nothing yet. This one was caught before it reported.
+
+**True.** The final measurement of the entire validation cycle needed a second
+uninstall on a machine that had already been uninstalled once. The product's uninstall
+log **appends** rather than truncating, so the second run would have produced a file
+containing both the earlier success marker and the new failure marker. The probe
+classifies that state deliberately, by name, as ambiguous. The check requires the
+failure marker alone. **It would therefore have failed on a run where the product did
+exactly the right thing**, and a failure there is indistinguishable, from the
+transcript alone, from the defect under test: the exact costume of entry 2.1, on the
+last row of the last machine.
+
+**Found by.** Reading the product's own logging call before dispatching anything, and
+then measuring the live log's marker counts on the machine. The first run's log was
+archived before the operator was asked to do anything.
+
+**Changed.** The log was rotated, and the rotation was proven necessary *and*
+sufficient by the resulting file: one start line, one marker, and it is the failing
+one.
+
+**The probe was not at fault and neither was the product.** What was wrong was the
+*order*, and no calibration rule in this project governs order. See class 11.
+
+### 4.5 A by-hand check that would have failed correct behaviour
+
+**Claimed.** A checklist step asserting that after removing one allowed website, one
+entry remains in the panel, so that the panel is proven to render a stored entry at
+load rather than only one added in the same session.
+
+**True.** The entry it expected is seeded by a setup path that the run in question did
+not use. No entry was ever there. The panel correctly said that nothing was allowed
+yet. The check would have produced **a failure against correct behaviour**, recorded
+by a person, on a product surface.
+
+**Found by.** Reading the checklist against the first screenshot the operator sent,
+rather than trusting the checklist. It was caught before the step was handed over.
+
+**Changed.** The check is recorded as void with that reason, and the checklist is
+what needs fixing: either the seeding becomes part of the setup, or the check states
+its own precondition. The property it exists to prove **remains unmeasured** and is
+recorded as unmeasured rather than folded into the passing count.
+
+### 4.6 A conclusion drawn from one eighth of the evidence
+
+**Claimed.** A first reading of an intermittent-connectivity finding, generalised
+from what had been measured.
+
+**True.** One host of eight had been measured. The reading was retracted the same
+session and replaced with a full sample: 96 attempts across all eight hosts, 12 each,
+with both controls firing in the same run. Four of the eight then turned out to answer
+on every attempt, which the first reading would not have predicted.
+
+**Found by.** The standing requirement to discover the subject rather than assume it,
+applied to the question of how many subjects there were.
+
+**Changed.** The retraction is in the record beside the measurement. **No verdict was
+taken on the finding itself**, in that session or the two after it, because it is a
+product decision rather than a measurement, and three separate sessions declining to
+take it is deliberate rather than an oversight. It is disclosed in the release notes
+with its mechanism labelled as inferred, because the split is measured and the cause
+is not.
 
 ---
 
@@ -351,6 +581,36 @@ The other three were scaffolding.
 
 **Changed.** Kept, with the qualification stated in the sentence itself rather than in
 a footnote.
+
+### 6.6 One sentence promising a standard of proof that three rows could not meet
+
+**Claimed.** Above the table of structural guarantees stood a single sentence: *every*
+claim in it was proven by asking the agent itself to cross the boundary and recording
+what it did.
+
+**True.** That sentence was false for three of the nine rows, and only one of the
+three was a defect.
+
+- **Inbound deny** is a claim about a machine other than this one. It was measured as
+  the absence of a listening surface plus the presence of the firewall rule. No run
+  has ever driven a connection from a second host.
+- **Credential protection** is a claim about where a secret rests. It was measured as
+  file ownership and file mode. It cannot be measured any other way: the agent is
+  given its own key by design, so asking it to fetch one would not produce a refusal.
+- **The kill switch** had no evidence at all. See entry 2.2.
+
+**Found by.** Enumerating the table one row at a time and asking of each what evidence
+stood behind it, during the release that had to correct the kill-switch row anyway.
+The enumeration was the deliverable; the row that prompted it was not.
+
+**Changed.** The kill switch left the table. The other two rows now carry **their own
+method in their own cell**, so the claim and the evidence sit together, and the
+paragraph above the table states the exception instead of speaking for every row.
+
+**The transferable finding is not the kill switch.** It is that a universal sentence
+was carried over a table containing rows that cannot be proven that way at all. Rows
+three and seven were always weaker than the sentence claimed. Nobody noticed, because
+nobody read a summary sentence as a claim about each row underneath it.
 
 ---
 
@@ -486,6 +746,156 @@ The entry is here rather than omitted because it is the only kind of evidence th
 matters about a practice: not that it is written down, but that it was followed on a
 day when following it produced an inconvenient answer.
 
+### 10.4 The tool built to measure a text-encoding bug, corrupted by that bug
+
+**Claimed.** Nothing. Caught before it reported.
+
+**True.** A customer-facing dialog was found rendering em dashes as garbage, because
+the script holding it is saved without the mark that tells the interpreter how to read
+it. The obvious next step is to sweep every shipped script for the same problem. The
+first version of that sweep contained the character it was searching for, written as a
+literal, in a file saved the same way. **The bug corrupted the tool built to measure
+the bug.**
+
+**Found by.** Calibrating the sweep before running it, which is rule 9 of the list at
+the foot of this document.
+
+**Changed.** The sweep was rewritten to contain no non-ASCII character at all and to
+work on raw bytes rather than on decoded text. It then reported the class honestly:
+five shipped scripts affected, twenty-one occurrences, of which **seven are visible to
+a customer and the rest are in comments**, counted per occurrence rather than asserted
+per file. That distinction is the whole finding: a garbled comment is untidy, and a
+garbled sentence in a dialog whose only job is to explain a decision is a defect the
+customer reads.
+
+### 10.5 A sweep certified by a canary shaped like the cases already known
+
+**Claimed.** A pattern had been proven to find every stale value of a given kind,
+because it had been canaried.
+
+**True.** It found the canaries and missed a real instance, which was written in a
+shape the canaries did not have. The canaries had been built to resemble the examples
+already in hand.
+
+**Found by.** The stale value failing a check downstream, and the sweep then being
+re-run against it and found blind.
+
+**Changed.** This is entry 10.2's rule, restated because it recurred after being
+written down: **build the canary to look like the thing you are afraid of missing, not
+like the things you already know are there.** Where the question is enumeration rather
+than detection, parse the structure instead of matching text.
+
+---
+
+## Class 11: a probe calibrated correctly, run in the wrong order
+
+This class was named at the end of the cycle, because it is the one that none of the
+existing rules covered. Every practice at the foot of this document governs an
+*instrument*. None of them governs the *order the instruments run in*, and two of the
+last cycle's defects lived there.
+
+### 11.1 Correct probes, placed in a plan that did not account for the machine's state
+
+**Claimed.** A run plan for the final measurement of the cycle, listing the probes to
+dispatch and the order to dispatch them in.
+
+**True.** Two of its steps were unsound, and neither probe was at fault.
+
+- The uninstall log **appends**, so a second uninstall on an
+  already-uninstalled machine would produce an ambiguous file and a false failure.
+  That is entry 4.4.
+- The dispatcher retrieves each probe's evidence file **by name**, and both probes due
+  to run had left files with those exact names on the machine the day before. A probe
+  that died early would have handed back **yesterday's verdict as today's**, with no
+  error anywhere.
+
+Both probes classify these situations correctly. Both are documented in their own
+source. What was wrong was that the plan assumed a fresh machine and the machine was
+not fresh.
+
+**Found by.** A read-only pass over the machine before any change was made, asking
+what each probe would find at the moment it read.
+
+**Changed.** The log was rotated and the stale evidence files moved to an archive,
+both before the operator was asked to do anything, and all seven retrieval paths were
+confirmed empty before the first dispatch.
+
+**The rule this produced:**
+
+> A probe is calibrated against a rigged input. **A run is not.** Before the first
+> dispatch, read what the machine already holds that the probes will read: logs that
+> append, evidence files fetched by name, snapshots about to be overwritten. State
+> what each will contain at the moment the probe reads it. **A second run over a
+> machine that has already been run is not the same measurement as the first.**
+
+---
+
+## The instrument-defect record
+
+This is the most transferable thing in the project, and it is the least flattering.
+
+The five sessions that validated v1.4.4 each counted their own defects at the end, in
+the same shape: defects in the **product**, defects in the **instruments and the run
+plan**, how many of those would have produced a **false finding** if they had not been
+caught, how many were **ship-blocker-shaped**, and how many were caught **before the
+operator was asked to touch anything**. The counts were taken by the person who made
+the mistakes, in the same document that reports the results.
+
+**The four validation machines:**
+
+| | Box A | Boxes B and C | Box D | Box D completion | Total |
+|---|---|---|---|---|---|
+| **Product defects found** | 1, cosmetic | **0** | **0** | **0** | **1** |
+| Instrument and run-plan defects | 8 | 5 | 5 | 5 | **23** |
+| of those, would have produced a **false finding** | 3 | 2 | 3 | 3 | **11** |
+| of those, **ship-blocker-shaped** | 2 | 0 | 2 | 1 | **5** |
+| caught **before the operator was asked for anything** | 1 of 8 | 2 of 5 | 3 of 5 | 4 of 5 | **10 of 23** |
+| Product observations carded | 1 | 0 | 1 | 2 | 4 |
+
+**Across the final four machines, the product looked better than the instruments
+measuring it.** One cosmetic product defect against twenty-three defects in the
+measuring apparatus. Eleven of those twenty-three would have produced a finding that
+was not true, and five of those eleven would have looked like a reason not to ship.
+
+**The fifth session is the one that produced the release**, and it is counted
+differently because it was not a measurement pass. It fixed the two product defects of
+entries 2.2 and 2.3, and in doing so found **six defects in its own work**, all before
+the build. Two of those six were **the exact defect class the session existed to fix,
+found in the fixes themselves**. That is not a comfortable observation and it is the
+honest one: the gates and the canaries are load-bearing precisely because this keeps
+happening to the people who wrote them.
+
+### What the numbers are for
+
+They are not an apology and they are not a boast. They are the answer to a specific
+question a reader of a security document should ask, which is: **when this project
+reports that a boundary held, how much is that report worth?**
+
+Three things follow from the table, and each is uncomfortable in a different way.
+
+**A finding is a measurement, and measurements have defects at the same rate
+everything else does.** Eleven false findings were prevented across four machines. The
+mechanism that prevented them was not care. It was the standing requirement that every
+block assertion carry a positive control which must succeed in the same run, and that
+a control which did not fire voids the result rather than producing a verdict. Those
+two rules did almost all of the work, mechanically, without anyone having to be
+suspicious on the right day.
+
+**Ten of the twenty-three were caught before the operator touched anything, and the
+proportion rose across the cycle**: one of eight on the first machine, four of five on
+the last. What changed was not skill. What changed was that reading the machine and
+the probes *before dispatching* became a step rather than an instinct, which is what
+class 11 is about.
+
+**The defects that recurred were the ones already written down.** A name collision on
+this project's own standing trap list was walked into by the person who had added it
+to that list, the day after adding it. An expectation was left stale beside a
+corrected measurement in the session immediately after a session that had named
+exactly that failure and asked for it to be carried forward. **Writing a lesson down
+does not apply it.** Only a rule the instrument enforces mechanically survives
+contact, which is why the practices below are checks in scripts and required rows in
+phases rather than paragraphs of advice.
+
 ---
 
 ## What this catalogue does not contain
@@ -528,6 +938,24 @@ above, and each is applied mechanically rather than remembered.
 10. **Enumerate, do not recall.** When something is removed, find every site that
     references it by execution, and walk the sequence for every window where it is
     still needed.
+11. **Execute the shipped thing, not a fragment of it.** A suite that extracts and
+    runs the payload a wrapper builds is blind, by construction, to every defect in
+    the wrapper. Two ship-blockers lived in that gap for months. Entries 2.2 and 2.3.
+12. **A success marker that has never failed is not evidence.** Manufacture the
+    failure it is supposed to report, and confirm it reports it. Entry 2.1.
+13. **The measurement being right does not make the expectation right.** When a probe
+    is edited to read something new, the assertion is a separate edit and needs its
+    own calibration. Adding the reader and leaving the verdict alone produces a probe
+    that gathers the right evidence and still returns the wrong answer. Entry 4.3.
+14. **A probe is calibrated against a rigged input; a run is not.** Before the first
+    dispatch, read what the machine already holds that the probes will read. Class 11.
+15. **A record saying a thing was done is not evidence that it was.** Entries 4.3 and
+    9.1. Several records agreeing is not corroboration when they share a source.
+16. **A command that exits zero can still have returned half its output.** Check the
+    size of what came back against the size the source reported. Entry 3.7.
+17. **A summary sentence above a table is a claim about every row underneath it.**
+    Where a row cannot meet it, the row carries its own method in its own cell.
+    Entry 6.6.
 
 ---
 

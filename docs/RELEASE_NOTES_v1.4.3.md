@@ -1,5 +1,26 @@
 # ClawFactory Secure Setup v1.4.3
 
+> **SUPERSEDED BEFORE PUBLICATION. This release was never published and the
+> artifact it describes was never shipped.**
+>
+> v1.4.3 was built and signed, then refused during validation for two defects that
+> predated it: the kill switch stopped nothing, and switching model provider failed
+> for every provider. Both are fixed in v1.4.4, which is the release that shipped.
+> Read [`RELEASE_NOTES_v1.4.4.md`](RELEASE_NOTES_v1.4.4.md) instead.
+>
+> **This document is kept, unedited below this notice, rather than deleted.** It
+> contradicts itself on purpose: its guarantee list calls the kill switch a working
+> control, and its own validation section at the end states plainly that it does not
+> work and that these notes are for the release that fixes it. That contradiction is
+> the record of a claim being refused before it reached anyone, and deleting the
+> document would delete the record. Nothing in it should be read as describing
+> shipped software.
+>
+> *Superseded 2026-08-29. Source: `docs/session_reports/2026-08-27_v144_wrapper_fixes_closeout.md`
+> section 5.3, which recorded this document as deliberately left alone, and
+> `docs/session_reports/2026-08-29_v144_validation_boxD_completion_closeout.md`
+> section 13.1, which takes the v1.4.4 verdict.*
+
 **Free and open source under Apache-2.0.** Not a beta, not a trial, not a limited
 edition. There is nothing to buy, no key to enter, no account to create, and the
 installer makes no network call to any ClawFactory-operated server at any point.
