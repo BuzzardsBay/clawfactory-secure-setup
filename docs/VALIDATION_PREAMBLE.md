@@ -1,19 +1,28 @@
 # ClawFactory validation preamble (PROMPT 15)
 
-**This file is now authoritative for ClawFactory.** Any ClawFactory CC job that pastes a
-validation preamble pastes it from here, not from the FrontierAI prompt library. The
-library copy is to be reduced to a pointer at this file, in a separate FrontierAI session;
-that edit is not made here because this session does not write to FrontierAI.
+**This file is the authoritative copy, outright.** Not a copy pending a pointer somewhere
+else. Any ClawFactory job that pastes a validation preamble pastes it from here, and any
+disagreement between this file and any other copy is resolved in favour of this one,
+without consulting the other.
 
-**Why it moved.** PROMPT 15 governs ClawFactory but lived in another project's prompt
-library, on a path that is not under version control and that a ClawFactory session has no
-reason to know. On 2026-08-17 a session could not find it at all and recorded that it had
-applied the close-out gate and the pre-flight checks from the conventions of recent
-close-outs instead, flagging that any PROMPT 15 requirement not inferable from those
-conventions had not been applied. On 2026-08-29 a job prompt named the path
-`C:\Projects\FrontierAI\FrontierAI_CC_Prompt_Library.md`, where no such file exists. The
-real copy was at `C:\Users\bmcki\OneDrive\Desktop\Claude Prompts\FrontierAI_CC_Prompt_Library.md`,
-lines 645 to 877. A governing document that two sessions could not locate is not governing.
+**There is no FrontierAI repository copy to defer to.** The text below did not come from
+the FrontierAI repository and there is nothing in that repository to reduce to a pointer.
+It came from `C:\Users\bmcki\OneDrive\Desktop\Claude Prompts\FrontierAI_CC_Prompt_Library.md`:
+a file **outside version control**, on a silently syncing OneDrive path, with no history, no
+review and no way for a session to tell whether the copy it read is the current one. That
+file is to be reduced to a one-line pointer at this repository path, in a separate session.
+Until it is, treat any text it holds as superseded by this file.
+
+**Why it moved.** PROMPT 15 governs ClawFactory but lived somewhere a ClawFactory session
+has no reason to look and no way to verify. Two sessions have now failed to find it. On
+2026-08-17 a session could not find it at all and recorded that it had applied the close-out
+gate and the pre-flight checks from the conventions of recent close-outs instead, flagging
+that any PROMPT 15 requirement not inferable from those conventions had not been applied. On
+2026-08-29 a job brief named `C:\Projects\FrontierAI\FrontierAI_CC_Prompt_Library.md`, where
+no such file exists, and the session found the real copy only by reading the 2026-08-17
+close-out that had recorded the same failure. **A governing document that two sessions could
+not locate was not governing anything.** Now it is in the repository it governs, under
+version control, where a `git log` can answer what changed and when.
 
 **Provenance of the text below.** Copied verbatim on 2026-08-29 from that file, from the
 `## PROMPT 15` heading through the end of its `### Notes on using PROMPT 15` section. The

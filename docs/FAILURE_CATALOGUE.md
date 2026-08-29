@@ -888,6 +888,45 @@ the place it was noticed is not a claim removed.** That is the WHO half of the d
 census, applied to sentences instead of to code, and it is the same rule that Class 8 and
 the toolchain-hostname defect produced.
 
+### 12.2 The same off-by-one, asserted a second time, against a record that already refuted it
+
+**Claimed.** That Studio has **six** panels which are not in this release. Written in a
+chat-authored job brief on 2026-08-29.
+
+**True.** There are **seven**. `docs/RELEASE_NOTES_v1.4.4.md:29`,
+`docs/RELEASE_v1.4.4_GITHUB_BODY.md:31` and `validation/MANUAL_CHECKS_studio.md` section 9
+all say seven of Studio's eleven panels are not in this release.
+
+**Why this is a separate entry and not a footnote to 12.1.** Because it is the second time.
+Section 1.2 of the v1.4.4 release-prep close-out, in this repository, is *titled* **"The
+card names six not-in-this-release panels. There are seven"**. The refutation was already
+written down, in this repository, under a heading that says the number, before the brief
+asserted six again. The number was not merely unverified; it was **contradicted by an
+existing record that the assertion did not consult**.
+
+**How it propagated.** Identically to 12.1, and from the same cause. A number entered a
+chat session from memory, was not checked against the repository, and was carried into a
+written brief where it acquired the authority of a specification. The first time this class
+fired it produced a novel error. This time it reproduced a **known** one.
+
+**Found by.** Deriving the number from the tree while writing it into
+`docs/V1_5_BACKLOG.md`, rather than copying it from the brief. The brief had explicitly
+instructed that a different number in it not be taken on faith; that instruction was
+generalised to every number in it, which is the only reason this was caught.
+
+**Changed.** Nothing new is added to the practices list, because rule 18 already covers it
+exactly and the entry exists to show that rule 18 has a repeat offence behind it rather than
+a single incident. What is added is a sharper reading of rule 18:
+
+> **A chat assertion is not merely unverified. It can be actively contradicted by a record
+> the assertion never consulted.** The question is not "is there evidence for this" but
+> "has this already been settled somewhere I have not looked". The second is a search, not
+> a memory.
+
+The corrected count and this history are both written into `docs/V1_5_BACKLOG.md`, so a
+third occurrence has somewhere to be checked against that is nearer to hand than a close-out
+section title.
+
 ---
 
 ## The instrument-defect record

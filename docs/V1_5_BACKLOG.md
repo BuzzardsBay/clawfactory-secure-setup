@@ -77,11 +77,45 @@ anyone who installed v1.4.4.
 
 One related item is genuinely open and is **not** in `README.md`:
 
-- **`resources/launcher.ps1:14`** still opens with `# launcher.ps1 - desktop shortcut
-  entry point.` No `[Icons]` entry has invoked it since the desktop icon was repointed at
-  `ClawChat.exe`. It was deliberately not corrected on 2026-08-29 because `launcher.ps1`
-  is a shipped script and editing it changes shipped bytes. **v1.5 changes shipped bytes
-  anyway, so correct it then.**
+- **`resources/launcher.ps1` lines 14 to 20.** A known false claim now **deliberately
+  retained in shipped bytes**. It is not one line. It is a seven-line header block
+  carrying four separate false assertions. Quoted verbatim, exactly as it stands in the
+  file, so this entry can be read without opening it:
+
+  ```
+  # launcher.ps1 — desktop shortcut entry point.
+  #
+  # Wired in by the [Icons] entry in ClawFactory-Secure-Setup.iss. Runs as the
+  # end user (not admin) when they double-click the ClawFactory icon. The
+  # shortcut starts PowerShell with -WindowStyle Hidden, so this script must
+  # never spill console output. All user-facing errors come through a Windows
+  # MessageBox dialog.
+  ```
+
+  **What is false, assertion by assertion, checked against `ClawFactory-Secure-Setup.iss`:**
+
+  | Assertion | Reality |
+  |---|---|
+  | "desktop shortcut entry point" | The desktop shortcut's entry point is `{app}\ClawChat.exe` |
+  | "Wired in by the `[Icons]` entry" | **No `[Icons]` entry invokes this script.** There is no such entry to be wired in by |
+  | "when they double-click the ClawFactory icon" | Double-clicking that icon runs `ClawChat.exe`. This script is not reached |
+  | "The shortcut starts PowerShell with `-WindowStyle Hidden`" | `grep -c "WindowStyle Hidden"` over the entire `.iss` returns **0**. No shortcut has ever passed that flag in the current script |
+
+  The last one is the worst of the four, because it is a specific, checkable, operational
+  detail that is simply not in the installer at all, and it is the premise for the
+  following sentence's rule that the script must never write to the console.
+
+  **It is a candidate for release-notes disclosure as well as for correction**, and that
+  is a decision, not a foregone conclusion. The case for disclosing: it is a shipped file,
+  it is auditable, "no telemetry, fully auditable PowerShell" is a claim this product makes
+  in its own README, and a reader auditing `launcher.ps1` against the `.iss` will find the
+  contradiction in about a minute. The case against: the script is unreachable, so the
+  block misdescribes something no customer executes, and disclosing it invites a reader to
+  weigh a comment on dead code as heavily as a live control. **Not decided here.**
+
+  It was deliberately not corrected on 2026-08-29 because `launcher.ps1` is a shipped
+  script and editing it changes shipped bytes. **v1.5 changes shipped bytes anyway, so
+  correct it then**, and decide the disclosure question at the same time.
 
 ### 3. The tenth build gate
 
@@ -161,7 +195,8 @@ typo, which may or may not be wanted. Decide when implementing.
 | Version badge (`v1.4.4`) | `README.md` line 3, twice on the same line | `#define MyAppVersion` in `ClawFactory-Secure-Setup.iss`, cross-checked against the last row of `released-versions.tsv` |
 | Smoke-check count ("19 checks") | `README.md` smoke-test section | Count of `Check '` invocations in `smoke-test.ps1` that are **not** inside the `if ($AgentChecks ...)` block. The opt-in count (7) is a second, separately derived number |
 | Numbered smoke-check list (items 1 to 19) | `README.md` smoke-test section | The `Check '<name>'` strings in `smoke-test.ps1`, in source order. The gate must compare the **list**, not only its length, because a reordering is invisible to a count |
-| Installer size ("~440 MB") | `README.md` installation step 1 | The size column of the last row of `released-versions.tsv` |
+| **Unsigned** installer size | any doc asserting a build size | The size column of the last row of `released-versions.tsv`. **This is the pre-signing size.** For 1.4.4 it is `440594967` |
+| **Signed** installer size | any doc asserting a download size, and the release body | The `size` field of the published GitHub release asset. For 1.4.4 it is `440610608` |
 | OpenClaw version pin ("2026.4.27") | `README.md` components section | The pinned version literal in the installer scripts |
 | Bundled-file count, wherever asserted | any doc | Count of `Source:` lines in the `.iss` `[Files]` section |
 | Agent count ("four agents") | `README.md`, `CLAUDE_ClawFactory.md`, `rename-agent.ps1` dialog | The agent list written by `resources/bootstrap.ps1` |
@@ -171,6 +206,27 @@ not from a doc that lists bundled files, and the version must come from the `.is
 not from a badge that another doc copied. The whole value of the gate is that it does not
 consult prose. A staleness gate that derives one prose number from another prose number
 is `docs/FAILURE_CATALOGUE.md` Class 10.
+
+**A note on the two installer sizes, which is why they are two rows and not one.** Two
+byte counts for v1.4.4 are in circulation and both are correct, of different artifacts.
+Verified by execution on 2026-08-29, not inferred:
+
+| Artifact | Size | SHA-256 |
+|---|---|---|
+| Unsigned, as the ledger records it | `440594967` | `548562c72d5261bc62d590df03746ea2bb52134a413e10d137b590e589fdcdea` |
+| Signed, as published and as it sits in `Output\` | `440610608` | `6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1` |
+
+The published GitHub release asset and the local `Output\ClawFactory-Secure-Setup.exe` are
+**byte-identical**: same size and same SHA-256. `Get-AuthenticodeSignature` on that file
+returns `Status: Valid`, signer `CN=Bret Mckinney`, countersigned by
+`CN=Microsoft Public RSA Time Stamping Authority`. The difference is **15641 bytes**, which
+is the Authenticode signature block and its countersigned timestamp appended to the PE.
+This confirms the expected explanation rather than assuming it.
+
+**The gate must never compare one against the other**, and must fail loudly if a document
+asserts a size without saying which artifact it means. The `~440 MB` in `README.md` happens
+to be true of both, which is exactly the kind of coincidence that hides the ambiguity until
+someone writes a precise number.
 
 ---
 

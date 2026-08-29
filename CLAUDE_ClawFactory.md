@@ -369,7 +369,7 @@ Each PowerShell script in the installer flow + post-install + ongoing-operations
 **User context**: Windows user (no admin). WSL operations as `clawuser`.
 
 **Outputs / side effects**:
-1. HTTP-probes `127.0.0.1:8787/status`. If 200, logs `ALREADY_RUNNING`, opens `http://127.0.0.1:8787` in the **default browser** (`Open-Dashboard` → `Start-Process $DashboardUrl`) and exits. **It does not open a terminal.**
+1. HTTP-probes `127.0.0.1:8787/status`. If 200, logs `ALREADY_RUNNING`, opens `http://127.0.0.1:8787` in the **default browser** (`Open-Dashboard` → `Start-Process $DashboardUrl`) and exits. **It does not open a terminal.** Note the subject: this describes what **this script** does when something invokes it, and **no `[Icons]` entry does** (see the precondition above). It is not a description of any shortcut's behaviour. The shortcut that opens the browser dashboard is `{group}\ClawFactory Dashboard`, which runs `cmd.exe /c start http://127.0.0.1:8787` and does not involve this script at all.
 2. If not responding, calls `Start-Gateway` (3-tier fallback: systemd → `openclaw gateway start` → `nohup setsid openclaw gateway run`).
 2r. Replays active workspace grants by dot-sourcing `clawfactory-grants.ps1`. Fully wrapped in try/catch — a broken or absent grants library is logged and skipped, never fatal to the launch.
 2a. Starts `{app}\ClawChat.exe` if present (`Test-Path` guarded, so dev-tree runs without a bundled ClawChat still work).
