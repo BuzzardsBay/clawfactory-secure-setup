@@ -1,6 +1,6 @@
 # ClawFactory Secure Setup
 
-[![v1.4.0](https://img.shields.io/badge/release-v1.4.0-green)](../../releases) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Windows 11](https://img.shields.io/badge/Windows-10%202004%2B%20%2F%2011-0078D6?logo=windows)](#system-requirements)
+[![v1.4.4](https://img.shields.io/badge/release-v1.4.4-green)](../../releases) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Windows 11](https://img.shields.io/badge/Windows-10%202004%2B%20%2F%2011-0078D6?logo=windows)](#system-requirements)
 
 > The public site (clawfactory.app) is published from [BuzzardsBay/clawfactory-site](https://github.com/BuzzardsBay/clawfactory-site). `docs/` in this repo is no longer the published source.
 
@@ -104,6 +104,12 @@ The script runs 19 checks and exits 0 only if all pass:
 > Checks 12–19 are the Grants + spend-governor substrate. Like the other
 > WSL-dependent checks they SKIP (not FAIL) when the smoke test runs as
 > `NT AUTHORITY\SYSTEM`.
+>
+> Seven further checks, numbered 20 to 26, run only with `-AgentChecks`. They
+> drive real agent turns to verify the grant boundary from the agent's own point
+> of view. They need a working provider key and a running gateway, they are slow,
+> and they are opt-in for that reason. The 19 above are what the command shown
+> here runs.
 
 Note what the smoke test is and is not: it confirms the controls are installed and wired. It is not the evidence that they hold against a hostile agent. That evidence is consumer-side, asking the agent itself to cross each boundary on a clean machine, and it lives in `docs/session_reports/`.
 
@@ -120,7 +126,7 @@ Note what the smoke test is and is not: it confirms the controls are installed a
 .\scripts\build_release.ps1
 ```
 
-This is the build command. It runs seven pre-build gates, compiles with Inno Setup, and signs the result. The gates check that the SOUL, persona and composed-workspace-SOUL digests pinned in `setup.ps1` match the files on disk, that every preflight-required resource is actually bundled, that the embedded Studio payload and the bundled Ubuntu rootfs are the pinned ones, and that the two version literals agree. Each one fails the build on drift and none of them auto-correct.
+This is the build command. It runs nine pre-build gates, compiles with Inno Setup, and signs the result. The nine, in the order the script runs them, are: SOUL, bundle, interpolation, worktree, Studio, version, persona, workspace SOUL, rootfs. They check that the SOUL, persona and composed-workspace-SOUL digests pinned in `setup.ps1` match the files on disk, that every preflight-required resource is actually bundled, that no shipped `.ps1` interpolates a variable the file never defines, that the bundled bytes are the committed bytes, that the embedded Studio payload and the bundled Ubuntu rootfs are the pinned ones, and that the two version literals agree. Each one fails the build on drift and none of them auto-correct. The version gate has a second half that cannot run until after compilation: the compiled digest must not contradict a version already recorded in `released-versions.tsv`.
 
 Output: `Output\ClawFactory-Secure-Setup.exe`. Requires the bundled rootfs at `resources\ubuntu-rootfs.tar.gz` (gitignored; see [Build prerequisites in CONTRIBUTING.md](CONTRIBUTING.md#build-prerequisites) for the source URL and digest). The `.iss` and `setup.ps1` are the only sources of truth: every line is auditable before you trust a build.
 

@@ -320,7 +320,7 @@ Each PowerShell script in the installer flow + post-install + ongoing-operations
 **Downstream consumers**:
 - `resources/post-install.ps1` (run by step 14)
 - `resources/bootstrap.ps1` (run by step 15)
-- `resources/launcher.ps1` (desktop shortcut, post-install)
+- `resources/launcher.ps1` (bundled, post-install; NO `[Icons]` entry invokes it)
 - `resources/clawfactory-stop.ps1` (Start Menu, post-install)
 - `resources/switch-provider.ps1` (Start Menu, post-install)
 
@@ -437,7 +437,7 @@ Inno Setup .iss
               ↓
            ────────────────────────────────────
            Post-install operational scripts:
-              • launcher.ps1   (desktop shortcut)
+              • launcher.ps1   (bundled; no shortcut invokes it)
               • clawfactory-stop.ps1   (kill switch)
               • switch-provider.ps1    (provider change)
               • rename-agent.ps1   (rename UX)

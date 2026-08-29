@@ -2,6 +2,17 @@
 
 Every answer below maps to the actual behavior of `setup.ps1`, `bootstrap.ps1`, or `launcher.ps1` as shipped. Where the installer leaves a real gap, it says so directly.
 
+**Staleness warning, added 2026-08-29.** Most of this file was written before ClawChat
+was bundled and before the desktop icon was repointed at it. On 2026-08-29 every answer
+that described how a user reaches the agent was re-derived from the `[Icons]` section of
+`ClawFactory-Secure-Setup.iss` and corrected; the spend-governor and conversation-history
+answers were corrected in the same pass. **Answers outside those topics have NOT been
+re-derived and some are known stale.** Specifically: the security-researcher Q4 says the
+`.exe` is unsigned, which has been false since Azure Artifact Signing was wired, and the
+retail-investor Q5 describes the API key as living in Windows Credential Manager, which is
+where it is captured but not where it comes to rest. Do not answer a customer from an
+uncorrected section of this file without checking the tree first.
+
 ---
 
 PERSONA: Security researcher
@@ -34,13 +45,13 @@ BIGGEST DROP-OFF RISK: The dashboard requires device-identity pairing the instal
 PERSONA: Journalist / investigative reporter
 TECHNICAL LEVEL: low
 
-Q1: I clicked the desktop lobster and a web page opened, but it doesn't have a chat box. What now?
-WHAT HAPPENS: `launcher.ps1` runs `systemctl --user start openclaw-gateway` inside WSL, polls `http://127.0.0.1:8787/status` for up to 15 seconds, then opens that URL in your default browser. What you see is the OpenClaw gateway's control panel, not a chat window — and the chat is gated by a "device pairing" step the installer doesn't walk you through.
-ANSWER: Honestly, this is the biggest rough edge in the current installer. The simpler path right now is the terminal: open Start → "Ubuntu" → at the prompt type `openclaw chat`, pick `orchestrator` from the list. If the terminal is too unfamiliar, wait for the next installer build that bundles the chat UI directly. **Do not put source documents into this until you can confirm the chat works end-to-end.**
+Q1: I clicked the desktop lobster. What am I looking at?
+WHAT HAPPENS: The desktop icon and the Start Menu `ClawChat` entry both carry `Filename: {app}\ClawChat.exe` (`ClawFactory-Secure-Setup.iss` `[Icons]`). Clicking either opens ClawChat, the bundled desktop chat window. No browser and no terminal is involved, and no device pairing step stands in front of it. `launcher.ps1` is still bundled but no `[Icons]` entry invokes it, so the browser dashboard is not what the icon opens.
+ANSWER: ClawChat is the chat window; type your question into it. ClawFactory Studio, the control panel, is a separate window for grants, spend and provider settings. The browser dashboard at `http://127.0.0.1:8787` still exists and still needs device pairing, but it is an advanced surface, not the path you are meant to take.
 
 Q2: Where do my conversations get saved, and could they be subpoenaed off this machine?
-WHAT HAPPENS: Inside WSL, the gateway writes session logs to `/tmp/openclaw/openclaw-<date>.log` (cleared on reboot in some configs but not all) and persistent chat history to `~/.openclaw/agents/<name>/sessions/` as JSONL. Your prompts and the model's responses sit on disk inside WSL in plaintext until you delete them.
-ANSWER: They're stored locally only — nothing leaves your machine if you picked Ollama, and only goes to your chosen LLM provider (Anthropic/OpenAI/etc.) if you picked one of those. But they are on disk in plaintext. Treat them like a Word document: encrypt your laptop's disk (BitLocker), and delete the JSONL files in `~/.openclaw/agents/*/sessions/` after sensitive sessions. There is **no built-in "purge history" button** — that's a real gap.
+WHAT HAPPENS: There are two stores, not one. ClawChat, the window the desktop icon opens, keeps its conversation history on the **Windows** side under `%APPDATA%\ClawChat`; `uninstall.ps1` says so in its own uninstall dialog and states that **neither uninstall branch deletes it**. Separately, inside WSL the gateway writes session logs to `/tmp/openclaw/openclaw-<date>.log` and per-agent JSONL under `~/.openclaw/agents/<name>/sessions/`. Your prompts and the model's responses sit on disk in plaintext in both places until you delete them.
+ANSWER: They're stored locally only. Nothing leaves your machine if you picked Ollama, and it only goes to your chosen LLM provider (Anthropic/OpenAI/etc.) if you picked one of those. But they are on disk in plaintext. Treat them like a Word document: encrypt your laptop's disk (BitLocker), delete `%APPDATA%\ClawChat` for the chat window's history, and delete the JSONL files in `~/.openclaw/agents/*/sessions/` for the gateway's. There is **no built-in "purge history" button** in either place, and uninstalling does not clear the Windows-side store. That is a real gap.
 
 Q3: How do I shut everything down before I cross a border or hand the laptop to someone?
 WHAT HAPPENS: The Start Menu has a "ClawFactory Kill Switch" entry. It runs `clawfactory-stop.ps1`, which unmounts every granted Windows folder, kills any running agent turn, stops the OpenClaw gateway, and then verifies by counting the agent's processes inside the sandbox — it prints what it actually stopped and exits non-zero if it could not confirm. It does **not** unregister WSL or delete chat history. (There are no containers; that wording was left over from a Docker design removed in 2026-07.)
@@ -52,9 +63,9 @@ ANSWER: Yes — pick Ollama at install time. After install, you can disconnect f
 
 Q5: What about my notes — can I export a conversation?
 WHAT HAPPENS: Chat history is stored as JSONL files at `~/.openclaw/agents/<name>/sessions/<id>.jsonl` inside WSL. There is no export button, no Markdown render, no "save as PDF."
-ANSWER: Not natively. To extract a session today: open Ubuntu, type `cat ~/.openclaw/agents/orchestrator/sessions/*.jsonl` and copy the output, or `cp` the file to a Windows location. This is a real product gap; export-to-Markdown is the kind of feature that should exist for your use case and currently doesn't.
+ANSWER: Not natively. To extract a session today: open Ubuntu, type `cat ~/.openclaw/agents/orchestrator/sessions/*.jsonl` and copy the output, or `cp` the file to a Windows location. ClawChat's own history is on the Windows side under `%APPDATA%\ClawChat` and can be copied from there. This is a real product gap; export-to-Markdown is the kind of feature that should exist for your use case and currently doesn't.
 
-BIGGEST DROP-OFF RISK: The desktop shortcut opens a dashboard they can't actually chat in, and the only working path (`openclaw chat` from a Linux terminal) requires comfort with the command line they don't have.
+BIGGEST DROP-OFF RISK: Not the chat surface. The desktop icon opens ClawChat and they can type into it. The remaining risk for this persona is that neither uninstall branch deletes the Windows-side conversation history, and nothing in the product tells them that except the uninstall dialog itself.
 
 ---
 
@@ -62,8 +73,8 @@ PERSONA: Ambitious student (grad or undergrad)
 TECHNICAL LEVEL: medium-high
 
 Q1: I picked Ollama at install — how do I actually start asking it questions?
-WHAT HAPPENS: After install, `bootstrap.ps1` printed a "what to do next" block with three commands. The desktop shortcut points at the gateway's control UI which needs device pairing.
-ANSWER: Skip the desktop icon for now. Open Ubuntu (Start → "Ubuntu") and run `openclaw chat`. Pick `orchestrator` from the agent list. If you get an error about the gateway not running, run `systemctl --user start openclaw-gateway` first. The gateway dashboard at `http://127.0.0.1:8787` is real but currently requires manual device pairing the installer doesn't explain — file an issue if you want me to walk you through it.
+WHAT HAPPENS: The desktop icon and the Start Menu `ClawChat` entry both launch `ClawChat.exe`, the bundled chat window. `bootstrap.ps1` also prints a "what to do next" block whose step 3 points at the `openclaw chat` CLI, which is a second, command-line route to the same agents.
+ANSWER: Double-click the desktop lobster, or use Start Menu, ClawFactory, ClawChat. Type your question in the window. If you would rather stay on the command line, open Ubuntu (Start, then "Ubuntu") and run `openclaw chat`, then pick `orchestrator` from the agent list; if that errors about the gateway, run `systemctl --user start openclaw-gateway` first. The browser dashboard at `http://127.0.0.1:8787` is a third surface and still requires manual device pairing the installer doesn't explain, so it is not the one to send a new user to.
 
 Q2: Can I install other Ollama models like `mistral` or `qwen2.5-coder`?
 WHAT HAPPENS: Step-InstallOllama only pulls `llama3.1:8b` by default. After install, Ollama is running as a systemd service inside WSL and accepts standard `ollama pull` commands.
@@ -142,26 +153,26 @@ BIGGEST DROP-OFF RISK: They cannot get their data files into the agent without b
 PERSONA: Retail investor / trader
 TECHNICAL LEVEL: low
 
-Q1: I clicked the lobster icon and a webpage opened. Where do I type my question?
-WHAT HAPPENS: `launcher.ps1` opens `http://127.0.0.1:8787` in your default browser. That URL serves the OpenClaw gateway's control dashboard — it has menus and panels but no chat box you can use until you complete a "device pairing" step the installer doesn't explain.
-ANSWER: Right now the easiest path is **not** the desktop icon. Click Start, search "Ubuntu", press Enter, and at the black window's prompt type `openclaw chat` and press Enter. Pick "orchestrator" from the list with arrow keys. Type your question and press Enter. The desktop icon needs a fix the next installer build will include — for now, treat it as a dashboard for advanced settings, not the way to chat.
+Q1: I clicked the lobster icon. Where do I type my question?
+WHAT HAPPENS: The desktop icon runs `ClawChat.exe` from the install folder. ClawChat is a chat window with a message box in it. The browser dashboard at `http://127.0.0.1:8787` is a different surface, reached from the Start Menu "ClawFactory Dashboard" entry, and it does still require a device-pairing step the installer does not explain.
+ANSWER: Double-click the lobster and type into the box in the window that opens. That is the whole flow. If a window opens and says the gateway is not running, give it thirty seconds and try again, or use Start Menu, ClawFactory, ClawFactory Kill Switch, and then reopen. Do not send this persona to the browser dashboard.
 
 Q2: How much does each question cost?
-WHAT HAPPENS: If you picked a cloud provider (Grok, OpenAI, Claude, Gemini), each chat goes through your API key and costs whatever that provider charges per token. The installer does not show you a counter or cap. If you picked Ollama, every question is free and runs on your laptop.
-ANSWER: For cloud providers: roughly $0.01–$0.10 per question depending on length and which model you picked. Check your provider's billing dashboard (Anthropic console / OpenAI billing) every few days. To avoid surprises: switch to Ollama from the Start Menu shortcut "Switch AI Provider" — it's free and runs locally, just slower and a little less smart. There is **no built-in spending cap** in this installer — set one in your provider's billing settings.
+WHAT HAPPENS: If you picked a cloud provider (Grok, OpenAI, Claude, Gemini), each chat goes through your API key and costs whatever that provider charges per token. There **is** a built-in spend governor: it meters spend and its turn gate refuses a turn once the cap is reached. Smoke checks 18 and 19 verify exactly that. If you picked Ollama, every question is free and runs on your laptop.
+ANSWER: For cloud providers: roughly $0.01 to $0.10 per question depending on length and which model you picked. Set a cap in ClawFactory Studio and the turn gate will stop turns at it. Still check your provider's billing dashboard (Anthropic console / OpenAI billing) every few days, because the governor is a gateway-path control and not a structural one: it is a guardrail, not a hard ceiling. To remove the cost question entirely, switch to Ollama from the Start Menu shortcut "Switch AI Provider". It is free and runs locally, just slower and a little less smart.
 
 Q3: Can I import my brokerage statements (PDFs, CSVs)?
 WHAT HAPPENS: WSL is configured so the agent cannot see your Windows files. Your `Downloads` folder is invisible to the agent.
 ANSWER: For now, paste the relevant text into the chat box directly — the agent can read pasted text just fine. For uploading whole PDFs or CSVs, you'd need a workflow that copies files into the agent's workspace, which currently requires command-line steps that aren't ready for non-technical users. **Real gap** — file upload is on the next-build list.
 
 Q4: Why does my desktop icon say "ClawFactory could not start. Check that WSL is running"?
-WHAT HAPPENS: `launcher.ps1` tries to start the OpenClaw service inside WSL and waits 15 seconds for it to come up. If WSL isn't running yet (right after a reboot, or after Windows put it to sleep), 15 seconds isn't always enough.
+WHAT HAPPENS: That dialog comes from `launcher.ps1`, which the desktop icon no longer invokes, so on a current install this specific message should not appear from the icon. What the icon does is start `ClawChat.exe`, which polls the gateway itself and shows an offline state if WSL has not come up yet. If you do see the old dialog, `launcher.ps1` is being run some other way; it tries to start the OpenClaw service inside WSL and waits up to 120 seconds for it.
 ANSWER: Wait 30 seconds and double-click the lobster again. If it still fails: restart your PC and try once more. If it still fails after a fresh restart, use the Start Menu "ClawFactory Kill Switch" then double-click the lobster — that's a clean reset. You shouldn't need to do this often; usually only after Windows updates or a deep sleep.
 
 Q5: Is my API key safe? Where is it stored?
 WHAT HAPPENS: Your key was stored in Windows Credential Manager when you typed it during install. Credential Manager uses Windows DPAPI, which encrypts the key with a key tied to your Windows password. If someone else logs into your computer as a different user, they cannot decrypt it.
 ANSWER: It's about as safe as a password saved in Chrome. Encrypted by Windows, tied to your account, can't be read by other users on the same PC. The risk is: if someone gets your Windows password (or convinces Windows you're you), they can read it. Standard precaution: enable BitLocker on your laptop disk if you're using a cloud provider key with real money behind it.
 
-BIGGEST DROP-OFF RISK: They expect the desktop icon to launch a ChatGPT-like chat window, get a confusing dashboard, and assume the product is broken.
+BIGGEST DROP-OFF RISK: Not the chat surface. The desktop icon does launch a chat window. The remaining risk for this persona is that the spend governor is opt-in: a cap they never set in Studio is a cap the turn gate never enforces, so the first surprise is a provider bill.
 
 ---
