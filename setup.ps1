@@ -157,6 +157,16 @@ function Write-Log {
     else                        { Write-Host $line }
 }
 
+function Format-Reading {
+    # v1.4.5 (D3): render a WMI/CIM reading with its RAW value and its TYPE, so a
+    # log line distinguishes $false from "not reported". `-not $null` is $true, so a
+    # bare boolean in a log is exactly the ambiguity that produced a false BIOS
+    # warning on the first external install.
+    param($Value)
+    if ($null -eq $Value) { return '<null:not-reported>' }
+    return ('{0} [{1}]' -f $Value, $Value.GetType().Name)
+}
+
 #--- Silent-mode safety -----------------------------------------------------
 # v1.0.12: every interactive primitive in this script (Read-Host, MessageBox)
 # routes through one of these two helpers. Under -Silent or a non-interactive
@@ -289,6 +299,26 @@ function Test-WslFunctional {
     if (-not ($list -contains $WslDistro)) { return $false }
     $rTrue = Invoke-WslExe -Arguments @('-d', $WslDistro, '-u', 'root', '--', 'true')
     return ($rTrue.ExitCode -eq 0)
+}
+
+function Get-VirtualizationHelpText {
+    # v1.4.5 (D3): the deferred half of the firmware reading. Every WSL failure
+    # message ends with this, and which half leads depends on what preflight saw.
+    # The old text was 'Please contact support at hello@avitalresearch.com', which
+    # is the wrong instruction for a product that is free, public and unsupported,
+    # and it named neither of the two things a person can actually do.
+    if ($script:VirtFirmwareSuspect) {
+        return ("This computer also reported that hardware virtualization may be turned off in its firmware. " +
+                "Open Task Manager, go to Performance > CPU and look at 'Virtualization'. If it says Disabled, " +
+                "restart, enter the BIOS/UEFI setup screen, turn on Intel VT-x (or AMD SVM Mode), and run this " +
+                "installer again. If it says Enabled, restart this computer and run the installer again instead - " +
+                "Windows sometimes needs a restart before virtualization support becomes active. " +
+                "Full details are in $LogFile.")
+    }
+    return ("Two things cause this. Restart this computer and run the installer again - Windows sometimes needs a " +
+            "restart before virtualization support becomes active. If that does not work, check your BIOS/UEFI " +
+            "setup screen and turn on Intel VT-x (or AMD SVM Mode); Task Manager > Performance > CPU > " +
+            "Virtualization will say Disabled if that is the cause. Full details are in $LogFile.")
 }
 
 function Save-ResumeFlag {
@@ -843,13 +873,42 @@ function Step-Preflight {
     if ([int]$os.BuildNumber -lt 22000) {
         throw "Windows 11 required (detected build $($os.BuildNumber))."
     }
+    # v1.4.5 (D3). This reading is NOT a gate and must not become one.
+    #
+    # Win32_Processor.VirtualizationFirmwareEnabled is a single OEM-populated
+    # firmware bit. It reads $null on some hardware, and `-not $null` is $true, so
+    # the WARN below cannot distinguish "disabled" from "not reported". That was an
+    # argument until 2026-08-30, when it became a measurement: on the first external
+    # install failure this WARN fired on a machine whose Task Manager reads
+    # Virtualization: Enabled, and whose actual fault was a pending reboot. A hard
+    # gate on this bit would have refused to install on a working computer -- the
+    # same defect class as trusting an exit code, committed in the other direction.
+    #
+    # So: log every reading with its raw value and type, so the next person
+    # diagnosing this has facts instead of a verdict; set a suspicion flag; and let
+    # a REAL failure downstream decide whether to lead with the firmware half of its
+    # message. Nothing here changes control flow.
     try {
-        $cpu = Get-CimInstance Win32_Processor
-        if (-not $cpu.VirtualizationFirmwareEnabled) {
-            Write-Log WARN 'Virtualization may be disabled in BIOS. WSL2 may fail to start.'
+        $cpu  = @(Get-CimInstance Win32_Processor)[0]
+        $sys  = $null
+        try { $sys = Get-CimInstance Win32_ComputerSystem } catch { }
+        $vfe  = $cpu.VirtualizationFirmwareEnabled
+        $slat = $cpu.SecondLevelAddressTranslationExtensions
+        $vmme = $cpu.VMMonitorModeExtensions
+        $hyp  = if ($sys) { $sys.HypervisorPresent } else { $null }
+        Write-Log INFO ('Virtualization readings: ' +
+            "VirtualizationFirmwareEnabled=$(Format-Reading $vfe); " +
+            "HypervisorPresent=$(Format-Reading $hyp); " +
+            "SecondLevelAddressTranslationExtensions=$(Format-Reading $slat); " +
+            "VMMonitorModeExtensions=$(Format-Reading $vmme)")
+        if (-not $vfe) {
+            $script:VirtFirmwareSuspect = $true
+            Write-Log WARN ('Virtualization may be disabled in this computer''s firmware. This is a WARNING, ' +
+                            'not a check that failed: the bit is unreported on some hardware and reads the same ' +
+                            'way when it is simply absent. The install continues.')
         }
     } catch {
-        Write-Log WARN 'Could not query CPU virtualization state.'
+        Write-Log WARN "Could not query CPU virtualization state: $($_.Exception.Message)"
     }
     if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
         throw 'wsl.exe not found on PATH. Install the Windows Subsystem for Linux feature first.'
@@ -3703,6 +3762,11 @@ Set-Content -Path "C:\ProgramData\ClawFactory\smoke-results.json" -Value $output
 $script:InstallSucceeded = $false
 $script:InstallFailReason = ''
 $script:RebootPending = $false
+# v1.4.5 (D3): Step-Preflight records a firmware-virtualization SUSPICION here.
+# It is never a gate - see the comment on the reading itself - it only decides
+# which half of a real failure's message leads. Declared here so StrictMode 3.0
+# cannot trip on it if preflight never ran.
+$script:VirtFirmwareSuspect = $false
 try {
 
 if ($Resume) {
