@@ -787,6 +787,43 @@ than detection, parse the structure instead of matching text.
 
 ---
 
+### 10.6 A scanner that could not run, reporting a clean tree
+
+**Claimed.** That all ten shipped `.ps1` files are free of the non-ASCII bytes that
+produce the v1.5 mojibake. Produced on 2026-08-29 while re-deriving that census from
+the tree, by the obvious one-liner: a `grep -cP` with a negated hex character class,
+run per file under `LC_ALL=C`, inside a loop whose per-file expression ended `|| echo 0`.
+
+**True.** Five of the ten carry non-ASCII bytes and no BOM, exactly as
+`docs/V1_5_BACKLOG.md` already recorded: `setup.ps1`, `post-install.ps1`,
+`bootstrap.ps1`, `rename-agent.ps1`, `launcher.ps1`.
+
+**What went wrong.** `grep -P` on this platform refuses under `LC_ALL=C` — *"grep: -P
+supports only unibyte and UTF-8 locales"* — and exits **2**. The `|| echo 0` converted
+that refusal into the number zero. **Ten files, ten zeroes, a perfectly uniform clean
+result, produced by a program that never ran.** The uniformity is what makes it
+convincing: a real clean tree and a scanner that cannot start look identical.
+
+**Found by.** The rule, applied mechanically rather than remembered. An em dash was
+planted in a copy of a clean shipped script and the pattern was required to find it
+before the clean result was believed. It did not. A byte-value scan then found 3 bytes
+in the canary, 0 in the control, and reproduced the published census file-for-file and
+line-for-line.
+
+**Why this is in Class 10 and not Class 2.** It is both, and Class 10 is the sharper
+reading: the instrument was built specifically to audit a *text-encoding* defect and was
+itself defeated by a *text-encoding* constraint — the locale. Entry 10.4 records the
+first sweep for this same defect containing the defect. This is the second, by a
+different mechanism, on the same subject.
+
+**Changed.** Three requirements written into the staleness-gate specification in
+`docs/V1_5_BACKLOG.md`: match on byte values and never on a regex engine's character
+classes; run the canary and the clean control in the *same invocation* as the real scan;
+and treat any scanner exiting non-zero as **VOID, never clean**. That last one is the
+whole entry. A practice is added below as rule 21.
+
+---
+
 ## Class 11: a probe calibrated correctly, run in the wrong order
 
 This class was named at the end of the cycle, because it is the one that none of the
@@ -1068,7 +1105,9 @@ rather than as history. Two documents, because a fixed defect and a live one cal
 different decisions from a reader.
 
 **No user-reported issues appear here**, because there have not been any. The product
-is being published now.
+was published on 2026-08-29: this repository is public, and `v1.4.4` is its first GitHub
+Release. Anything reported from here on is a user report and belongs in a different
+document from this one.
 
 ---
 
@@ -1125,6 +1164,24 @@ above, and each is applied mechanically rather than remembered.
 19. **A claim removed from the place it was noticed is not a claim removed.** The WHO
     half of the dependency census applies to sentences, not only to code. Entry 12.1,
     and Class 8.
+20. **A citation proves the provenance of a sentence, not the provenance of the
+    artefact.** Before citing a file as evidence of what a user sees, establish that the
+    file cited is the file that ships. For anything served, name the repository, branch
+    and path the live surface is built from and confirm the deployed bytes match. The
+    same question applies to any artefact with more than one copy: a bundled file versus
+    its repo original, a built installer versus its source, a vendored dependency versus
+    upstream. Entry 12.3. *(This clause was written into
+    `docs/VALIDATION_PREAMBLE.md` when 12.3 was recorded and was missing from this list
+    until 2026-08-29.)*
+21. **A measuring program that exits non-zero has not measured anything.** Its output is
+    VOID, never clean. Any step that converts a non-zero exit into a count — `|| echo 0`,
+    a swallowed `catch`, a default — has removed the only signal that distinguishes "found
+    nothing" from "could not look". Entry 10.6.
+22. **A specification for a derivation is itself a derivation, and needs running.**
+    Writing down how a number must be derived is not the same as deriving it. A
+    cross-check specified in `docs/V1_5_BACKLOG.md` as "both, and they must agree"
+    disagreed on a correct tree the first time anyone ran it, because one comment header
+    covers two gates. Class 10, one level up: the instrument was still on paper.
 
 ---
 

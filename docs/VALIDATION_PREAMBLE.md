@@ -289,7 +289,7 @@ described otherwise. Marketing claims match the structural column only.
 
 # Clauses earned in the v1.4.4 cycle
 
-The three clauses below are not part of the PROMPT 15 text copied above. They were earned
+The four clauses below are not part of the PROMPT 15 text copied above. They were earned
 in the v1.4.4 validation cycle (boxes A, B, C and D, the wrapper-fix build, the release
 preparation, and the documentation reconciliation that followed the release) and until
 2026-08-29 they existed only inside close-out documents in `docs/session_reports/`, which
@@ -297,8 +297,10 @@ is to say they governed nothing. They are added here so that a future job pastes
 the rest of the preamble.
 
 The first two are recorded verbatim as they were written in the close-outs that earned
-them. The third is new and is recorded together with a matching entry in
-`docs/FAILURE_CATALOGUE.md`.
+them. The third is recorded together with a matching entry in
+`docs/FAILURE_CATALOGUE.md`. **The fourth was added on 2026-08-29 by the documentation
+reconciliation** and is the only one that governs the handoff card rather than a
+measurement or a sentence.
 
 ## 1. The measurement being right does not make the expectation right
 
@@ -354,3 +356,99 @@ no cheap way to re-check. It was caught only when the operator said "fix the but
 fixing it required finding it. Acting on that instruction without finding it would most
 plausibly have meant re-uploading a ClawAgent installer that had been deliberately withdrawn
 as unsafe. See `docs/FAILURE_CATALOGUE.md` entry 12.3.
+
+## 4. A handoff card carries the evidence that could change the instruction
+
+```
+A handoff card carries the evidence that could change the instruction, not only the
+evidence needed to approve it. A card written to get a yes or a no on a fixed sequence
+cannot produce a better sequence. Enumerate the subject fully -- counts, states, sizes,
+who has touched it -- even where the enumeration is not needed to answer the question
+being asked, because the operator is deciding and you are not.
+
+And where two instructions arrive in the same reply, check them against each other
+before executing either. Following both literally can produce a claim that is false
+about the surface it lands on.
+```
+
+**Why this one exists.** On 2026-08-29 a card asked for approval to prepend a warning to
+four archived ClawAgent releases and **keep their installers downloadable so existing links
+keep working**. Because the brief had said not to take the number four on faith, the card
+enumerated all four assets rather than counting them, and the enumeration carried
+`download_count: 0` on every one. **If nothing had ever been fetched there were no existing
+links to preserve**, and the only argument for leaving a knowingly-unsafe installer
+downloadable evaporated. The operator did not approve the sequence; he changed it, to
+warning **and** delete, and the reason he could was that the card contained the measurement
+that undercut its own premise.
+
+The second paragraph is the same day's second lesson. The revised reply said to apply the
+warning block **unchanged**, and that block contained the sentence *"The installer below
+remains downloadable so existing links keep working."* Applying both instructions literally
+would have published, on four public pages, a sentence false about the page it sat on --
+manufacturing this catalogue's central defect class on a customer-facing surface rather
+than fixing it. The conflict was caught before the first write, reported, and resolved by
+replacing that one sentence.
+
+Full record: `docs/session_reports/2026-08-29_doc_truth_and_clawagent_hazard_closeout.md`
+section 6.3 and 6.5.
+
+---
+
+# Open measurements owed by the next validation cycle
+
+**This section is deliberately OUTSIDE the paste block above.** It is not boilerplate and
+must not be pasted into every job. It is here because this is the file a ClawFactory
+validation job opens, and an open measurement recorded only in a close-out or a v1.5
+planning page governs nothing -- which is the reason this file exists at all.
+
+**Clear an entry from this list only by measuring it, or by the product change that removes
+the subject.** Do not clear one because it looks stale.
+
+## OM-1. The `:8787` dashboard has never been opened, on any release, by rule
+
+**Card `#311`. Owed since 2026-08-29.**
+
+`ClawFactory-Secure-Setup.iss` `[Icons]` ships `{group}\ClawFactory Dashboard`, which runs
+`cmd.exe /c start http://127.0.0.1:8787`. It is one click from the Start Menu under hover
+text that invites it and warns of nothing.
+
+**This project forbids its own sessions from opening that URL.**
+`ClawFactory_Session_Handoff_2026-07-14.md:51` says *"Never open the dashboard at
+127.0.0.1:8787 (restart-loop hazard)"*, and `docs/session_reports/PHASE0_RECON_2026-07-13.md`
+calls it *"the hazardous `:8787` endpoint"*, *"hazard rule #5"* and *"the forbidden
+dashboard"*.
+
+**The tree supports two readings and settles neither.**
+
+- **(a)** The hazard was real, was root-caused to a missing `.wslconfig` `vmIdleTimeout`,
+  was fixed in v1.0.1, and the rule outlived its cause. The shortcut is harmless and the
+  rule is stale. `CLAUDE_ClawFactory.md` records `openclaw-control-ui` issuing a restart RPC
+  in that entry's list of causes explicitly **ruled out**.
+- **(b)** The hazard is real and separate from the `vmIdleTimeout` bug, and the shortcut
+  hands it to a first-run user.
+
+**The finding is that nobody knows which, and the reason is the rule itself.** The surface
+has gone unmeasured on every release since v1.0.1 **because opening it is forbidden**. A
+standing prohibition has kept a shipped, customer-facing, one-click surface untested across
+six versions.
+
+**What the next cycle owes.** One measurement, on a validation box, under an **explicit
+one-time suspension of hazard rule #5, recorded as such in the run plan before it is taken**
+-- not decided at the keyboard. It must:
+
+1. **Be taken on a box that is being torn down anyway**, last in the run order, after every
+   other phase has produced its verdict. If reading (b) is right, this wedges the machine.
+2. **Carry a positive control in the same run**: the gateway answering `/status` with 200
+   immediately before the click, and again after, from a path that is *not* the browser.
+   Without the "after", a wedge and a clean result look identical in the transcript.
+3. **Record what a first-run user actually sees**, which is the half that is not in doubt.
+   The dashboard is device-pairing gated (`SUPPORT_MATRIX.md:26`) and the installer ships no
+   pairing flow, so the expected result even under reading (a) is a dead end. Capture the
+   screen, not a description of it.
+4. **Not be confused with a verdict on the shortcut.** `docs/V1_5_BACKLOG.md` item 5 asks
+   for the shortcut to be **deleted** regardless of how this measures. Deleting it removes
+   an invitation; it does not answer whether the surface is hazardous, and this measurement
+   does not answer whether the shortcut should ship.
+
+**If the measurement is not taken, say so in the close-out and leave this entry standing.**
+A cycle that skips it has not closed it.

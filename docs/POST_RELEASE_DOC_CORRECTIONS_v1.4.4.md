@@ -23,15 +23,27 @@ the work recorded here.
 
 **Released artifact this diverges from.**
 
+> **Which artifact these two numbers describe, corrected 2026-08-29.** The `SHA-256` and
+> `Size` rows below are the **UNSIGNED** build, which is what `released-versions.tsv`
+> records and what the version gate compares against. They are **not** the numbers a
+> customer sees. The **published** asset is the signed one: **440,610,608** bytes, SHA-256
+> `6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1`. The 15,641-byte
+> difference is the Authenticode signature block and its countersigned timestamp appended
+> to the PE. The rows were correct and consistent with each other; the *label* did not say
+> which artifact, which is the ambiguity `docs/V1_5_BACKLOG.md` item 4 requires be closed
+> wherever a size is asserted.
+
 | Field | Value |
 |---|---|
 | Version | 1.4.4 |
 | Artifact | `ClawFactory-Secure-Setup.exe` |
-| SHA-256 | `548562c72d5261bc62d590df03746ea2bb52134a413e10d137b590e589fdcdea` |
-| Size | 440594967 bytes |
+| SHA-256 (**unsigned**) | `548562c72d5261bc62d590df03746ea2bb52134a413e10d137b590e589fdcdea` |
+| Size (**unsigned**) | 440594967 bytes |
+| SHA-256 (**signed, as published**) | `6e65560325cb6d7d3fea204ebb72876b3b113cbbfe9f2fa4f94113237e9eb4d1` |
+| Size (**signed, as published**) | 440610608 bytes |
 | Built from | `25945d5` |
 | Tag `v1.4.4` at | `9111e9b` |
-| Recorded in | `released-versions.tsv` |
+| Recorded in | `released-versions.tsv` (unsigned rows only) |
 
 ---
 

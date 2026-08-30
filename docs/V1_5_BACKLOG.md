@@ -230,6 +230,188 @@ someone writes a precise number.
 
 ---
 
+#### Sharpening, 2026-08-29: the complete number census, and what re-deriving it taught
+
+**Still specification only. Nothing below was implemented.** The table above was written
+from the numbers that were noticed. This section is the result of deriving **every**
+self-describing number in the shipped and repository documents from the tree in one pass,
+and it changes three of the derivations above.
+
+**The complete census.** Ten numbers, each with the exact derivation the gate must use and
+the value it produced on 2026-08-29.
+
+| # | Number | Value on 2026-08-29 | Derivation, exactly |
+|---|---|---|---|
+| 1 | Build-gate count | **9** | The **length of the `gatesPassed` array literal** in `scripts/build_release.ps1`. See the warning below: the header count does **not** agree, and the previous spec said it must |
+| 2 | Bundled-file count | **56** | `grep -c '^Source:'` over `ClawFactory-Secure-Setup.iss`, `[Files]` section only |
+| 2b | Bundled **markdown** count | **4** | The `Source:` lines matching `.md"`. `README.md`, `resources/safety-rules.md`, `resources/persona.md`, `resources/orchestrator-prompt.md`. **`SECURITY_FINDINGS.md` is NOT bundled** and at least one close-out has said it is |
+| 3 | Smoke-check count, default | **19** | `Check '` occurrences in `smoke-test.ps1` **before** the `if ($AgentChecks ...)` guard (line 317 today) |
+| 3b | Smoke-check count, opt-in | **7** | `Check '` occurrences **at or after** that guard. Total in file: **26**. Three numbers, all correct, of different things |
+| 4 | **Unsigned** installer size | **440594967** | Size column, last row of `released-versions.tsv` |
+| 5 | **Signed** installer size | **440610608** | The `size` field of the published release asset, from the GitHub releases API. Confirmed equal to the length of `Output\ClawFactory-Secure-Setup.exe` |
+| 6 | Version literal | **1.4.4** | `#define MyAppVersion` in the `.iss`, cross-checked against the last row of `released-versions.tsv` and against the `v1.4.4` badge on `README.md:3` (which carries it **twice on one line**) |
+| 7 | Studio panel count, not-in-this-release | **7** of **11** | `docs/RELEASE_NOTES_v1.4.4.md:29`, `docs/RELEASE_v1.4.4_GITHUB_BODY.md:31`, `validation/MANUAL_CHECKS_studio.md` section 9. **Not derivable from this repository's tree** -- Studio is a separate repository. This row is a cross-document agreement check, not a derivation, and the gate must say so |
+| 8 | Mojibake **file** count | **5** of 10 shipped `.ps1` | For each `.ps1` named in a `Source:` line: first three bytes are not `EF BB BF` **and** at least one byte falls outside `09 0A 0D 20-7E`. Hits: `setup.ps1`, `resources/post-install.ps1`, `resources/bootstrap.ps1`, `resources/rename-agent.ps1`, `resources/launcher.ps1` |
+| 9 | Mojibake **customer-visible occurrence** count | **7** | Non-ASCII **characters** (not lines) on the four customer-reaching lines: `rename-agent.ps1:21` (2), `:25` (2), `:29` (1), `bootstrap.ps1:128` (1), `:226` (1) |
+| 10 | OpenClaw version pin | **2026.4.27** | The pinned version literal in the installer scripts |
+
+**Correction 1 to the spec above: the build-gate cross-check as written FAILS TODAY, and
+the reason is not drift.** The previous spec says to count `^# --- Pre-build gate:` headers
+and cross-check against the `gatesPassed` array, "**Both, and they must agree**". They do
+not. The header count is **8**; the array has **9** entries. Nothing is stale: the header
+at `scripts/build_release.ps1:527` reads *"the persona and the COMPOSED workspace SOUL"* --
+**one header covering two gates**, `persona` and `workspace-soul`. A gate implemented from
+the spec as written would fail the build on a correct tree, on its first run.
+
+This is the second-order form of the defect the whole page is about. The rule *"derive it,
+never trust the prose"* was applied, a derivation was written down, and **the derivation
+itself was never run.** `docs/FAILURE_CATALOGUE.md` Class 10 is audit instruments carrying
+the defect they audit; this is a *specification* carrying it. **The array is the authority;
+the header count is advisory and must be reported as a warning, not a failure.**
+
+**Correction 2: number 7 is not derivable and must not pretend to be.** Every other row
+reads a file in this repository. The Studio panel count reads three documents that agree
+with each other, describing a repository whose source is elsewhere. A gate that treats it
+as a derivation is deriving one prose number from another prose number, which the note
+above already names as Class 10. It stays in the census because the number has now been
+asserted wrongly more than once -- see `docs/FAILURE_CATALOGUE.md` entry 12.2 -- but it is
+an agreement check between three named files and must be labelled as one.
+
+**Correction 3: the scanner for numbers 8 and 9 must not use `grep -P`, and must be
+canaried before any clean result is believed.** Re-deriving the mojibake census on this
+machine, the obvious pattern -- a `grep -cP` with a negated hex character class, run under
+`LC_ALL=C` -- returned **0 for all ten shipped scripts**, i.e. a completely clean tree. It
+was wrong. `grep -P` on this platform refuses under `LC_ALL=C` with *"grep: -P supports
+only unibyte and UTF-8 locales"* and exits **2**, and the surrounding `|| echo 0` in the
+loop turned that refusal into a reported zero. The clean result was a **failure to run,
+presented as a pass**, on the exact defect class this gate exists to catch.
+
+It was caught only because the preamble rule was applied: an em dash was planted in a copy
+of a clean shipped script and the pattern was required to find it **before** the clean
+result was believed. It did not. A byte-value scan (`od -An -v -tu1`, filter for values
+above 126) found 3 bytes in the canary and 0 in the control, and then reproduced the
+published census exactly: 10 shipped scripts, 5 affected, same files, same line numbers.
+
+**Three requirements follow, and they are not optional:**
+
+1. **The gate matches on byte values, never on a regex engine's character classes**, and
+   never on a literal non-ASCII character in its own source (already required above, for a
+   different reason -- entry 10.4).
+2. **The gate carries a planted canary and a clean control, and runs both in the same
+   invocation as the real scan.** A canary run separately is a second measurement of a
+   different moment.
+3. **A scanner that exits non-zero is VOID, never clean.** The `|| echo 0` that swallowed
+   the failure is the whole defect. Any harness step that converts a non-zero exit into a
+   count must be treated as absent.
+
+#### 4b. The site download-link check. **A POST-RELEASE ASSERTION, not a derivation**
+
+Recorded separately, deliberately. Every number in the census above is derived from bytes
+in this repository. **This one is not derivable at all.** It is an HTTP reading against a
+surface built from a different repository, and folding it into the staleness gate would put
+a network call inside a lint and would let a transient 502 fail a documentation check.
+
+**What it asserts.** After a release is published, and only then: a `HEAD` request to
+
+```
+https://github.com/BuzzardsBay/clawfactory-secure-setup/releases/latest/download/ClawFactory-Secure-Setup.exe
+```
+
+must return **200**, following redirects, with a `Content-Length` equal to the **signed**
+size (census row 5) of the release just published.
+
+**Why the size and not just the 200.** A 200 proves a file is served. Only the size proves
+it is *this* release's file. `latest` moves; a stale CDN edge or a failed asset upload can
+serve the previous release's binary under a 200 for some time. On 2026-07-21 this project
+watched a CDN serve a stale page across 32 consecutive polls.
+
+**Why it belongs to the release, not to the build.** It cannot pass before publication --
+the asset does not exist -- so it can never be a pre-build gate. It is the last step of
+cutting a release, after the asset is attached, and its failure mode is "the three download
+buttons on `clawfactory.app` are 404ing right now", which is a release incident and not a
+documentation defect.
+
+**Failure means the obligation in item 6 was broken**, almost always by the asset having
+been attached under a different filename. Fix the release, or fix the site -- in the same
+window, not next week.
+
+**This assertion has no positive control and cannot easily be given one**, because the
+negative case is a real 404 against a public URL. State that limitation rather than
+implying the reading is as strong as a gated measurement. The nearest available control is
+to request a filename known not to exist and require **404**, in the same run, which proves
+the reading distinguishes present from absent. **Do that.** A `HEAD` that returns 200 for
+everything, including a name that cannot exist, is measuring a redirect, not an asset.
+
+---
+
+### 5. The `ClawFactory Dashboard` shortcut, card `#311`. **DELETE IT, do not fix it**
+
+Added 2026-08-29 by the documentation-reconciliation job. Card `#311` was raised the same
+day at priority 1, **product severity, not documentation severity**.
+
+**What ships.** `ClawFactory-Secure-Setup.iss` `[Icons]`, verbatim:
+
+```
+Name: "{group}\ClawFactory Dashboard"; \
+  Filename: "{sys}\cmd.exe"; \
+  Parameters: "/c start http://127.0.0.1:8787"; \
+  WorkingDir: "{app}"; \
+  Comment: "Open ClawFactory dashboard in browser (gateway must be running)"
+```
+
+A Start Menu entry, shipped in v1.4.4, that opens the browser dashboard in one click, under
+hover text that invites it and warns of nothing.
+
+**Why it is a dead end, and this half is not in doubt.** The dashboard is device-pairing
+gated — `SUPPORT_MATRIX.md:26`, grounded in the gateway's Ed25519 device-identity connect —
+and **the installer ships no pairing flow and no explanation of one.** A first-run user who
+clicks it reaches a surface they cannot get past, from a label promising a dashboard.
+
+**Why deletion and not a fix.** Shipping a pairing flow is a feature, and a feature for a
+surface nobody has asked for and nobody has measured. Removing five lines from `[Icons]`
+costs nothing, removes a one-click dead end from the Start Menu, and leaves the dashboard
+reachable by anyone who types the URL. Nothing else in the product references the shortcut.
+The `Comment:` string is the only place the product advertises the dashboard at all.
+
+**What deleting it does NOT do.** It does not close the measurement question below, and it
+does not make the `:8787` surface safe or unsafe. It removes an invitation, nothing more.
+
+**Scope note.** This changes `[Icons]`, which is shipped bytes, so it cannot be done outside
+a build. v1.5 changes shipped bytes anyway.
+
+**The open measurement question is NOT recorded here**, deliberately, because a v1.5
+planning page is not what a validation cycle reads. It is in
+`docs/VALIDATION_PREAMBLE.md`, under "Open measurements owed by the next validation cycle".
+
+### 6. The site download links are coupled to the asset filename. **A RELEASE OBLIGATION**
+
+Added 2026-08-29. This is not a v1.5 work item; it is a **standing obligation on every
+future release**, recorded on the page a person cutting a release is most likely to open.
+
+`clawfactory.app` carries **three** download buttons. Since the 2026-08-29 site change they
+no longer point at the release page. All three point at the file:
+
+```
+https://github.com/BuzzardsBay/clawfactory-secure-setup/releases/latest/download/ClawFactory-Secure-Setup.exe
+```
+
+`/releases/latest/download/<name>` resolves **by filename**. If a release publishes its
+asset under any other name, all three buttons return **404**. No gate catches it: the
+filename lives in `BuzzardsBay/clawfactory-site`, a different repository, and nothing in
+this repository's build reads it.
+
+**The obligation, in one line:** *every release must attach its installer as exactly
+`ClawFactory-Secure-Setup.exe`, or the site's three download buttons must be changed in the
+same window.*
+
+`OutputBaseFilename=ClawFactory-Secure-Setup` in the `.iss` produces that name today, so
+the obligation is satisfied by not changing that line. It is written down because it is
+satisfied by accident rather than by a check.
+
+**Verified 2026-08-29**, and this is an HTTP reading, not a tree derivation: a `HEAD` on
+the download URL returns `200` with `Content-Length: 440610608`, matching the published
+signed asset. The corresponding **post-release assertion** is specified in item 4 below.
+
 ## Carried, not scheduled
 
 These are open conditions, not v1.5 work items. They are here so that v1.5 planning does

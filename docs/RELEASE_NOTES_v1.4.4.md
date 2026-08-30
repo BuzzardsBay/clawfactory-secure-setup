@@ -67,8 +67,13 @@ safety-rules file that is root-owned, read-only and hash-pinned at install.
 
 ### Installing
 
-1. Download the installer from the Releases page. It is about 440 MB, because the
-   Linux filesystem image and the desktop application are bundled rather than fetched.
+1. Download the installer from the Releases page. **The signed file you download is
+   440,610,608 bytes** -- about 440 MB -- because the Linux filesystem image and the
+   desktop application are bundled rather than fetched. (Two byte counts for this release
+   are in circulation and both are correct, of different artifacts: `released-versions.tsv`
+   records the **unsigned** build at 440,594,967 bytes, and the Authenticode signature
+   block plus its countersigned timestamp adds 15,641 bytes to the published file. Anything
+   asserting a size for this release has to say which of the two it means.)
 2. Right-click and choose Run as administrator.
 3. Walk the wizard: choose a provider, supply an API key, acknowledge the security
    summary, install.
