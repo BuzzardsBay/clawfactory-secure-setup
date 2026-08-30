@@ -598,12 +598,13 @@ function Invoke-Rollback {
     $reversed = @($CompletedSteps)
     [Array]::Reverse($reversed)
     foreach ($s in $reversed) {
-        Write-Log INFO "Undoing: $s"
         switch ($s) {
             'FirewallRule' {
+                Write-Log INFO "Undoing: $s"
                 Remove-NetFirewallRule -DisplayName $FirewallRuleName -ErrorAction SilentlyContinue
             }
             'EnsureWsl' {
+                Write-Log INFO "Undoing: $s"
                 $ans = Confirm-Or-Default "Rollback: unregister WSL '$WslDistro' distro? This deletes the Ubuntu distro and any files inside it. Type YES to confirm" 'YES'
                 if ($ans -eq 'YES') {
                     # v1.0.12: Process.Start instead of `wsl ... 2>&1` for the
@@ -618,9 +619,22 @@ function Invoke-Rollback {
                     Write-Log WARN 'WSL distro left in place by user choice.'
                 }
             }
-            default { }
+            # v1.4.5 (D6): say nothing was undone, rather than logging "Undoing: <step>"
+            # for a step there is no case for. setup.ps1 saves 31 distinct checkpoint
+            # names and this switch handles 2; the other 29 fell to an empty default.
+            # The first external install completed only 'Preflight', so accepting the
+            # rollback prompt produced "Running rollback for completed steps..." then
+            # "Undoing: Preflight" and did nothing at all, and the user reasonably
+            # concluded the rollback was broken.
+            default {
+                Write-Log INFO "No rollback action is defined for '$s' - nothing was undone for that step."
+            }
         }
     }
+    # C:\Program Files\ClawFactory staying populated is CORRECT: Inno owns that
+    # directory and only the ClawFactory uninstaller removes it. Say so here, once,
+    # because the prompt above implies otherwise.
+    Write-Log INFO ('Rollback finished. Files under ' + $PSScriptRoot + ' are removed by the ClawFactory uninstaller (Settings > Apps), not by this rollback.')
 }
 
 function Invoke-WithRollback {
@@ -635,13 +649,20 @@ function Invoke-WithRollback {
         # in v1.0.13 when only the Preflight checkpoint had been saved.
         $done = @(Get-CompletedSteps)
         if ($done.Count -gt 0) {
-            $ans = Confirm-Or-Default 'Installation failed. Run automatic rollback? (y/N)' 'n'
+            # v1.4.5 (D6): the prompt now states what rollback can actually undo.
+            # It has cases for exactly two steps and no mechanism for the other 29.
+            $ans = Confirm-Or-Default 'Installation failed. Run automatic rollback? It can only remove the Windows firewall rule and unregister the Ubuntu distro. (y/N)' 'n'
             if ($ans -match '^[Yy]') {
                 Invoke-Rollback -CompletedSteps $done
             } else {
-                Write-Log INFO "Rollback skipped. Log: $LogFile"
+                Write-Log INFO 'Rollback skipped.'
             }
         }
+        # v1.4.5 (D7): print the log location on EVERY failure path. It used to be
+        # printed only when rollback was declined, so the user who accepted it - the
+        # first external one did - was never told where the log was. Measured cost of
+        # that omission: forty-one minutes between the failure and his next action.
+        Write-Log ERROR "Installation log: $LogFile"
         throw
     }
 }
