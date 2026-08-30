@@ -4,8 +4,9 @@
 `git rev-parse --show-toplevel`. Branch `main`, starting at `2d46f9a`.
 
 **Scope held.** No shipped bytes. No build, no release, no tag, no version bump. No change
-to `BuzzardsBay/clawfactory-site`. No repository settings. Two commits on `main`: the
-reconciliation and this close-out.
+to `BuzzardsBay/clawfactory-site`. No repository settings. Three commits on `main`: the
+reconciliation (`1f7f918`), this close-out (`658a6cc`), and the addendum in section 9 that
+the end-of-session gate produced after `658a6cc` was already pushed.
 
 **Verdict: the job's premises were mostly right and two were wrong.** Both are reported in
 section 1 rather than worked around. Of the seven census items in TASK 1, **three needed a
@@ -67,7 +68,7 @@ scope judgement, it is the thing the pre-publication sweep existed to prevent.
 standard TASK 2 asked for. It is not staged and not pushed. It appears in no
 `git status --short` output in section 7 because git cannot see it.
 
-**And while correcting it, two secrets were removed from it** — see section 3.13. That was
+**And while correcting it, two secrets were removed from it** — see section 5.4. That was
 not asked for. It was done because this session was editing the section that held them,
 the file has been committed to this repository before, and leaving a live credential in a
 file being actively edited is worse than the scope stretch.
@@ -694,12 +695,13 @@ literal lines. Caught by reading the message back, fixed with `commit --amend -F
 | | Count |
 |---|---|
 | Product defects found | **0** — none were sought; this job touches no product code |
-| Defects found in **this session's own instruments** | **1** — the `grep -P` scanner, 6.3 |
-| of those, would have produced a **false finding** | **1**. It would have reported the mojibake defect as fixed |
+| Defects found in **this session's own instruments** | **2** — the `grep -P` scanner (6.3) and the pipeline-masked secret check (9.1) |
+| of those, would have produced a **false finding** | **2**. The first would have reported the mojibake defect as fixed; the second reported a live credential in three tracked files that does not exist |
 | Defects found in **existing specifications** | **1** — the build-gate cross-check, 6.2(a) |
 | Defects found in **existing records** | **2** — the false `SECURITY_FINDINGS` bundling row (6.4); the missing practice 20 (6.4) |
 | **Prompt premises found wrong** | **2** — section 1 |
-| Caught **before** anything was written | **1 of 1** instrument defect (the canary ran before the result was used) |
+| Caught **before** anything was written | **2 of 2** instrument defects. Both were caught by a control firing in the same invocation, not by suspicion |
+| **Security findings** | **1** — the Azure subscription id is in 7 tracked files of a public repository and in 6 commits of its history. 9.3. Reported, not fixed: the disposition is the operator's |
 
 **The instruments were wrong more often than the documents were.** Four of the seven
 censuses found the tree already correct. What this session actually produced was one
@@ -719,3 +721,81 @@ new rules — three of them earned by defects in the reconciliation itself.
 4. **`CHANGELOG.md` has no entries for v1.4.1 through v1.4.4.**
 5. **Nothing in TASK 3 was implemented**, by instruction. The staleness gate, the tenth
    build gate and the post-release download check are all specification.
+6. **The Azure subscription id is public and no disposition has been chosen.** 9.3. It is
+   in 7 tracked files and 6 commits of a public repository. Accept-and-document is the
+   recommendation; a history rewrite is the alternative; neither is decided.
+
+---
+
+## 9. ADDENDUM: what the end-of-session gate found, after the close-out was committed
+
+The gate in 7.2 was extended with a check that this session's own secret-removal (5.4) had
+not simply moved the problem. It found two things.
+
+### 9.1 My own gate check was a defective instrument, and the controls caught it
+
+The first form of the check was `git grep -l '<password>' HEAD -- | head -3 || echo "..."`.
+**In a pipeline, `$?` is the last command's status**, so `head`'s exit 0 suppressed the
+`|| echo` branch and the *next* command's output appeared under the first command's label.
+It looked exactly like a live credential in three tracked files.
+
+This is the `cmd | head` followed by `$?` trap, named verbatim in
+`docs/VALIDATION_PREAMBLE.md` under SHELL AND EXIT CODES, walked into while running a
+security check. It was resolved by re-running with `if git grep -q …; then` and **two
+controls in the same invocation**: a string that must be present (`ClawFactory-Secure-Setup`
+→ found) and one that cannot exist (→ not found). Only then was either result believed.
+
+**Second instrument defect of this session**, and the second caught by a control rather than
+by care. See 6.3 for the first.
+
+### 9.2 The plaintext admin password is ABSENT from the repository. Confirmed
+
+```
+$ git grep -q '<password>' HEAD  ->  exit 1, ABSENT
+```
+
+The pre-publication sweep did its job. Nothing about the credential removed from
+`CLAUDE_ClawFactory.md` §20.6 in 5.4 was ever pushed.
+
+### 9.3 **The Azure subscription id IS in the public repository, in 7 tracked files**
+
+**A finding for the operator, not something this session should decide.**
+
+```
+$ git grep -l '<subscription-id>' HEAD
+REPORT.md
+docs/session_reports/HANDOFF_2026-08-20_card258.md
+reports/AZURE_SIGNING_WIRED_20260706.md
+validation-runs/phase1-bake-20260506-130428/log.md
+validation-runs/phase1-bake-20260506-132433/log.md
+validation-runs/phase1-bake-20260506-144034/log.md
+validation-runs/phase1-bake-20260506T185022Z/log.md
+```
+
+It appears inside full ARM resource ids — the baseline image, the signing account, the
+validation resource group — in commands that were pasted into reports. **6 commits in the
+history touch it**, so it is in the published history and not only in the tip.
+
+**Why this is reported and not fixed.**
+
+- **An Azure subscription id is an identifier, not a credential.** It grants nothing on its
+  own; every operation against it is authenticated separately. It is not the same class of
+  exposure as a password, and this report does not claim it is.
+- **But the pre-publication sweep treated it as sensitive.** `.gitignore:62` names "the
+  Azure subscription id" among the reasons `CLAUDE_ClawFactory.md` was untracked. **The
+  sweep untracked the file that held it and did not census the identifier itself** — which
+  is `docs/FAILURE_CATALOGUE.md` practice 19 exactly: *a claim removed from the place it was
+  noticed is not a claim removed*, applied to a value instead of a sentence.
+- **Redacting the working tree would not remove it.** It is in six commits of a public
+  repository's history. Closing it properly means either accepting the exposure explicitly,
+  or a history rewrite on a repository that has already been cloned by an unknown number of
+  people. **Both are the operator's call and neither is a documentation-reconciliation
+  task.**
+
+**Recommended disposition, offered not taken:** accept and document. The identifier is
+low-value, the history rewrite is high-cost and incomplete, and an explicit line in
+`SECURITY_FINDINGS.md` saying the subscription id is public and why that is acceptable is
+worth more than a rewrite that leaves forks untouched. **Not decided here.**
+
+**This did not delay the push and does not change any commit above.** It is recorded because
+the gate found it and a gate finding that is not written down did not happen.
