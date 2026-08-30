@@ -1,7 +1,8 @@
 set +e
 # Stop and disable gateway
 sudo -u clawuser bash -c 'systemctl --user stop openclaw-gateway 2>/dev/null; systemctl --user disable openclaw-gateway 2>/dev/null' 2>/dev/null
-# Flush the clawfactory nft chain (uses iptables on WSL1)
+# Flush the clawfactory nft chain (the iptables-legacy backend is still reachable
+# on a WSL2 kernel without nftables; see setup.ps1 Step-EgressFirewall)
 /usr/sbin/nft delete table inet clawfactory 2>/dev/null
 # Clear immutable flags so the frozen safety files can be removed (Defect 2/4:
 # SOUL.md + workspace SOUL are root:root chattr +i; rm/deluser fail otherwise).
