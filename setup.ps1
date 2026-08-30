@@ -878,17 +878,29 @@ function Step-EnsureWsl {
     if (-not $Resume) {
         try {
             $rList = Invoke-WslExe -Arguments @('--list', '--quiet')
-            $distroExisted = $false
-            if ($rList.ExitCode -eq 0 -and $rList.StdOut) {
+            # v1.4.5: a failed `wsl --list` used to fall through to $distroExisted =
+            # $false, and 'false' is the DESTRUCTIVE answer - it records that the
+            # distro was not here before ClawFactory, i.e. that it is ClawFactory's to
+            # unregister. Write no verdict rather than a guessed one. On the first
+            # external install this call took a full sixty seconds and still
+            # succeeded, so the false record was not produced; the shape that produces
+            # it is one timeout away. Leaving any existing file untouched is
+            # deliberate: overwriting or deleting it could turn a previously recorded
+            # 'true' (the safe answer) into an absent one.
+            if ($rList.ExitCode -eq 0) {
                 $distros = @(($rList.StdOut -split "`n") |
                     ForEach-Object { ($_ -replace "`0", '').Trim() } |
                     Where-Object { $_ -ne '' })
                 $distroExisted = ($distros -contains $WslDistro)
+                if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Force -Path $LogDir | Out-Null }
+                Set-Content -LiteralPath (Join-Path $LogDir 'wsl-state.txt') `
+                    -Value ([string]$distroExisted).ToLower() -Encoding UTF8 -NoNewline
+                Write-Log INFO "Recorded distroExistedPreInstall=$distroExisted to wsl-state.txt"
+            } else {
+                Write-Log WARN ("wsl --list --quiet failed (exit $($rList.ExitCode)); whether '$WslDistro' " +
+                                "existed before this install is UNKNOWN. Recording nothing rather than 'false', " +
+                                "which would tell the uninstaller this distro is ClawFactory's to remove.")
             }
-            if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Force -Path $LogDir | Out-Null }
-            Set-Content -LiteralPath (Join-Path $LogDir 'wsl-state.txt') `
-                -Value ([string]$distroExisted).ToLower() -Encoding UTF8 -NoNewline
-            Write-Log INFO "Recorded distroExistedPreInstall=$distroExisted to wsl-state.txt"
         } catch {
             Write-Log WARN "Could not record wsl-state.txt: $($_.Exception.Message)"
         }
