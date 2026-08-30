@@ -301,6 +301,40 @@ function Test-WslFunctional {
     return ($rTrue.ExitCode -eq 0)
 }
 
+function Wait-WslFunctional {
+    # v1.4.5 (D2): Test-WslFunctional, retried a bounded number of times.
+    #
+    # WHY A RETRY AND NOT A SINGLE CALL. A one-shot probe against a distro that was
+    # registered a moment ago is a coin flip, and a false negative here would refuse
+    # to install on a healthy-but-slow machine - which is the same defect class the
+    # fix exists to remove. Three attempts, three seconds apart.
+    #
+    # WHAT IT COSTS WHEN IT IS ABOUT TO FAIL, stated as a trade rather than as free.
+    # Test-WslFunctional makes three wsl.exe calls, and on the one broken machine
+    # measured, `wsl --list --quiet` took SIXTY SECONDS. So the honest worst case is
+    # a few minutes added to an install that is going to fail anyway, in exchange
+    # for failing at the step that is actually wrong. The first external user spent
+    # forty-one minutes in front of the message this replaces.
+    param([int]$Attempts = 3, [int]$DelaySeconds = 3)
+    for ($i = 1; $i -le $Attempts; $i++) {
+        if (Test-WslFunctional) { return $true }
+        if ($i -lt $Attempts) { Start-Sleep -Seconds $DelaySeconds }
+    }
+    return $false
+}
+
+function Get-WslNotCreatedMessage {
+    # v1.4.5 (D2): the message for "the command said it worked and the distro is not
+    # there". It is quoted with the command that lied, because the log's next line up
+    # is usually the refutation - on the first external install failure it read
+    # "The requested operation is successful. Changes will not be effective until the
+    # system is rebooted." one line above "WSL2 install succeeded."
+    param([Parameter(Mandatory)][string]$Command)
+    return ("$Command reported success (exit 0), but no working '$WslDistro' environment exists on this " +
+            "computer afterwards. ClawFactory will not continue against an environment that was never " +
+            "created. " + (Get-VirtualizationHelpText))
+}
+
 function Get-VirtualizationHelpText {
     # v1.4.5 (D3): the deferred half of the firmware reading. Every WSL failure
     # message ends with this, and which half leads depends on what preflight saw.
@@ -540,7 +574,11 @@ function Install-WslDistroWithFallback {
             if ($t) { Add-Content -LiteralPath $LogFile -Value "[wsl --import v2] $t" -Encoding UTF8 }
         }
         if ($rImp.ExitCode -eq 0) {
-            Write-Log INFO 'WSL2 import from bundle succeeded.'
+            # v1.4.5 (D2): verify the claim before anything downstream depends on it.
+            if (-not (Wait-WslFunctional)) {
+                throw (Get-WslNotCreatedMessage -Command 'wsl --import')
+            }
+            Write-Log INFO 'WSL2 import from bundle succeeded (verified: distro present and responding).'
             return 'wsl2'
         }
         Write-Log WARN "wsl --import failed (exit $($rImp.ExitCode)), falling through to wsl --install."
@@ -554,7 +592,16 @@ function Install-WslDistroWithFallback {
         if ($t) { Add-Content -LiteralPath $LogFile -Value "[wsl install out] $t" -Encoding UTF8 }
     }
     if ($rInst.ExitCode -eq 0) {
-        Write-Log INFO 'WSL2 install succeeded.'
+        # v1.4.5 (D2). THE load-bearing fix, and the one the evidence caught in the
+        # act. On 2026-08-30 this exit code was 0 in the same second the import had
+        # failed with HCS_E_SERVICE_NOT_AVAILABLE - a network install of Ubuntu in
+        # under a second - and the very next step failed WSL_E_DISTRO_NOT_FOUND. The
+        # exit code is not the state; the state is whether a distro exists and
+        # answers.
+        if (-not (Wait-WslFunctional)) {
+            throw (Get-WslNotCreatedMessage -Command 'wsl --install')
+        }
+        Write-Log INFO 'WSL2 install succeeded (verified: distro present and responding).'
         return 'wsl2'
     }
     # v1.4.5 (v1.4.5-A + D4): one unconditional, named stop. No WSL1 downgrade.
@@ -1005,16 +1052,24 @@ function Step-EnsureWsl {
         $bundledTarball = if ($BundledRootfsDir) { Join-Path $BundledRootfsDir 'ubuntu-rootfs.tar.gz' } else { '' }
         $variant = Install-WslDistroWithFallback -BundledRootfs $bundledTarball
         Write-Log INFO "WSL variant installed: $variant"
-        New-ClawUserAndSetDefault
 
+        # v1.4.5 (D5): the readiness wait runs BEFORE New-ClawUserAndSetDefault, not
+        # after it. On the first external install failure the user's error was
+        # "Failed to pre-create clawuser stub (exit=-1)" - a message about a Linux
+        # user account, on a machine with no Linux. Test-WslFunctional asks root, so
+        # it does not depend on clawuser existing and the swap is safe. Strictly
+        # redundant now that Install-WslDistroWithFallback verifies its own claim;
+        # kept deliberately as a second net under the first.
         $ready = $false
         for ($i = 1; $i -le 12; $i++) {
             if (Test-WslFunctional) { $ready = $true; break }
             Start-Sleep -Seconds 5
         }
         if (-not $ready) {
-            throw 'WSL could not be configured on this machine. Please contact support at hello@avitalresearch.com'
+            throw ('ClawFactory could not start the Linux environment it installed on this computer. ' +
+                   (Get-VirtualizationHelpText))
         }
+        New-ClawUserAndSetDefault
         Save-Checkpoint 'EnsureWsl'
         return
     }
@@ -1049,11 +1104,14 @@ function Step-EnsureWsl {
         $bundledTarball = if ($BundledRootfsDir) { Join-Path $BundledRootfsDir 'ubuntu-rootfs.tar.gz' } else { '' }
         $variant = Install-WslDistroWithFallback -BundledRootfs $bundledTarball
         Write-Log INFO "WSL variant installed: $variant"
-        New-ClawUserAndSetDefault
+        # v1.4.5 (D5): verify before creating the Linux user, not after. This is the
+        # exact site the first external install died at, one line too late.
         Start-Sleep -Seconds 5
         if (-not (Test-WslFunctional)) {
-            throw 'WSL could not be configured on this machine. Please contact support at hello@avitalresearch.com'
+            throw ('ClawFactory could not start the Linux environment it installed on this computer. ' +
+                   (Get-VirtualizationHelpText))
         }
+        New-ClawUserAndSetDefault
         Save-Checkpoint 'EnsureWsl'
         return
     }
@@ -1094,11 +1152,13 @@ function Step-EnsureWsl {
         $bundledTarball = if ($BundledRootfsDir) { Join-Path $BundledRootfsDir 'ubuntu-rootfs.tar.gz' } else { '' }
         $variant = Install-WslDistroWithFallback -BundledRootfs $bundledTarball
         Write-Log INFO "WSL variant installed: $variant"
-        New-ClawUserAndSetDefault
+        # v1.4.5 (D5): verify before creating the Linux user, not after.
         Start-Sleep -Seconds 5
         if (-not (Test-WslFunctional)) {
-            throw 'WSL could not be configured on this machine. Please contact support at hello@avitalresearch.com'
+            throw ('ClawFactory could not start the Linux environment it installed on this computer. ' +
+                   (Get-VirtualizationHelpText))
         }
+        New-ClawUserAndSetDefault
         Save-Checkpoint 'EnsureWsl'
         return
     }
