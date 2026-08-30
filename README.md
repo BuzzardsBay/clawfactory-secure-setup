@@ -42,7 +42,7 @@ And the boundary that travels with all of them: **this covers email. It is not a
 - Administrator privileges for install
 - 16 GB RAM recommended (8 GB minimum)
 - 50 GB free disk (Ubuntu rootfs + OpenClaw runtime + Studio)
-- Hardware virtualization enabled in BIOS (VT-x / AMD-V) for WSL2; falls back to WSL1 automatically if unavailable
+- Hardware virtualization enabled in BIOS (VT-x / AMD-V). WSL2 is required and there is no WSL1 fallback: if virtualization is unavailable the installer stops with a named message rather than installing something that cannot run ClawFactory's controls
 
 ## Installation
 
@@ -116,7 +116,7 @@ Note what the smoke test is and is not: it confirms the controls are installed a
 ## Known limitations
 
 - **SmartScreen "Unknown publisher" warning on unsigned builds.** Releases built via `scripts\build_release.ps1` are Authenticode-signed (Azure Artifact Signing, individual identity, Bret Mckinney) and timestamped. A local dev build compiled directly with `ISCC.exe` is unsigned and cannot be signed; click "More info -> Run anyway" for those.
-- **WSL1 fallback on hardware without nested virtualization.** If `HCS_E_HYPERV_NOT_INSTALLED` fires (common in nested VMs and some older laptops), the installer falls back to WSL1 automatically. Some features (systemd, networking) behave differently, and the egress firewall uses iptables-legacy instead of nftables.
+- **No WSL1 fallback (changed in v1.4.5).** Earlier releases downgraded to WSL1 when `HCS_E_HYPERV_NOT_INSTALLED` fired. That path was removed: eleven of ClawFactory's controls are systemd units, WSL1 has no systemd, and the install could not complete on it — it ran for roughly twenty minutes and then failed on a gateway health probe, telling the user nothing about the real cause. The installer now stops immediately with a message naming the two things a person can act on (restart; BIOS/UEFI virtualization). On hardware without nested virtualization ClawFactory does not install.
 - **Provider model IDs are forward-looking** (`grok-4-1-fast`, `gpt-5`, `claude-sonnet-4-6`, `gemini-2.5-pro`). If your provider's catalog uses a different name when you install, change it via `Switch AI Provider` from the Start Menu.
 - **The egress allowlist matches on address, not hostname.** Anything served from an address ClawFactory already allows is reachable. This is permanent for v1 and is stated in full in [SECURITY_FINDINGS.md](SECURITY_FINDINGS.md).
 

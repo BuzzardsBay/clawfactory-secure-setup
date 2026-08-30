@@ -459,14 +459,37 @@ function Install-WslDistroWithFallback {
     # PRIMARY: `wsl --import` from a bundled rootfs tarball passed in via
     # $BundledRootfs. Offline, fast, deterministic. Single WSL2 attempt;
     # any non-zero exit (including HCS_E_HYPERV_NOT_INSTALLED) falls through
-    # to the network install path below, which has its own WSL1 fallback.
+    # to the network install path below.
     #
     # FALLBACK: existing `wsl --install` (network) path. Used when no
     # bundle was passed, the tarball is absent, or the bundled import
-    # failed. Same WSL2 -> WSL1 fallback shape as before, unchanged.
+    # failed. WSL2 only.
     #
-    # Returns the variant string ('wsl2' or 'wsl1') for logging.
+    # v1.4.5: the WSL1 fallback that used to live at the end of this function is
+    # GONE, and its removal is a security fix rather than an install fix. Eleven of
+    # this product's controls are systemd units, and WSL1 has no systemd - so the
+    # branch could not produce a working ClawFactory. What it actually produced was
+    # worse than "insecure": the install cannot COMPLETE on WSL1. It runs for
+    # roughly twenty minutes and then dies in Step-PreinstallGatewayRuntime with
+    # "Gateway did not respond after 120 seconds" (the gateway is started only
+    # through `systemctl --user`, and this script has no nohup/setsid path), or in
+    # install-quarantine.sh's broker socket ping. The user is told about a health
+    # probe on a machine whose real problem is that virtualization is unavailable.
+    # The branch has never executed on any validation box in this project's history.
+    #
+    # Returns the variant string ('wsl2') for logging. The value is assigned at
+    # three call sites, logged once at each, and read nowhere - the return is kept
+    # rather than dropped so those three log lines stay put.
     param([string]$BundledRootfs = '')
+
+    # v1.4.5 (D4): the import call's streams have to survive past the import block,
+    # because the virtualization diagnostic below used to be applied ONLY to the
+    # `wsl --install` output while the real error - on the one machine this has ever
+    # happened to - was in the IMPORT output:
+    #   Wsl/Service/RegisterDistro/CreateVm/HCS/HCS_E_SERVICE_NOT_AVAILABLE
+    # Initialised here, not just inside the branch, because StrictMode 3.0 makes an
+    # unassigned variable a terminating error on the no-bundle path.
+    $importOutput = ''
 
     if ($BundledRootfs -and (Test-Path -LiteralPath $BundledRootfs)) {
         # --- Rootfs pin. Same anchor as the SOUL and persona pins: a literal in
@@ -511,6 +534,7 @@ function Install-WslDistroWithFallback {
         # v1.0.12: Process.Start instead of `wsl ... 2>&1 | ForEach-Object`
         # for the same reason as Invoke-WslBash.
         $rImp = Invoke-WslExe -Arguments @('--import', $WslDistro, $WslInstallDir, $BundledRootfs, '--version', '2')
+        $importOutput = $rImp.StdOut + "`n" + $rImp.StdErr
         foreach ($line in (($rImp.StdOut + "`n" + $rImp.StdErr) -split "`r?`n")) {
             $t = $line.Trim()
             if ($t) { Add-Content -LiteralPath $LogFile -Value "[wsl --import v2] $t" -Encoding UTF8 }
@@ -533,31 +557,28 @@ function Install-WslDistroWithFallback {
         Write-Log INFO 'WSL2 install succeeded.'
         return 'wsl2'
     }
-    $hyperVMissing = ($output -match 'HCS_E_HYPERV_NOT_INSTALLED' -or $output -match '0x80370102')
-    if (-not $hyperVMissing) {
-        throw "wsl --install failed (exit $($rInst.ExitCode)) and no fallback signal detected. See $LogFile."
+    # v1.4.5 (v1.4.5-A + D4): one unconditional, named stop. No WSL1 downgrade.
+    #
+    # D4 is the scoping half of this: the old test read $output, which is built from
+    # $rInst - the INSTALL call - so a virtualization error reported by the IMPORT
+    # call was invisible to it. Both streams are tested now. HCS_E_SERVICE_NOT_AVAILABLE
+    # is included because that is the code the one real occurrence produced; it is the
+    # Host Compute Service not running, which is what a pending reboot leaves behind.
+    $allOutput = $importOutput + "`n" + $output
+    $virtSignal = ($allOutput -match 'HCS_E_HYPERV_NOT_INSTALLED' -or
+                   $allOutput -match 'HCS_E_SERVICE_NOT_AVAILABLE' -or
+                   $allOutput -match '0x80370102' -or
+                   $allOutput -match '0x80370114')
+    if ($virtSignal) {
+        throw ("ClawFactory needs WSL 2, and Windows reported that the Virtual Machine Platform is not " +
+               "available on this computer (wsl --install exit $($rInst.ExitCode)). " +
+               (Get-VirtualizationHelpText))
     }
-    Write-Log WARN 'WSL2 unavailable (HCS_E_HYPERV_NOT_INSTALLED). Falling back to WSL1.'
-    $rFb1 = Invoke-WslExe -Arguments @('--install', '--no-distribution')
-    foreach ($line in (($rFb1.StdOut + "`n" + $rFb1.StdErr) -split "`r?`n")) {
-        $t = $line.Trim()
-        if ($t) { Add-Content -LiteralPath $LogFile -Value "[wsl install fallback] $t" -Encoding UTF8 }
-    }
-    $rFb2 = Invoke-WslExe -Arguments @('--set-default-version', '1')
-    foreach ($line in (($rFb2.StdOut + "`n" + $rFb2.StdErr) -split "`r?`n")) {
-        $t = $line.Trim()
-        if ($t) { Add-Content -LiteralPath $LogFile -Value "[wsl set-default-version] $t" -Encoding UTF8 }
-    }
-    $rFb3 = Invoke-WslExe -Arguments @('--install', '-d', $WslDistro, '--no-launch')
-    foreach ($line in (($rFb3.StdOut + "`n" + $rFb3.StdErr) -split "`r?`n")) {
-        $t = $line.Trim()
-        if ($t) { Add-Content -LiteralPath $LogFile -Value "[wsl install -d $WslDistro] $t" -Encoding UTF8 }
-    }
-    if ($rFb3.ExitCode -ne 0) {
-        throw "WSL1 fallback install also failed (exit $($rFb3.ExitCode))."
-    }
-    Write-Log WARN 'WSL1 fallback install succeeded. Some features (systemd, networking) behave differently on WSL1.'
-    return 'wsl1'
+    throw ("ClawFactory could not install the Ubuntu environment it needs. The 'wsl --install' command failed " +
+           "with exit $($rInst.ExitCode) and Windows did not report a virtualization problem, so the cause is in " +
+           "the log rather than in this message. Restart this computer and run the installer again; if it " +
+           "fails the same way, the lines beginning [wsl --import v2] and [wsl install out] in $LogFile are " +
+           "the ones to look at.")
 }
 
 function New-ClawUserAndSetDefault {
@@ -919,8 +940,8 @@ function Step-Preflight {
 function Step-EnsureWsl {
     # Three cases:
     #   1. WSL2 + Ubuntu already functional -> skip.
-    #   2. WSL kernel loaded but Ubuntu missing -> install Ubuntu (with WSL1
-    #      fallback on HCS_E_HYPERV_NOT_INSTALLED), no reboot.
+    #   2. WSL kernel loaded but Ubuntu missing -> install Ubuntu (WSL2 only;
+    #      a virtualization failure now stops with a named message), no reboot.
     #   3. WSL not installed at all -> run wsl --install --no-distribution,
     #      register ClawFactory-Resume scheduled task, save checkpoint, show
     #      restart dialog, reboot. The $Resume branch above completes the
@@ -979,8 +1000,8 @@ function Step-EnsureWsl {
             Save-Checkpoint 'EnsureWsl'
             return
         }
-        # Pre-reboot we ran DISM but not `wsl --install`. Run it now. WSL1
-        # fallback kicks in if HCS_E_HYPERV_NOT_INSTALLED is detected.
+        # Pre-reboot we ran DISM but not `wsl --install`. Run it now. The distro
+        # install is WSL2-only: a virtualization failure stops with a named message.
         $bundledTarball = if ($BundledRootfsDir) { Join-Path $BundledRootfsDir 'ubuntu-rootfs.tar.gz' } else { '' }
         $variant = Install-WslDistroWithFallback -BundledRootfs $bundledTarball
         Write-Log INFO "WSL variant installed: $variant"

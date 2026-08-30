@@ -417,7 +417,8 @@ sudo -u clawuser XDG_RUNTIME_DIR=/run/user/1000 systemctl --user disable opencla
 # ---------------------------------------------------------------------------
 CF_UNITS="clawfactory-allow-providers.timer clawfactory-allow-providers.service clawfactory-egress-refresh.service clawfactory-fw.service clawfactory-proxy.service clawfactory-quarantine.service clawfactory-quarantine-gc.timer clawfactory-quarantine-gc.service clawfactory-send.service clawfactory-send-gc.timer clawfactory-send-gc.service"
 systemctl disable --now $CF_UNITS
-# Flush the clawfactory nft chain (uses iptables on WSL1)
+# Flush the clawfactory nft chain (the iptables-legacy backend is still reachable
+# on a WSL2 kernel without nftables; see setup.ps1 Step-EgressFirewall)
 /usr/sbin/nft delete table inet clawfactory 2>/dev/null
 # Clear immutable flags so the frozen safety files can be removed (Defect 2/4:
 # SOUL.md + workspace SOUL are root:root chattr +i; rm/deluser fail otherwise).
