@@ -1098,6 +1098,87 @@ Full record: `docs/session_reports/2026-08-30_first_external_install_failure_clo
 
 ---
 
+## Class 14: a measurement retired by a convenience, and invisible because the results kept passing
+
+Class 13 is about a fleet that was identical. This one is about *how* it got that way, and
+it has a different lesson, because nobody chose it. The step was not skipped. It was
+performed once, by the instrument, and then the machine that performed it was photographed.
+
+### 14.1 The bake performed the install step, then generalized the evidence away
+
+**Claimed.** `clawfactory-win11-baseline` is a clean Windows 11 machine. Every close-out
+that used it, from 2026-05-06 onward, described boxes built on it as clean installs, and the
+v1.4.4 fleet's four-box coverage was reported against that description.
+
+**True.** The bake script
+`validation-runs/phase1-bake-20260506-144034/configure-vm.ps1` opens with:
+
+```powershell
+Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -All -NoRestart
+Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -All -NoRestart
+```
+
+and the bake log records `## Task 5 — Reboot / PASS` immediately after. Then sysprep,
+generalize, capture. The image therefore ships with both features `Enabled` and the reboot
+already taken, and `VirtualMachinePlatform` on a box built from it can never read
+`EnablePending`. The same script also stops and disables `wuauserv`, so the Windows Update
+reboot-pending key cannot be set either, and adds three Defender exclusions covering the
+installer's three principal write targets.
+
+**None of that was a decision about coverage.** It was three lines added to make a bake
+succeed, in May, in a session about provisioning. The measurement they retired —
+*what does this installer do on a machine where virtualization has just been switched on and
+not yet rebooted* — was not discussed, because retiring it was not the point of the change.
+
+**Found by.** A user, on 2026-08-30, on his own computer. Then, later the same day, by reading
+the bake script rather than the close-outs that cited the image. The close-outs describe the
+image; the script describes what the image *is*.
+
+**And this corrects the entry above it.** Entry 13.1 and its close-out attribute the gap to
+`clawfactory-win11-baseline-v2`, the June rebake, on the reasoning that the fix for the
+engine-version problem created the reboot-path problem. That attribution is wrong.
+`REPORT.md`'s own "Before" block — measured on `cfv-133`, a box built from the *original*
+image — records `Microsoft-Windows-Subsystem-Linux` and `VirtualMachinePlatform` as
+**`Enabled`** four and a half weeks before `-v2` was baked. The rebake added the WSL engine
+and nothing else that matters here.
+
+So the blind spot is a month older than reported, it exists on **both** images, and falling
+back to the older image would not have caught it. `-v2` removed the last remaining first-run
+WSL step from a fleet that had already lost the feature-enablement step. The correction makes
+the finding larger rather than smaller, which is the usual direction when an attribution
+turns out to be too tidy.
+
+**Changed.**
+
+1. **A written record per image**, `docs/reference/BASELINE_IMAGES.md`: for each baseline,
+   the steps it has already performed, which of them the bake log actually *confirms* as
+   opposed to attempts, and the numbered list of things a box built on it therefore cannot
+   measure. It also records the three items that have never been read back on any box —
+   whether the Defender exclusions survived sysprep, whether `wuauserv` is still disabled on
+   a provisioned box, and whether either image's `VirtualMachinePlatform` still reads
+   `Enabled` today.
+2. **A clause in the paste block**, so it travels into every future job rather than living in
+   a close-out: *A BASELINE IMAGE IS A SET OF INSTALL STEPS ALREADY COMPLETED*, in
+   `docs/VALIDATION_PREAMBLE.md`. Every cycle must include at least one box from a stock
+   image that has performed none of them, and the run plan must name which rows the baked
+   boxes cannot answer.
+3. **The `ENVIRONMENT` clause that names `-v2` was amended** rather than left standing, since
+   a paste block that says "use this image" beside a clause that says "not only this image"
+   is the same defect on a smaller scale. It now scopes itself to the baked boxes and defers
+   explicitly.
+
+**Why this is its own class.** Class 1 is a control that tested nothing. Class 9 is a phase
+believed to have run that had not. This one is neither: the phase ran, correctly, once — as
+part of building the instrument — and the instrument then made it unrunnable. The passing
+results afterwards were not false. They were true statements about a narrower question than
+the one everyone thought was being asked, and nothing in the transcript records the question
+getting narrower.
+
+Full record: `docs/reference/BASELINE_IMAGES.md` and
+`docs/session_reports/2026-08-30_pre_v145_groundwork_closeout.md`.
+
+---
+
 ## The instrument-defect record
 
 This is the most transferable thing in the project, and it is the least flattering.
@@ -1260,6 +1341,19 @@ above, and each is applied mechanically rather than remembered.
     state of the machine before it runs, and a baked baseline removes setup cost by
     removing exactly that state. One deliberately unlike box beats four more of the same.
     Entry 13.1.
+24. **A baseline image is a set of install steps already completed, and every one of them
+    is unmeasured rather than passed.** Read the bake script, not the close-outs that cite
+    the image: the close-outs describe what the image is for, the script describes what the
+    image *is*. Keep a written record per image of what it has performed and of what its
+    bake log actually *confirms* as opposed to attempts, and update it in the same commit
+    as the rebake. Entry 14.1.
+25. **A conclusion drawn from an exit code is a claim about a state that nobody looked at.**
+    Zero means the process ended; it does not mean the file exists, the unit is enabled,
+    the socket is listening or the distro was created. Where the next step depends on the
+    state, check the state — and check the half that is load-bearing, not the half that is
+    convenient: `systemctl enable --now` makes two claims and the ping only ever tests one
+    of them. Entry 13.1's D2, and the census in
+    `docs/session_reports/2026-08-30_pre_v145_groundwork_closeout.md`.
 
 ---
 
