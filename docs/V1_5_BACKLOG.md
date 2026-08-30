@@ -12,9 +12,161 @@ recommendation.
 
 ---
 
-## Certain
+## v1.4.5 — the install-fix release, which comes BEFORE everything below
 
-### 1. The mojibake, card `#296`
+**Added 2026-08-30**, after the first external install failure
+(`docs/session_reports/2026-08-30_first_external_install_failure_closeout.md`, card `#315`)
+and the exit-code census that followed it
+(`docs/session_reports/2026-08-30_pre_v145_groundwork_closeout.md`).
+
+v1.4.5 is not part of v1.5 and must not wait for it. Its scope is deliberately the
+smallest surface that fixes the failure: `Step-Preflight`, `Step-EnsureWsl` and
+`Install-WslDistroWithFallback`, all of which complete before `Step-ConfigureWslConfig`.
+Everything else the census found is listed in item 7 below as **v1.5**, and the reason is
+revalidation cost, not severity — widening the changed surface past `Step-EnsureWsl`
+converts a two-box revalidation into a full four-box rerun.
+
+**D1 still waits on the reproduction.** D2–D5 are correct under either reading of the root
+cause. D1's pending-reboot gate is not, and building it before `PR.C1` returns would be the
+same defect committed a second time.
+
+### v1.4.5-A. Remove the WSL1 fallback. **Security fix, not an install fix.**
+
+**Specification only. Nothing in this session edited `setup.ps1`.**
+
+**What it is today.** `Install-WslDistroWithFallback:510-530`. When `wsl --install` fails
+and the output matches `HCS_E_HYPERV_NOT_INSTALLED` or `0x80370102`, the function runs
+`wsl --install --no-distribution`, `wsl --set-default-version 1`, and
+`wsl --install -d Ubuntu --no-launch`, then logs
+
+> `WSL1 fallback install succeeded. Some features (systemd, networking) behave differently on WSL1.`
+
+and returns `'wsl1'`.
+
+**Why it is a security item.** Eleven of the product's controls are systemd units. Read
+from the tree, not from a prior close-out — the list is `uninstall.ps1:420`'s `CF_UNITS`,
+and it is the same eleven:
+
+| Unit | Control it carries | Defined at |
+|---|---|---|
+| `clawfactory-quarantine.service` | Guard 1, the delete broker | `resources/clawfactory-quarantine.service`, installed by `resources/install-quarantine.sh` |
+| `clawfactory-quarantine-gc.service` / `.timer` | Guard 1 retention | same |
+| `clawfactory-send.service` | Guard 2, the approval-gated send broker | `resources/clawfactory-send.service`, `resources/install-send.sh` |
+| `clawfactory-send-gc.service` / `.timer` | Guard 2 retention | same |
+| `clawfactory-proxy.service` | Blocker 1, the chatCompletions gating proxy | `resources/clawfactory-proxy.service`, `resources/install-chat-proxy.sh` |
+| `clawfactory-fw.service` | egress-allowlist re-apply at boot | written inline, `setup.ps1:1817`, enabled `1830` |
+| `clawfactory-allow-providers.service` / `.timer` | provider-address re-add | `setup.ps1:2233` / `2243` |
+| `clawfactory-egress-refresh.service` | Guard 3 boot refresh | `resources/install-read-fetch.sh:~370` |
+
+Plus `openclaw-gateway.service` as a **user** unit under `systemctl --user`, which needs
+`loginctl enable-linger` and `dbus-user-session` (`setup.ps1:1349-1362`), and
+`/etc/wsl.conf`'s `[boot] systemd=true` (`setup.ps1:1239`), which WSL1 does not read.
+
+**Three controls do NOT depend on systemd, and saying so matters because the argument
+should not be broader than the facts:**
+
+- **The live nftables/iptables chain.** `Step-EgressFirewall` applies it directly with
+  `nft -f`. Only its survival across a restart is `clawfactory-fw.service`.
+- **`/etc/wsl.conf`'s `[automount] enabled=false` and `[interop] enabled=false`** — the P0
+  file-isolation guard. A WSL-configuration control, verified by
+  `Assert-WslAutomountDisabled` (`setup.ps1:1217`), no systemd involved.
+- **The gated `openclaw` shim** at `/usr/bin/openclaw` — a filesystem substitution
+  (`resources/install-turn-gate.sh`), no systemd involved.
+
+**A correction to the reasoning in the prior close-out, and the reason to remove the branch
+is stronger for it.** §4.3 of
+`docs/session_reports/2026-08-30_first_external_install_failure_closeout.md` says *"A WSL1
+install would produce a ClawFactory with none of its security controls."* Read against the
+code, that is not what happens. A WSL1 install **cannot complete**. It dies, in this order:
+
+1. `Step-PreinstallGatewayRuntime` (`setup.ps1:3743`) polls `http://127.0.0.1:8787/status`
+   thirteen times and `throw`s *"Gateway did not respond after 120 seconds"*
+   (`setup.ps1:~2625`). The gateway is started only through `systemctl --user`; **there is
+   no `nohup`/`setsid` fallback anywhere in `setup.ps1` or `resources/gateway-wait.sh`** —
+   `resources/launcher.ps1:205-206` claims *"Same logic as setup.ps1's
+   Step-PreinstallGatewayRuntime"* and that comment is stale, the launcher has the fallback
+   and the installer does not.
+2. If it somehow got past that, `Step-FreezeInjectedSoul` (`3753`) runs
+   `resources/freeze-injected-soul.sh`, whose `chattr +i "$WS"` at line 104 is unguarded
+   under `set -e`.
+3. And then `Step-InstallQuarantine` (`3754`): `install-quarantine.sh` has no start path for
+   the broker other than the systemd unit, and its 30-second socket ping ends in
+   `fatal "broker did not answer a ping from $AGENT_USER within 30s"`.
+
+So the defect is not "ships insecure". It is **"spends roughly twenty minutes, then fails
+with a message about a gateway health probe, or a broker socket, on a machine whose actual
+problem is that it is running WSL1 because virtualization is unavailable."** The user is
+never told the real thing. That is a worse diagnosis defect than the one that produced this
+whole investigation, and it argues for removal at least as strongly.
+
+**One premise is inherited rather than measured, and it is shared with the claim it
+corrects:** that WSL1 has no systemd. It is not in dispute, but it has never been measured
+on any box in this project, and neither the original claim nor this correction rests on
+anything stronger.
+
+**What to delete.** `setup.ps1:506-530` — the `$hyperVMissing` computation, the
+`if (-not $hyperVMissing) { throw ... }`, and the three fallback calls (`$rFb1`, `$rFb2`,
+`$rFb3`) with their logging loops and the `return 'wsl1'`.
+
+**What replaces it.** An unconditional named stop at the point `wsl --install` fails, with
+the virtualization diagnostic read from **the right variable** — D4's fix, which belongs in
+the same edit. Today `setup.ps1:506` tests `$output`, built at `497` from `$rInst`, the
+*install* call; the import call's streams are in `$rImp` and are only logged. The
+replacement tests both.
+
+**What the user sees.** Not a downgrade. A stop, naming the two things a person can act on:
+
+> ClawFactory needs WSL 2, and Windows reported that the Virtual Machine Platform is not
+> available on this computer. Two things cause this, and the log says which. **Restart this
+> computer and run the installer again** — Windows sometimes needs a restart before
+> virtualization support becomes active. **If that does not work, check your BIOS/UEFI
+> setup screen** and turn on Intel VT-x (or AMD SVM Mode); Task Manager → Performance → CPU
+> → Virtualization will say `Disabled` if this is the cause. Full details are in
+> `C:\ProgramData\ClawFactory\install.log`.
+
+Under D3 that message branches on `$script:VirtFirmwareSuspect` and leads with the firmware
+half when the preflight found it.
+
+**Regression risk: none any measurement would detect.** The branch has never executed on any
+validation box. `docs/session_reports/` contains no run in which
+`Install-WslDistroWithFallback` returned `'wsl1'`.
+
+**Nothing dangles.** `$variant` is assigned at exactly three sites — `setup.ps1:882`, `926`,
+`971` — and each is followed by one `Write-Log INFO "WSL variant installed: $variant"` and
+nothing else. **It is never persisted, never branched on and never read again.** The
+complete tree-wide census of every WSL1 reference:
+
+| Site | What it is | Action |
+|---|---|---|
+| `setup.ps1:432, 436, 438` | comments describing the fallback | delete with it |
+| `setup.ps1:506-530` | the branch itself | delete |
+| `setup.ps1:831, 879` | comments naming "with WSL1 fallback" | reword |
+| `setup.ps1:882/926/971` + `883/927/972` | `$variant` assign + log | keep; the string becomes always `'wsl2'`, so either keep the log or drop the return value |
+| `resources/launcher.ps1:196` | comment explaining why the launcher probes HTTP instead of `systemctl is-active` — *"returned inactive on systemd-less WSL installs (WSL1 fallback or systemd-disabled)"* | **keep the code, keep the comment.** The HTTP probe is correct independently, and "systemd-disabled" remains reachable |
+| `resources/uninstall.ps1:420` | comment *"uses iptables on WSL1"* on the `nft delete table` line | reword; the iptables-legacy backend remains reachable on a WSL2 kernel without nftables (`setup.ps1:1681`) |
+| `validation/uninstall-teardown-extract.sh:4` | the same comment in the extracted copy | reword with it |
+
+Nothing branches on the distro version anywhere. There is no `wsl --list --verbose` parse,
+no `--set-version` read-back, and no `$variant` consumer.
+
+### v1.4.5-B. The exit-code fixes on the changed surface
+
+From the census (item 7): **D1** `setup.ps1:266`, **D2** `488` / `502` / `526`, **D1's
+premise** `923` and `968`, **D5** the `Test-WslFunctional` ordering at `928-930`, `884-888`
+and `973-975`, and one new site the census added:
+
+**`setup.ps1:850` — `distroExistedPreInstall` defaults to the destructive answer.**
+`if ($rList.ExitCode -eq 0 -and $rList.StdOut)` gates the whole computation; on any failure
+of `wsl --list --quiet`, `$distroExisted` stays `$false` and `wsl-state.txt` is written
+`false`, which the uninstaller reads as *"this distro did not exist before we installed, so
+it is ours to remove"*. **On the external machine that call took sixty seconds**, which is
+the shape of a call that is about to fail. A `wsl --list` that errors should write **no**
+verdict, or an explicit `unknown` that the uninstaller treats as "leave it alone", never
+the answer that permits removing a user's pre-existing distro. Worth fixing in the same
+edit because it is four lines away and in the same function.
+
+---
+
 
 **What it is.** Windows PowerShell 5.1 decodes a `.ps1` with no byte-order mark using
 the system ANSI codepage, not UTF-8. A file saved as UTF-8 without a BOM therefore has
@@ -411,6 +563,97 @@ satisfied by accident rather than by a check.
 **Verified 2026-08-29**, and this is an HTTP reading, not a tree derivation: a `HEAD` on
 the download URL returns `200` with `Content-Length: 440610608`, matching the published
 signed asset. The corresponding **post-release assertion** is specified in item 4 below.
+
+### 7. The exit-code census: 14 load-bearing sites in `setup.ps1`, plus 9 outside it
+
+**Added 2026-08-30.** D2 was not a one-off. It is an instance of a pattern — *treating a
+return code as proof that a state exists, rather than checking the state* — and this is the
+enumeration of every other instance, taken by AST rather than by grep, calibrated against
+planted canaries in shapes the file does not already contain, and adjudicated by reading
+each site. Method, canary results and the full per-line table are in
+`docs/session_reports/2026-08-30_pre_v145_groundwork_closeout.md` §3. The instrument is
+committed at `validation/census-exitcode-proof.ps1` so the numbers can be re-derived rather
+than believed.
+
+**Counts.** `setup.ps1`: 65 raw AST hits → 16 false positives of the taint model, 1 in dead
+code (`Enable-WindowsFeaturesForWsl`, never called) → **48 live sites: 26 verified, 8
+unverified but harmless, 14 unverified and load-bearing.** Eight other shipped `.ps1` files:
+68 raw hits, 5 load-bearing after adjudication. Thirteen shipped `.sh` files: 4 load-bearing
+shapes. Twelve shipped `.js` files: **zero** — every exit code checked there is a
+`setpriv`-as-the-agent permission probe, where the exit code *is* the state being asked
+about, which is the pattern done right.
+
+**The six that go in v1.4.5** are listed under v1.4.5-B above: `266`, `488`, `502`, `526`,
+`923`/`968`, the `Test-WslFunctional` ordering, and `850`.
+
+**The rest are v1.5.** Not because they are milder — two of them are security-shaped — but
+because each one widens the changed surface past `Step-EnsureWsl` and converts a two-box
+revalidation into a four-box rerun. Listed in descending severity:
+
+1. **Five systemd units are enabled with the result thrown away.** `install-quarantine.sh:140-141`,
+   `install-send.sh:190-191`, `install-chat-proxy.sh:87` all use
+   `systemctl enable --now <unit> >/dev/null 2>&1 || true`. `enable --now` makes **two**
+   claims — *running now* and *comes back after a reboot* — and each installer's live socket
+   ping or health probe tests only the first. **Nothing in the product ever checks that
+   Guard 1's broker, Guard 2's broker or the gating proxy are enabled at boot.**
+   `install-read-fetch.sh:379-386` is the counter-example and says so in its own comment:
+   *"`systemctl enable` is routinely written here with `|| true`, which means a unit that
+   failed to install looks identical to one that did"*, and it reads back `is-enabled` and
+   `fatal`s. Three files should do what the fourth already does. `setup.ps1:1830`
+   (`systemctl enable clawfactory-fw.service 2>/dev/null || true`) is the same shape; that
+   one has at least been measured to survive a reboot on a validation box, which is a
+   measurement, not a check in the code.
+2. **`nft flush set ... || true` in the exposure direction.** `clawfactory-read-fetch.sh:72`
+   and `clawfactory-toolchain.sh:144`. Both sit directly under a comment reading
+   *"Flush first. Every exit after this point is fail-closed."* The `|| true` breaks exactly
+   that property: if the set exists (checked) but the flush fails (not checked), the
+   previously-allowed addresses stay in the live set and the script goes on to add the new
+   list and report the new count. A revoked host stays reachable while the panel says it was
+   revoked. Low probability, wrong direction, and **the code disagrees with its own
+   comment**, which in a security product is a defect in the audit trail.
+3. **`setup.ps1:2922`, `Step-InstallTurnGate`.** `install-turn-gate.sh`'s own final check —
+   *"Verify passthrough (a non-agent subcommand must still work)"* — downgrades to a WARN on
+   failure, so the script exits 0 and `$rc -ne 0` never fires. A shim that replaced
+   `/usr/bin/openclaw` and then does not work is indistinguishable from one that does. The
+   product claims no caller can launch an ungated turn; that claim rests on this exit code.
+4. **`resources/switch-provider.ps1:349`.** `if ($fwExit -ne 0) { Write-Warning ... }` and
+   then, unconditionally, `Write-Host "  [x] egress allowlist updated (backend
+   auto-detected)"`. **The success tick prints whether or not the firewall was updated.**
+   After a provider switch that means the agent may have no route to the new provider, the
+   old provider's addresses may still be allowed, and the user has been shown a green check
+   for both. Same file, line `148`: the `auth-profiles.json` key write warns and continues,
+   leaving the gateway on the old key.
+5. **`resources/clawfactory-grants.ps1:588`, `Sync-GovernorMirror`.** `if ($r.ExitCode -eq 0)
+   { $script:CF_LastMirroredCaps = $payload }`. The bash is `;`-chained with no `set -e` and
+   its **last** command is `chmod 644`, so the exit code reports the chmod, not the
+   `base64 -d > /etc/clawfactory/governor.json` that does the work. On a failed write the
+   redirect has already truncated the file, `chmod` still succeeds, the module caches the
+   caps as mirrored, and **never retries** — so a user who changes their spend cap in Studio
+   gets a permanently blocked agent (`clawfactory-turn-gate.sh:53` emits
+   `spend_config_bad`) with no self-heal. Fail-closed, which is the right direction, and
+   still wrong.
+6. **`setup.ps1:2717`** (auth-profile registration warns and continues; the key is then
+   written for a profile that does not exist), **`setup.ps1:1309`** (the
+   `-u clawuser -- true` boot test fails, the code falls back to root, WARNs, and nothing
+   re-checks that the default user is `clawuser`), **`setup.ps1:2697`** (default model),
+   **`resources/bootstrap.ps1:279`** (per-agent auth-profile fan-out).
+7. **`setup.ps1:1852`, `Step-EgressFirewall`.** On failure it logs ERROR and `return`s
+   without a checkpoint and **without throwing**, so the install continues. This one *is*
+   caught: `install-send.sh:194` runs `clawfactory-fw-assert.sh || fatal` and
+   `Step-InstallSend` throws. But that is twenty-one steps later, and the whole OpenClaw
+   install, the gateway bring-up, the turn-gate and the SOUL freeze all run in between with
+   no firewall. This is the preamble's *"WHEN is it needed"* question and it has an answer
+   nobody wrote down.
+
+**What the census cannot catch** is in the close-out §3.5, measured rather than asserted:
+two canaries in shapes that cross a boundary the AST cannot follow — an exit code written to
+a file and read back later, and an exit code passed across a parameter binding — were both
+planted and both **missed**, with the total unchanged at 65.
+
+**Do not fix any of these in the v1.4.5 build.** They are listed so that the v1.5 build has
+a work list rather than a rediscovery.
+
+---
 
 ## Carried, not scheduled
 
