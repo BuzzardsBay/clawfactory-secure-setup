@@ -7,10 +7,16 @@ Most projects publish what works. This document publishes what did not, because 
 security product the more useful question is not "what does it claim" but "what did
 the claims turn out to be worth, and what caught the difference".
 
-Everything below was found during development of a product that had not shipped, by
-the people building it. None of it is a report from a user. That is the point: the
-value of a control is not that it exists, it is that it fires on your own work before
-anyone else is exposed to it.
+Almost everything below was found during development of a product that had not shipped,
+by the people building it. That was the point: the value of a control is not that it
+exists, it is that it fires on your own work before anyone else is exposed to it.
+
+**Entry 13.1 is the exception, and it is here rather than tidied away because it is the
+one that tests whether the rest of this document meant anything.** It was not found by a
+control. It was found on 2026-08-30 by the first person outside this project who tried to
+install the product, on his own computer, where it failed. Until that day this paragraph
+said *"None of it is a report from a user"*, and that sentence has been corrected rather
+than left standing.
 
 ## How to read this
 
@@ -1028,6 +1034,70 @@ is the same failure at the byte level; this is it at the citation level.
 
 ---
 
+## Class 13: a validation fleet identical in the one dimension that decided the outcome
+
+Every other class in this document is about an instrument that measured the wrong thing.
+This one is about instruments that measured correctly, on machines that could not be in
+the state the answer depended on.
+
+### 13.1 The first install by someone who did not build the product
+
+**Claimed.** v1.4.4 was validated across four Azure boxes — `cfv-179`, `cfv-180`,
+`cfv-181`, `cfv-182` — covering the structural control table, the wrapper phase, the
+uninstaller, the provider gate and the guard panels. Zero product defects were found in
+boxes A, B, C and D. The release shipped on 2026-08-29, the first GitHub Release this
+repository has ever had.
+
+**True.** On 2026-08-30 the first person outside the project to run the installer could
+not install it. It failed 88 seconds in, on a Windows machine that had never had WSL, at
+`New-ClawUserAndSetDefault` — a function about a Linux user account and a sudoers file,
+neither of which was the problem. **All four validation boxes ran the same image,
+`clawfactory-win11-baseline-v2`, which was deliberately baked with the WSL engine already
+installed and virtualization already live**, precisely so that validation runs would stop
+tripping over the WSL engine version. Every one of them therefore entered
+`Step-EnsureWsl` with a working virtualization layer and took a branch the external
+machine could not take. The branch that machine took had not been executed by any
+recorded validation of this product — the only run that ever reached it is dated
+2026-05-21, roughly twenty-six releases earlier, and that run failed too.
+
+Four boxes are not four samples if they are identical in the dimension that decides the
+answer. They were four copies of one sample.
+
+**Found by.** A user. Not a control, not a probe, not a review. This is the only entry in
+this catalogue for which that is true, and it is the entry about the largest untested
+surface in the product.
+
+**Changed.** Three things, and the ordering matters.
+
+1. **The regression case was written before the fix**, so it could not be shaped by
+   whatever the fix turned out to be: `validation/interim-v145-pendingreboot.ps1`
+   constructs the state deliberately — a stock Windows 11 image, never had WSL, with the
+   virtualization feature enabled and not yet rebooted — and refuses to report anything
+   unless a control confirms the box actually started in that state. Its first assertion
+   is that the image is **not** `baseline-v2`.
+2. **The defects the trace found are specified but not yet built**, because one of them
+   depends on a measurement that has not been taken, and building a branch on an
+   unmeasured premise is the defect being fixed. The one that does not depend on it is
+   the serious one: a fallback path logged `WSL2 install succeeded` on the strength of an
+   exit code, one second after the operation it was covering for had failed, with nothing
+   between that line and the next step checking that a distro existed. Class 2, arriving
+   from outside instead of from a probe.
+3. **A standing question was added to the run plan**, not just a test: *in what dimension
+   is this fleet homogeneous, and is it the dimension the answer turns on?* A baked
+   baseline image is a convenience that removes setup cost, and it removes it by removing
+   the starting state that half the installer exists to handle.
+
+The general form, which is the transferable part: **a validation fleet inherits the
+blindness of its base image.** Every box built from one image shares every property that
+image was baked with, including the ones nobody chose deliberately, and a suite that runs
+only on that fleet cannot see any of them. The cheapest defence is not more boxes. It is
+one box that is deliberately *unlike* the others in the dimension the product cares most
+about — which for an installer is always the state of the machine before it runs.
+
+Full record: `docs/session_reports/2026-08-30_first_external_install_failure_closeout.md`.
+
+---
+
 ## The instrument-defect record
 
 This is the most transferable thing in the project, and it is the least flattering.
@@ -1104,10 +1174,12 @@ product, including the ones that are weaker than their names suggest, are in
 rather than as history. Two documents, because a fixed defect and a live one call for
 different decisions from a reader.
 
-**No user-reported issues appear here**, because there have not been any. The product
+**One user-reported issue appears here**, entry 13.1, and it is the only one. The product
 was published on 2026-08-29: this repository is public, and `v1.4.4` is its first GitHub
-Release. Anything reported from here on is a user report and belongs in a different
-document from this one.
+Release. The first install by someone who did not build it was attempted the following
+day and failed. It is in this catalogue rather than in an issue tracker because what is
+transferable about it is not the bug — it is the shape of the gap that let a fleet of
+green validation boxes certify a path none of them could execute.
 
 ---
 
@@ -1182,6 +1254,12 @@ above, and each is applied mechanically rather than remembered.
     cross-check specified in `docs/V1_5_BACKLOG.md` as "both, and they must agree"
     disagreed on a correct tree the first time anyone ran it, because one comment header
     covers two gates. Class 10, one level up: the instrument was still on paper.
+23. **A validation fleet inherits the blindness of its base image.** Ask, in the run plan
+    rather than at the keyboard, in what dimension every box is identical, and whether it
+    is the dimension the answer turns on. For an installer that dimension is always the
+    state of the machine before it runs, and a baked baseline removes setup cost by
+    removing exactly that state. One deliberately unlike box beats four more of the same.
+    Entry 13.1.
 
 ---
 
