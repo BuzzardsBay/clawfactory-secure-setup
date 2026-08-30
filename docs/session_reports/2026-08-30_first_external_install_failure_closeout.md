@@ -20,7 +20,7 @@ governed work actually done below.
 Two clauses fired and changed what this session did:
 
 - **"CALIBRATE BEFORE MEASURING."** Every body in the new probe was run against a known-answer
-  input before the probe was allowed near a real box. §6.2 records the results, including a
+  input before the probe was allowed near a real box. §5.3 records the results, including a
   negative control.
 - **"A citation proves the provenance of a sentence, not the provenance of the artefact."**
   The tag `v1.4.4` points at `9111e9b`, a documentation commit, while the artefact was built
