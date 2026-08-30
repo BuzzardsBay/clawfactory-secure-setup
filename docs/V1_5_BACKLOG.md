@@ -26,9 +26,18 @@ Everything else the census found is listed in item 7 below as **v1.5**, and the 
 revalidation cost, not severity — widening the changed surface past `Step-EnsureWsl`
 converts a two-box revalidation into a full four-box rerun.
 
-**D1 still waits on the reproduction.** D2–D5 are correct under either reading of the root
-cause. D1's pending-reboot gate is not, and building it before `PR.C1` returns would be the
-same defect committed a second time.
+**D1 no longer waits. Updated 2026-08-30, later the same day.** The external machine's
+`install.log` arrived and settles the root cause with no inference left: the import failed
+`Wsl/Service/RegisterDistro/CreateVm/HCS/HCS_E_SERVICE_NOT_AVAILABLE`, `wsl --install` printed
+*"Changes will not be effective until the system is rebooted"* and returned **0**, and the next
+step failed `WSL_E_DISTRO_NOT_FOUND`. Task Manager on that machine reads **Enabled**, so the
+firmware reading is ruled out.
+
+**`PR.C1` is answered from the field, so the reproduction is closed as redundant.** The log line
+`WSL2 kernel loaded but Ubuntu missing` is inside the `if ($kernelOk)` branch at `setup.ps1:924`,
+and `$kernelOk` comes from `wsl --status`'s exit code at `923` — so **`wsl --status` exits 0 while
+`VirtualMachinePlatform` is `EnablePending`**, which is precisely the assumption D1's design
+turned on. `cfv-183` was torn down. Full reading: the close-out's §9.
 
 ### v1.4.5-A. Remove the WSL1 fallback. **Security fix, not an install fix.**
 
@@ -155,7 +164,10 @@ From the census (item 7): **D1** `setup.ps1:266`, **D2** `488` / `502` / `526`, 
 premise** `923` and `968`, **D5** the `Test-WslFunctional` ordering at `928-930`, `884-888`
 and `973-975`, and one new site the census added:
 
-**`setup.ps1:850` — `distroExistedPreInstall` defaults to the destructive answer.**
+**`setup.ps1:850` — `distroExistedPreInstall` defaults to the destructive answer.** *(Recorded
+2026-08-30 as latent, not triggered: on the external machine the 60-second `wsl --list`
+succeeded, so `wsl-state.txt` reads `false` truthfully. The risk is unchanged; it simply did
+not bite this time.)*
 `if ($rList.ExitCode -eq 0 -and $rList.StdOut)` gates the whole computation; on any failure
 of `wsl --list --quiet`, `$distroExisted` stays `$false` and `wsl-state.txt` is written
 `false`, which the uninstaller reads as *"this distro did not exist before we installed, so
@@ -164,6 +176,49 @@ the shape of a call that is about to fail. A `wsl --list` that errors should wri
 verdict, or an explicit `unknown` that the uninstaller treats as "leave it alone", never
 the answer that permits removing a user's pre-existing distro. Worth fixing in the same
 edit because it is four lines away and in the same function.
+
+### v1.4.5-C. The failure path itself. Three defects the log exposed, none of them in the diagnosis
+
+**Added 2026-08-30 from the external machine's artefacts.** These are cheap, they are all on the
+already-changed surface or in the shared failure path, and every one of them cost the first
+external user something measurable.
+
+**D6 — `Invoke-Rollback` announces work it has no mechanism to do.** `setup.ps1` has **31
+distinct `Save-Checkpoint` names**; `Invoke-Rollback` has **2** cases, `FirewallRule` and
+`EnsureWsl`. The other 29 fall to `default { }`. The external install completed only `Preflight`,
+so answering `Y` to *"Installation failed. Run automatic rollback? (y/N)"* produced:
+
+```
+[11:52:37] [ERROR] Running rollback for completed steps...
+[11:52:37] [INFO] Undoing: Preflight
+```
+
+and did nothing, because there is no `Preflight` case. **A prompt that offers an action, a log
+line that claims it happened, and no mechanism behind either.** Fix: either the prompt states
+what rollback can actually undo, or `default { }` logs *"no rollback action defined for
+`<step>`"* rather than `Undoing: <step>`. The second is one line and is the honest minimum.
+`C:\Program Files\ClawFactory` remaining populated is separately **correct** — Inno owns it —
+but the prompt implies otherwise and the user concluded the rollback was broken.
+
+**D7 — accepting the rollback is the one path that never prints the log location.**
+`Invoke-WithRollback` writes `"Rollback skipped. Log: $LogFile"` only in the `else` branch. Accept,
+and you are never told where the log is. Combined with `Failed to pre-create clawuser stub
+(exit=-1)`, which names neither a cause nor a file, the failure path gave the user nothing
+actionable. **The measurement that should govern how hard this is worth fixing: forty-one
+minutes** — `11:11:19` failure to `11:52:37` rollback answer. That is how long a real person sat
+in front of an error about a Linux user account before deciding what to do.
+
+**D8 — `wsl.exe`'s UTF-16LE nulls are stripped on one path and not the other, and the unstripped
+one carries the most valuable line in the file.**
+
+```
+[wsl:root out] T h e r e   i s   n o   d i s t r i b u t i o n   w i t h   t h e   s u p p l i e d   n a m e .
+```
+
+`Update-WslEngine` strips them at `setup.ps1:263`. `Invoke-WslBash`'s `[wsl:root out]` /
+`[wsl:root err]` path (`setup.ps1:765-772`) does not. The nulls also make `grep` treat
+`install.log` as a **binary file** and silently suppress matches — which it did to one of mine
+while reading these artefacts. Same one-line strip as line 263.
 
 ---
 
