@@ -108,7 +108,11 @@ The prompt is written by someone who cannot see the repo. It will sometimes be w
 ENVIRONMENT, NOT NEGOTIABLE
 
 - Standard_D2s_v4. DSv5 quota in westus2 is zero. Do not "upgrade" the size.
-- Image clawfactory-win11-baseline-v2, resource group clawfactory-validation.
+- Image clawfactory-win11-baseline-v2, resource group clawfactory-validation, for the
+  baked boxes ONLY. This line is not a licence to run the whole cycle on one image -- see
+  A BASELINE IMAGE IS A SET OF INSTALL STEPS ALREADY COMPLETED below, which requires at
+  least one box per cycle from a stock image. Where the two clauses appear to conflict,
+  that one wins.
 - ONE az vm run-command invoke at a time. They queue and interfere.
 - az vm run-command runs as SYSTEM and WSL refuses to run there. Every WSL test needs the
   interactive auto-logon session. Auto-logon is a ONE-SHOT: after any reboot a human must
@@ -217,6 +221,27 @@ certified a file containing $2. A pattern of [A-Za-z]+ found its canary and stil
 MANUAL-CONFIRM, because neither contained a hyphen. Build the canary to look like the thing
 you are afraid of missing, not like the things you already know are there. Where the
 question is enumeration rather than detection, parse the AST instead of matching text.
+
+A BASELINE IMAGE IS A SET OF INSTALL STEPS ALREADY COMPLETED
+
+Every step an image has already performed is a step the boxes built on it cannot measure.
+Not a step that passed -- a step that was never asked. A baked baseline buys setup time by
+deleting exactly the state the product is supposed to handle, and the boxes go on passing
+while it is gone, which is why nothing surfaces it.
+
+- Each baseline carries a WRITTEN RECORD of the steps it has already performed, updated at
+  every rebake, in the same commit as the rebake. The bake script is that record; a prose
+  sentence in a close-out is not. For the two images that exist the record is
+  docs/reference/BASELINE_IMAGES.md. Read it before choosing the image, not after a result
+  is in dispute.
+- Every validation cycle includes AT LEAST ONE BOX FROM A STOCK IMAGE that has performed
+  none of them. One deliberately unlike box beats four more of the same.
+- Name, in the run plan, which rows the baked boxes cannot answer and which box answers
+  them. A row measured only on the baked fleet is scoped to the baked fleet and says so.
+
+The bake for clawfactory-win11-baseline enabled VirtualMachinePlatform, rebooted, disabled
+Windows Update and added three Defender exclusions before capture. For four months no box
+could be in the state the first external install failed in, and four boxes agreed.
 
 RESOURCE LEDGER
 
