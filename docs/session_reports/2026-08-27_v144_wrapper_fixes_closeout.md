@@ -827,6 +827,7 @@ applied to a build. Do not put a build through a pipeline that can close early.
 | `resources/switch-provider.ps1`, the Ollama line | **Yes** | **Yes**, in the honest direction: a warning replaces an unconditional success line when Ollama is absent. The firewall change still applies either way |
 | `setup.ps1`, `.iss` version literals | **Yes** | No. The stamped version string only |
 | `SECURITY_FINDINGS.md`, `README.md` | **Yes** — both are in `[Files]` | No runtime behaviour. They are what the user is told |
+| ^ **CORRECTION, 2026-08-29** | **FALSE, and left standing above rather than rewritten, because this is a record.** Only `README.md` is in `[Files]` (`ClawFactory-Secure-Setup.iss:46`) and only `README.md` carries a Start Menu shortcut (`:186`). **`SECURITY_FINDINGS.md` is NOT bundled.** The four bundled markdown files are `README.md`, `resources/safety-rules.md`, `resources/persona.md` and `resources/orchestrator-prompt.md`. This matters because it decides whether correcting that file costs a release or a commit: it costs a commit. | — |
 | `SECURITY.md`, `SUPPORT_MATRIX.md` | No, not bundled | No |
 | `scripts/build_release.ps1`, the ninth gate | No, not bundled | No runtime behaviour; it constrains future builds |
 | `validation/interim-v144-wrappers.ps1`, `interim-v120-phase1.ps1` | No, not bundled | No |
