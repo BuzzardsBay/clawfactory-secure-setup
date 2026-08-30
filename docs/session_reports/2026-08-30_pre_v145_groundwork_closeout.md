@@ -7,8 +7,14 @@
 documentation, specification. **`setup.ps1` was not modified.** Evidence in §7.2.
 **Job state at close:** Tasks 1, 2, 3, 4 and 5 **COMPLETE**.
 
-**Three things in this job contradict the prompt or the close-out it builds on. They are in
-§2.3, §4.5 and §5.4, and all three are reported rather than smoothed over.**
+**Then the log arrived, and §9 is the addendum.** It settles the root cause with no inference
+left, answers the reproduction's decisive row from the field, and adds three defects — D6, D7 and
+D8 — found in the failure path rather than in the diagnosis. **No build was started.**
+
+**Four things here contradict the prompt or the close-out this builds on: §2.3, §4.5, §5.4 and
+§6.4 — plus one of my own claims corrected in §9, where I had reasoned that the missing
+`ProgramData` directory proved a fallback had fired. It had not; the log existed all along.
+All of them are reported rather than smoothed over.**
 
 ---
 
@@ -782,3 +788,145 @@ card sees the corrections without needing this document.
    `ClawFactory-Secure-Setup.iss` was not covered. It is a different language with its own
    `Exec()` result convention, and `Exec()`'s `ResultCode` out-parameter is exactly the shape
    this census exists to find. It deserves its own pass.
+
+---
+
+## 9. ADDENDUM — the external machine's artefacts arrived, and settle it
+
+**Added later on 2026-08-30, after this job's tasks were complete.** Jason sent four files.
+Read directly from `C:\Users\bmcki\Downloads\`, not from anyone's summary of them:
+
+| File | Bytes | sha256 (first 16) |
+|---|---|---|
+| `install.log` | 5,045 | `abdd5575963d8ea1` |
+| `checkpoint.json` | 101 | `95b77638ce07dc5e` |
+| `install-result.txt` | 76 | `d901ca2a7b1bdc5c` |
+| `wsl-state.txt` | 8 | `426e1dd405b288e3` |
+
+**The log exists.** §8's item 1 and the prior close-out both treated it as possibly lost. It was
+in `C:\ProgramData\ClawFactory` the whole time; `C:\ProgramData` is hidden in Explorer by
+default. The code argument that it *must* exist — `Write-Log` writes the file before the console
+under `$ErrorActionPreference='Stop'` — held.
+
+### 9.1 The four claims put to me, each checked against the file
+
+**All four verified.**
+
+1. **The import failed with `HCS_E_SERVICE_NOT_AVAILABLE`.** Confirmed, and the line above it is
+   more direct still:
+   ```
+   [wsl --import v2] The operation could not be started because a required feature is not installed.
+   [wsl --import v2] Error code: Wsl/Service/RegisterDistro/CreateVm/HCS/HCS_E_SERVICE_NOT_AVAILABLE
+   ```
+   The Host Compute Service was not running — the state a pending reboot leaves behind.
+
+2. **`wsl --install` printed the contradiction and returned 0.** Confirmed, and the two lines are
+   adjacent in the file:
+   ```
+   [wsl install out] The requested operation is successful. Changes will not be effective until the system is rebooted.
+   [2026-08-30 11:11:18] [INFO] WSL2 install succeeded.
+   ```
+   **D2 caught in the act.** The sentence that refutes the claim is the line immediately above the
+   claim. It was captured to disk by `setup.ps1:498-501` and read by nothing.
+
+3. **`WSL_E_DISTRO_NOT_FOUND` proves no distro was created.** Confirmed.
+
+4. **Forty-one minutes.** Confirmed: failure at `11:11:19`, rollback answered at `11:52:37`.
+   41 minutes 18 seconds.
+
+### 9.2 What the log adds beyond what was asked
+
+**A. `PR.C1` is answered, and the reproduction is redundant.** At `11:11:18` the log reads
+`WSL2 kernel loaded but Ubuntu missing - installing Ubuntu only.` That string is inside the
+`if ($kernelOk)` branch at `setup.ps1:924`, and `$kernelOk` is set at `923` from
+`wsl --status`'s exit code. **So `wsl --status` exits 0 while `VirtualMachinePlatform` is
+`EnablePending`.** That is `PR.C1`, the single row the entire reproduction was designed to
+measure, answered from the field rather than from a rig. `cfv-183` was torn down on that basis —
+VM, NIC, public IP, NSG and OS disk, verified by re-reading the group, back to the four-resource
+residual.
+
+**B. D1 is confirmed from the artefact rather than inferred.** `wsl --update`'s captured output
+contains, verbatim:
+
+> `Installing Windows optional component: VirtualMachinePlatform | The requested operation is successful. Changes will not be effective until the system is rebooted.`
+
+Captured at `setup.ps1:256`, normalised at `263`, written to the log at `264`, and never
+referenced again. The installer recorded the reason it was about to fail, in English, one second
+before it failed.
+
+**C. D3's preflight bit is a measured false positive, and this settles the gate question.**
+The WARN fired at `11:09:53` — and Task Manager on that machine reads **Enabled**. So
+`Win32_Processor.VirtualizationFirmwareEnabled` read falsey on a machine where hardware
+virtualization is on and working. **Had that check been a hard gate, it would have refused to
+install on a perfectly capable computer.** §4.3 of the prior close-out argued against gating on
+it from first principles; it is now argued against from a measurement, on the only machine that
+has ever exercised it.
+
+**D. New defect — D8. The most valuable diagnostic line in the file is nearly unreadable.**
+
+```
+[wsl:root out] T h e r e   i s   n o   d i s t r i b u t i o n   w i t h   t h e   s u p p l i e d   n a m e .
+```
+
+`Update-WslEngine` strips `wsl.exe`'s UTF-16LE null bytes at `setup.ps1:263`. `Invoke-WslBash`'s
+`[wsl:root out]` / `[wsl:root err]` path (`setup.ps1:765-772`) does not. The nulls also make
+`grep` classify `install.log` as a **binary file**, which silently suppresses matches — it
+suppressed one of mine while checking the rootfs digest, and would suppress a support engineer's.
+The fix is the same null-strip that line 263 already performs.
+
+**E. The digest gate worked, and it is the one thing that did.** The logged rootfs hash
+`1483cc5c…4109` is 64 characters, equals the pin at `setup.ps1:467`, and equals `sha256sum` of
+`resources/ubuntu-rootfs.tar.gz` in this repository. Recorded because a failure report should say
+what held as well as what broke.
+
+**F. `setup.ps1:850`'s destructive default did not fire here.** The `wsl --list` took the full 60
+seconds (`11:09:53` → `11:10:53`) but *succeeded*, so `distroExistedPreInstall=False` was recorded
+truthfully and `wsl-state.txt` reads `false` correctly. The census finding at §3.2 stands as a
+latent risk rather than as something that bit — which is the right way to record it.
+
+**G. `checkpoint.json` confirms §9.3's rollback analysis with no inference:**
+
+```json
+{ "completedSteps": [ "Preflight" ] }
+```
+
+### 9.3 Two further defects, from the failure path rather than the diagnosis
+
+**D6 — `Invoke-Rollback` announces work it has no mechanism to do.** `setup.ps1` contains **31
+distinct `Save-Checkpoint` names**. `Invoke-Rollback` has **2** cases, `FirewallRule` and
+`EnsureWsl`; the other 29 fall to `default { }`. This install completed only `Preflight`, so
+answering `Y` to *"Installation failed. Run automatic rollback? (y/N)"* produced exactly this and
+nothing else:
+
+```
+[2026-08-30 11:52:37] [ERROR] Running rollback for completed steps...
+[2026-08-30 11:52:37] [INFO] Undoing: Preflight
+```
+
+**It logged that it was undoing a step and undid nothing, because there is no case for that step.**
+Class 2, on a user-facing prompt. `C:\Program Files\ClawFactory` remaining populated is separately
+*correct* — Inno owns that directory and only its uninstaller removes it, and nothing in
+`setup.ps1` should — but the prompt implies otherwise and the user reasonably concluded the
+rollback was broken.
+
+**D7 — accepting the rollback is the one path that never tells you where the log is.**
+`Invoke-WithRollback` prints the log path only in the `else` branch:
+`Write-Log INFO "Rollback skipped. Log: $LogFile"`. He accepted, so he was never shown it.
+Combined with `Failed to pre-create clawuser stub (exit=-1)`, which names neither a cause nor a
+file, **the failure path told him nothing he could act on.**
+
+**And the number that belongs next to D7: forty-one minutes.** That is how long a real person sat
+in front of an error message about a Linux user account before deciding what to do. It is the only
+measurement this project has of what a bad error message actually costs, and it should be quoted
+whenever the cost of clear failure text is weighed against the effort of writing it.
+
+### 9.4 What this changes
+
+- **Root cause: pending reboot. Confirmed, not inferred.** BIOS is ruled out by the Task Manager
+  reading, and the firmware bit that suggested it is a measured false positive (C).
+- **D1 is unblocked and specifiable now.** The condition it must detect is exactly the state the
+  log records, and `PR.C1` — the assumption D1's design turned on — is answered.
+- **The reproduction is closed as redundant**, not skipped. `cfv-183` is gone and the resource
+  group is back to its four-resource residual.
+- **D6, D7 and D8 are new** and are added to `docs/V1_5_BACKLOG.md` § *v1.4.5*.
+- **No build was started.** `setup.ps1` remains untouched; §7.2's evidence still holds at close.
