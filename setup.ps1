@@ -758,6 +758,17 @@ function Invoke-WslBash {
         if ($prevIn) { try { [Console]::InputEncoding = $prevIn } catch { } }
     }
 
+    # v1.4.5 (D8): strip wsl.exe's UTF-16 LE null bytes before logging, exactly as
+    # Update-WslEngine already does at the `wsl --update` site. The payload's own
+    # output is UTF-8 and carries no nulls, but wsl.exe's OWN messages on this same
+    # channel do, and those are the diagnostic lines that matter. On the first
+    # external install failure the single most useful line in install.log read
+    #   [wsl:root out] T h e r e   i s   n o   d i s t r i b u t i o n ...
+    # and the embedded nulls additionally made grep classify the whole file as
+    # BINARY, so a support engineer's search over it silently returns nothing.
+    $stdout = $stdout -replace "`0", ''
+    $stderr = $stderr -replace "`0", ''
+
     foreach ($line in ($stdout -split "`r?`n")) {
         $t = $line.Trim()
         if ($t) { Add-Content -LiteralPath $LogFile -Value "[wsl:$User out] $t" -Encoding UTF8 }
