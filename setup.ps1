@@ -278,6 +278,74 @@ function Update-WslEngine {
     }
 }
 
+function Get-WslFeatureStates {
+    # v1.4.5 (D1): read the TYPED state of the three Windows features WSL2 needs.
+    # Get-WindowsOptionalFeature returns a FeatureState enum -- Enabled, Disabled,
+    # EnablePending, DisablePending -- which is language-independent. That matters:
+    # the sentence Windows printed on the machine this defect was found on,
+    # "Changes will not be effective until the system is rebooted", is ENGLISH, and
+    # a gate that matched it would silently stop working on every other Windows
+    # language. This project's whole failure catalogue is about branches built on
+    # values that do not mean what the branch needs them to mean; matching prose
+    # would be one more.
+    #
+    # Requires elevation. The installer always runs elevated, but a read that throws
+    # returns 'Unknown' for that feature rather than a guess, and the caller treats
+    # Unknown as "do not gate". Fail-OPEN here is deliberate and is the same
+    # reasoning as D3: a false restart on a working machine is worse than the
+    # diagnosis we are trying to improve.
+    $names  = @('VirtualMachinePlatform', 'Microsoft-Windows-Subsystem-Linux', 'HypervisorPlatform')
+    $states = @{}
+    foreach ($n in $names) {
+        try {
+            $f = Get-WindowsOptionalFeature -Online -FeatureName $n -ErrorAction Stop
+            $states[$n] = [string]$f.State
+        } catch {
+            $states[$n] = 'Unknown'
+        }
+    }
+    return $states
+}
+
+function Test-WslRebootPending {
+    # v1.4.5 (D1). True iff Windows reports one of the WSL features in a *Pending
+    # state. $States is injectable so the decision can be exercised against a
+    # constructed pending state on a machine that is not in one; when omitted the
+    # real read happens here.
+    #
+    # WHAT IS DELIBERATELY *NOT* PART OF THE CONDITION. The design this came from
+    # proposed HKLM\...\Component Based Servicing\RebootPending and
+    # ...\WindowsUpdate\Auto Update\RebootRequired as a belt-and-braces second
+    # signal. They are read and LOGGED here, and they are not allowed to fire the
+    # gate. Either key is routinely present on a perfectly healthy machine after any
+    # Windows Update, and rebooting a user's computer mid-install on that basis
+    # would be a false gate on a signal that does not mean what the gate needs.
+    # Corroboration in the log; never the condition.
+    param([hashtable]$States)
+    if (-not $States) { $States = Get-WslFeatureStates }
+
+    $pending = @()
+    foreach ($k in @('VirtualMachinePlatform', 'Microsoft-Windows-Subsystem-Linux', 'HypervisorPlatform')) {
+        $v = if ($States.ContainsKey($k)) { [string]$States[$k] } else { 'Unknown' }
+        Write-Log INFO "Windows feature $k state: $v"
+        if ($v -eq 'EnablePending' -or $v -eq 'DisablePending') { $pending += "$k=$v" }
+    }
+
+    foreach ($p in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
+                     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired')) {
+        $present = $false
+        try { $present = Test-Path -LiteralPath $p } catch { }
+        Write-Log INFO "Corroboration only (never gates): $p present=$present"
+    }
+
+    if ($pending.Count -gt 0) {
+        Write-Log WARN ('Windows reports a restart is pending for: ' + ($pending -join ', ') +
+                        '. WSL cannot create a distro in this state.')
+        return $true
+    }
+    return $false
+}
+
 function Test-WslFunctional {
     # True iff WSL2 + Ubuntu can actually run a command. Distinguishes:
     #   - WSL features just enabled but kernel not loaded (post-install,
@@ -1047,6 +1115,14 @@ function Step-EnsureWsl {
             Save-Checkpoint 'EnsureWsl'
             return
         }
+        # v1.4.5 (D1), the loop guard. On the resume path we STOP; we never reboot a
+        # second time. No counter is needed for that: this branch is reachable only
+        # from a restart we ourselves scheduled, so $Resume IS the count.
+        if (Test-WslRebootPending) {
+            throw ("Windows still reports that a restart is pending after restarting. Please restart this " +
+                   "computer manually and run the ClawFactory installer again. If this repeats, the details " +
+                   "are in $LogFile.")
+        }
         # Pre-reboot we ran DISM but not `wsl --install`. Run it now. The distro
         # install is WSL2-only: a virtualization failure stops with a named message.
         $bundledTarball = if ($BundledRootfsDir) { Join-Path $BundledRootfsDir 'ubuntu-rootfs.tar.gz' } else { '' }
@@ -1078,6 +1154,29 @@ function Step-EnsureWsl {
         Write-Log INFO 'WSL2 + Ubuntu already functional - skipping install.'
         Save-Checkpoint 'EnsureWsl'
         return
+    }
+
+    # v1.4.5 (D1). The state nothing in this file could see until now, checked at the
+    # point it becomes knowable and BEFORE the $kernelOk test below.
+    #
+    # This is the branch the first external install took. `wsl --update` had already
+    # printed "Installing Windows optional component: VirtualMachinePlatform | The
+    # requested operation is successful. Changes will not be effective until the
+    # system is rebooted." and returned 0; the output was written to the log at the
+    # Update-WslEngine call above and referenced by nothing. Then `wsl --status`
+    # exited 0 anyway -- measured from the field, not assumed -- so $kernelOk was
+    # true, the import failed HCS_E_SERVICE_NOT_AVAILABLE, `wsl --install` returned 0
+    # without creating anything, and the install died four steps later complaining
+    # about a Linux user account.
+    #
+    # Placed AFTER Test-WslFunctional rather than before it, deliberately: if WSL
+    # already works, a pending feature state is not a reason to restart someone's
+    # computer.
+    if (Test-WslRebootPending) {
+        Invoke-WslRebootAndResume `
+            -Reason 'a Windows feature WSL2 needs is in a pending state and cannot take effect until restart' `
+            -DialogMessage ("Windows needs to restart to finish turning on virtualization support.`n" +
+                            "ClawFactory will continue automatically after the restart.`nClick OK to restart now.")
     }
 
     # Kernel-loaded check. If `wsl --status` returns 0 the feature is active
@@ -1163,10 +1262,25 @@ function Step-EnsureWsl {
         return
     }
 
-    # Reboot required - register ClawFactory-Resume scheduled task, save
-    # checkpoint, restart. v1.0.27: was an HKLM RunOnce inline write; the
-    # helper now registers a SYSTEM-context AtStartup task that fires
-    # regardless of interactive logon.
+    # Reboot required.
+    Invoke-WslRebootAndResume -Reason 'wsl --status still reports the kernel unavailable after wsl --install'
+}
+
+function Invoke-WslRebootAndResume {
+    # Register the ClawFactory-Resume scheduled task, persist the resume flag,
+    # checkpoint, tell the user, restart. v1.0.27: was an HKLM RunOnce inline write;
+    # the helper now registers a SYSTEM-context AtStartup task that fires regardless
+    # of interactive logon.
+    #
+    # v1.4.5 (D1): lifted out of Step-EnsureWsl unchanged so the new pending-reboot
+    # branch reaches the SAME subsystem rather than a second copy of it. The order of
+    # operations, including where Save-Checkpoint 'EnsureWsl' sits relative to the
+    # dialog and the restart, is byte-for-byte the order it had inline.
+    param(
+        [Parameter(Mandatory)][string]$Reason,
+        [string]$DialogMessage = "WSL2 requires a restart to complete setup.`nClawFactory will continue automatically after restart.`nClick OK to restart now."
+    )
+    Write-Log INFO "Restart required: $Reason"
     $scriptPath = Join-Path $PSScriptRoot 'setup.ps1'
     Register-ResumeScheduledTask -ExePath $SourceExe -ScriptPath $scriptPath
     Write-Log INFO 'Reboot required. ClawFactory-Resume scheduled task is registered.'
@@ -1189,7 +1303,7 @@ function Step-EnsureWsl {
     if (-not (Test-IsSilent)) {
         Add-Type -AssemblyName System.Windows.Forms
         [System.Windows.Forms.MessageBox]::Show(
-            "WSL2 requires a restart to complete setup.`nClawFactory will continue automatically after restart.`nClick OK to restart now.",
+            $DialogMessage,
             'Restart Required',
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Information
