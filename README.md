@@ -1,6 +1,6 @@
 # ClawFactory Secure Setup
 
-[![v1.4.4](https://img.shields.io/badge/release-v1.4.4-green)](../../releases) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Windows 11](https://img.shields.io/badge/Windows-10%202004%2B%20%2F%2011-0078D6?logo=windows)](#system-requirements)
+[![v1.4.5](https://img.shields.io/badge/release-v1.4.5-green)](../../releases) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Windows 11](https://img.shields.io/badge/Windows-10%202004%2B%20%2F%2011-0078D6?logo=windows)](#system-requirements)
 
 > The public site (clawfactory.app) is published from [BuzzardsBay/clawfactory-site](https://github.com/BuzzardsBay/clawfactory-site). `docs/` in this repo is no longer the published source.
 
