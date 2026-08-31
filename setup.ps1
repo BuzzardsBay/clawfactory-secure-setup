@@ -2240,6 +2240,32 @@ systemctl enable clawfactory-fw.service 2>/dev/null || true
         return
     }
 
+    # READ BACK. `systemctl enable clawfactory-fw.service` above is written with
+    # `|| true`, so a unit that failed to register looks identical to one that
+    # did, and the rest of this install would go on describing a firewall that
+    # is live NOW and gone at the next restart.
+    #
+    # WHY THIS ONE THROWS WHILE THE $rc CHECK ABOVE ONLY RETURNS. That is a
+    # deliberate asymmetry, not an oversight. A firewall that fails to APPLY is
+    # caught downstream: install-read-fetch.sh refuses to finish when Guard 3's
+    # set or accept is missing, so the install still fails closed. A firewall
+    # that applies and never comes back is caught by NOTHING -- the set is
+    # present at install time, every check passes, and every panel in the
+    # product reports the allowlist by reading /etc/clawfactory/allowed-ips.txt
+    # rather than the live chain. nft rules are kernel state and do not survive
+    # a distro restart; this oneshot unit replaying that file is the only thing
+    # that puts the deny back. This is the last place it can be caught.
+    $fwEnabledCheck = @'
+st="$(systemctl is-enabled clawfactory-fw.service 2>&1 || true)"
+echo "[clawfactory-fw] is-enabled read-back: ${st:-<empty>}"
+[ "$st" = "enabled" ] || exit 1
+'@
+    $rcFwEnabled = Invoke-WslBash -Script $fwEnabledCheck -User 'root'
+    if ($rcFwEnabled -ne 0) {
+        Write-Log ERROR 'clawfactory-fw.service did not enable. It is live for this session only and would not return after a restart.'
+        throw 'The ClawFactory egress firewall did not register to start with your machine. It is running now, but it would not come back the first time you restart your PC - and ClawFactory would keep showing you the network allowlist you configured while nothing was enforcing it. Refusing to complete the install.'
+    }
+
     # Surface which backend the script picked so the install log is
     # explicit (the bash output is also captured in install.log).
     $backendCheck = @'
@@ -2810,6 +2836,31 @@ echo "[gateway-preinstall] complete"
 
     $rc = Invoke-WslBash -Script $script -User 'root'
     if ($rc -ne 0) { Write-Log WARN "Gateway runtime pre-install returned $rc; the gateway may need manual help on first boot." }
+
+    # READ BACK. `systemctl enable --now clawfactory-allow-providers.timer` in
+    # the block above is written with `|| true`, and the surrounding $rc is only
+    # a WARN, so a timer that failed to register would leave no trace anywhere.
+    # It is checked here rather than inside that heredoc for two reasons: an
+    # `exit 1` there would abandon the rest of the block (the default agent.md
+    # among other things), and it would still only produce the WARN above.
+    #
+    # What the timer carries. It re-resolves the provider addresses -- so
+    # without it a DNS rotation eventually leaves the product unable to reach
+    # its own model provider -- and its ExecStartPost drop-in, written by
+    # install-send.sh, is the Guard 2 tripwire that re-reads the live chain and
+    # fails the unit if the allowlist accept ever widens beyond tcp dport 443
+    # or the explicit SMTP drop goes missing. A timer that does not come back
+    # takes that tripwire with it, silently.
+    $tmrEnabledCheck = @'
+st="$(systemctl is-enabled clawfactory-allow-providers.timer 2>&1 || true)"
+echo "[clawfactory-fw] allow-providers.timer is-enabled read-back: ${st:-<empty>}"
+[ "$st" = "enabled" ] || exit 1
+'@
+    $rcTmrEnabled = Invoke-WslBash -Script $tmrEnabledCheck -User 'root'
+    if ($rcTmrEnabled -ne 0) {
+        Write-Log ERROR 'clawfactory-allow-providers.timer did not enable. The provider address refresh and the Guard 2 firewall tripwire would both stop after a restart.'
+        throw 'The ClawFactory network refresh timer did not register to start with your machine. After you restart your PC it would not run again, which means ClawFactory would stop re-checking your model provider''s addresses and stop watching for changes to the email firewall rule it protects. Refusing to complete the install.'
+    }
 
     # Pre-install gateway config: `openclaw gateway install --force` starts
     # the service immediately after writing the unit, and the service exits
