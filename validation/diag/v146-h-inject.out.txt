@@ -1,0 +1,77 @@
+[20:03:46] 
+[20:03:46] ========================================================================
+[20:03:46] ClawFactory v1.4.5 systemd reboot persistence, stage=Inject  2026-08-31T20:03:46
+[20:03:46] ========================================================================
+[20:03:46] context: user=cfv-191\clawadmin elevated=True interactive=True
+[20:03:47]   [PASS] UP.CTX.Inject :: PRECONDITION: running in the interactive elevated session, not as SYSTEM
+[20:03:47]         wsl.exe refuses NT AUTHORITY\SYSTEM by name, so a WSL measurement taken from run-command reads -1 from every wsl call and scores a false product FAIL. user=cfv-191\clawadmin, elevated=True, interactive=True
+[20:03:47] channel self-test: SUBJECT_MARKER=0  CONTROL_RC=1  EXPAND=expanded-ok
+[20:03:47]   [PASS] UP.CHAN.Inject :: PRECONDITION: the WSL file channel discriminates pass from fail
+[20:03:47]         an inline nested wsl -- bash -c channel has fabricated passes on this project before: dropped echo lines, a zero exit code for a command that had just failed, and an empty variable that turned grep -q into a match-everything. The channel self-test runs a subject that must succeed and a control that must fail.
+[20:03:47] 
+[20:03:47] ========================================================================
+[20:03:47] 1. TASK 2 -- the new read-back, against a unit that did not enable
+[20:03:47] ========================================================================
+[20:03:47] shipped source staged into the distro at /var/tmp/cfv146-src-install-quarantine.sh
+[20:03:47] windows-side sha256 = dc9cae647e3f46d3f0a959ced2bad64c52920f9194dc02d8de71ce06aef4a5fc
+[20:03:49]    INJ> SRC_PRESENT=yes
+[20:03:49]    INJ> SRC_SHA=dc9cae647e3f46d3f0a959ced2bad64c52920f9194dc02d8de71ce06aef4a5fc
+[20:03:49]    INJ> SUBJECT_LINES=10
+[20:03:49]    INJ> SUBJECT_HAS_ISENABLED=2
+[20:03:49]    INJ> SUBJECT_HAS_FATAL=1
+[20:03:49]    INJ> FATAL_DEF=fatal() { echo "[quarantine] FATAL: $*" >&2; exit 1; }
+[20:03:49]    INJ> A_PRE_ISENABLED=enabled
+[20:03:49]    INJ> A_RC=0
+[20:03:49]    INJ> A_OUT=
+[20:03:49]    INJ> INJ_IS_DIR=yes
+[20:03:49]    INJ> INJ_IS_LINK=no
+[20:03:49]    INJ> INJ_ISENABLED=disabled
+[20:03:49]    INJ> C_RC=0
+[20:03:49]    INJ> C_OUT_LEN=0
+[20:03:49]    INJ> C_ISENABLED_AFTER=disabled
+[20:03:49]    INJ> B_RC=1
+[20:03:49]    INJ> B_OUT=[quarantine] FATAL: clawfactory-quarantine.service did not enable (systemctl is-enabled said 'disabled'). Deletes are only recoverable while the quarantine broker is running, and a unit that is not enabled does not come back after you restart your PC. The install would finish, the guard would work today, and the first restart would silently remove it. Refusing to complete.
+[20:03:49]    INJ> D_RC=0
+[20:03:49]    INJ> D_ISENABLED=enabled
+[20:03:49]    INJ> REPAIR_U=enabled
+[20:03:49]    INJ> REPAIR_COLL=enabled
+[20:03:49]    INJ> REPAIR_U_ACTIVE=active
+[20:03:49]    INJ> REPAIR_COLL_ACTIVE=active
+[20:03:49]    INJ> READER_CTL=present
+[20:03:49]   [PASS] UP.J.PRE :: PRECONDITION: the shipped installer text reached the box and the extraction found the block
+[20:03:49]         the subject must be the SHIPPED bytes, extracted by marker, not a copy retyped into the probe. src present=yes sha=dc9cae647e3f46d3f0a959ced2bad64c52920f9194dc02d8de71ce06aef4a5fc extracted lines=10 is-enabled hits=2 fatal hits=1
+[20:03:49]   [PASS] UP.J.CTL.A :: POSITIVE CONTROL: A: the shipped read-back PASSES a correctly enabled unit
+[20:03:49]         with nothing blocked, is-enabled='enabled' and the shipped block exited 0 (must be 0). A check that always failed would pass a one-sided test and would also break every install; this is the half that rules that out.
+[20:03:49]   [PASS] UP.J.CTL.D :: POSITIVE CONTROL: D: the injection is targeted at ONE unit
+[20:03:49]         with the block in place on clawfactory-quarantine.service, clawfactory-send.service still enabled in the same directory: rc=0, is-enabled='enabled'. An injection that broke every enable would abort the install elsewhere and prove nothing about this check.
+[20:03:49]   [PASS] UP.J1 :: THE FAULT LANDED: a directory occupies the enable target path
+[20:03:49]         the wants path is a directory=yes, symlink=no, and is-enabled now reads 'disabled'. A fault injection that does not inject scores a false pass and looks exactly like a working control.
+[20:03:49]   [PASS] UP.J2 :: C: THE OLD CODE DID NOT CATCH IT -- the pre-change line exits 0, silently
+[20:03:49]         the shipped v1.4.5 line -- systemctl enable --now the unit, redirected, or-true -- returned rc=0 with 0 bytes of output, and is-enabled afterwards read 'disabled'. That is the field failure exactly: the enable fails, the or-true swallows it, the unit is NOT enabled, and the install carries on reporting success.
+[20:03:49]   [PASS] UP.J3 :: B: THE NEW CODE CATCHES IT -- the shipped read-back aborts, with its own message
+[20:03:49]         the extracted shipped block exited 1 (must be non-zero) and said: '[quarantine] FATAL: clawfactory-quarantine.service did not enable (systemctl is-enabled said 'disabled'). Deletes are only recoverable while the quarantine broker is running, and a unit that is not enabled does not come back after you restart your PC. The install would finish, the guard would work today, and the first restart would silently remove it. Refusing to complete.'. Both the unit name and the release-notes sentence are required, so a block that aborted for some other reason cannot score this row.
+[20:03:49]   [PASS] UP.J4 :: the box was repaired and the repair was PROVED, not assumed
+[20:03:49]         after removing the injected directory: quarantine is-enabled='enabled' is-active='active'; send is-enabled='enabled' is-active='active'. All four must read enabled/active or a later reader of this box is reading damage this probe caused.
+[20:03:49] 
+[20:03:49] ========================================================================
+[20:03:49] Result table: ClawFactory v1.4.5 systemd reboot persistence, stage=Inject
+[20:03:49] ========================================================================
+[20:03:49] UP.CTX.Inject            PASS   PRECONDITION: running in the interactive elevated session, not as SYSTEM
+[20:03:49] UP.CHAN.Inject           PASS   PRECONDITION: the WSL file channel discriminates pass from fail
+[20:03:49] UP.J.PRE                 PASS   PRECONDITION: the shipped installer text reached the box and the extraction found the block
+[20:03:49] UP.J.CTL.A               PASS   POSITIVE CONTROL: A: the shipped read-back PASSES a correctly enabled unit
+[20:03:49] UP.J.CTL.D               PASS   POSITIVE CONTROL: D: the injection is targeted at ONE unit
+[20:03:49] UP.J1                    PASS   THE FAULT LANDED: a directory occupies the enable target path
+[20:03:49] UP.J2                    PASS   C: THE OLD CODE DID NOT CATCH IT -- the pre-change line exits 0, silently
+[20:03:49] UP.J3                    PASS   B: THE NEW CODE CATCHES IT -- the shipped read-back aborts, with its own message
+[20:03:49] UP.J4                    PASS   the box was repaired and the repair was PROVED, not assumed
+[20:03:49] 
+[20:03:49] PASS=9 FAIL=0 VOID=0 INFO=0  (counted 9 of 9 recorded rows)
+[20:03:49] positive controls registered=2 fired=2
+[20:03:49] preconditions declared=3 met=3
+[20:03:49] 
+[20:03:49] PHASE VERDICT: PASS. Every positive control fired and every precondition was met.
+[20:03:49] 
+[20:03:49] UNITPERSIST_COMPLETE rc=0
+
+啒乎剅䕟䥘䍔䑏㵅ര

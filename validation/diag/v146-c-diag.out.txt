@@ -1,0 +1,59 @@
+UPTIME_S=345
+SYSTEM_STATE=running
+FAILED_UNITS=
+---- clawfactory-fw.service ----
+Result=success
+ExecMainStatus=0
+LoadState=loaded
+ActiveState=inactive
+SubState=dead
+UnitFileState=enabled
+InactiveExitTimestampMonotonic=340555505
+ActiveEnterTimestampMonotonic=0
+ConditionResult=yes
+---- clawfactory-egress-refresh.service ----
+Result=success
+ExecMainStatus=0
+LoadState=loaded
+ActiveState=active
+SubState=exited
+UnitFileState=enabled
+InactiveExitTimestampMonotonic=342804778
+ActiveEnterTimestampMonotonic=344125546
+ConditionResult=yes
+---- clawfactory-proxy.service ----
+Result=success
+ExecMainStatus=0
+LoadState=loaded
+ActiveState=active
+SubState=running
+UnitFileState=enabled
+InactiveExitTimestampMonotonic=340558287
+ActiveEnterTimestampMonotonic=340558287
+ConditionResult=yes
+---- network-online.target ----
+ActiveState=active
+SubState=active
+---- systemd-networkd-wait-online ----
+masked-runtime
+---- journal for clawfactory-fw.service ----
+Aug 31 18:27:23 cfv-191 systemd[1]: Starting ClawFactory egress firewall (nftables or iptables-legacy fallback)...
+Aug 31 18:27:26 cfv-191 systemd[1]: clawfactory-fw.service: Deactivated successfully.
+Aug 31 18:27:26 cfv-191 systemd[1]: Finished ClawFactory egress firewall (nftables or iptables-legacy fallback).
+Aug 31 18:32:58 cfv-191 systemd[1]: Starting ClawFactory egress firewall (nftables or iptables-legacy fallback)...
+Aug 31 18:33:00 cfv-191 systemd[1]: clawfactory-fw.service: Deactivated successfully.
+Aug 31 18:33:00 cfv-191 systemd[1]: Finished ClawFactory egress firewall (nftables or iptables-legacy fallback).
+---- nft ----
+NFT_TABLE=present
+NFT_ADDRS=67
+ALLOWED_FILE=46
+---- proxy / gateway ----
+P8787_AGENT=502
+P8788_ROOT=000
+GW_USER_UNIT=active
+LINGER=Linger=yes
+---- agent reachability, with the root control ----
+AGENT_BLOCKED=6 of 6
+ROOT_REACHED=3 of 3
+
+啒乎剅䕟䥘䍔䑏㵅ര

@@ -1,0 +1,39 @@
+BOOT_ID=e4c394b2-adf0-46e2-ab06-64869893ce09
+UPTIME_S=265
+==== journal THIS BOOT: the two units that had never started before ====
+Aug 31 19:49:26 cfv-191 systemd[1]: Starting ClawFactory egress firewall (nftables or iptables-legacy fallback)...
+Aug 31 19:49:28 cfv-191 systemd[1]: clawfactory-fw.service: Deactivated successfully.
+Aug 31 19:49:28 cfv-191 systemd[1]: Finished ClawFactory egress firewall (nftables or iptables-legacy fallback).
+----
+Aug 31 19:49:30 cfv-191 clawfactory-egress-refresh.sh[409]: [egress-refresh] attempt 1/20: unresolved hosts read-fetch=0 toolchain=0
+Aug 31 19:49:30 cfv-191 clawfactory-egress-refresh.sh[409]: [egress-refresh] every host that had to be resolved was resolved; both sets are current
+Aug 31 19:49:30 cfv-191 clawfactory-egress-refresh.sh[409]: [read-fetch] READFETCH_STATUS hosts=0 resolved=0 failed=0 retained=0 addresses=0 backend=nftables
+Aug 31 19:49:30 cfv-191 clawfactory-egress-refresh.sh[409]: [read-fetch] backend=nftables hosts=0 addresses=0 (0 hosts means every read-fetch destination is denied)
+Aug 31 19:49:30 cfv-191 clawfactory-egress-refresh.sh[409]: [toolchain] policy says TOOLCHAIN=on
+Aug 31 19:49:30 cfv-191 clawfactory-egress-refresh.sh[409]: [toolchain] TOOLCHAIN_STATUS enabled=1 hosts=8 resolved=8 failed=0 retained=0 addresses=29 backend=nftables
+Aug 31 19:49:30 cfv-191 clawfactory-egress-refresh.sh[409]: [toolchain] backend=nftables toolchain=ON addresses=29 (skill installation, GitHub and npm are reachable)
+Aug 31 19:49:30 cfv-191 systemd[1]: Finished ClawFactory: re-resolve the Guard 3 egress sets once the network is up.
+==== fw-assert this boot ====
+Aug 31 19:50:01 cfv-191 clawfactory-fw-assert.sh[1016]: [fw-assert] chain shape OK (uid-scoped, all three allowlist accepts are 443-only, read-fetch and toolchain sets present with their accepts, SMTP dropped explicitly, terminal drop present)
+==== how many times has the distro booted since the Windows restart ====
+-5 24f7e74f6a4d45df8761e0cb0d65fa05 Mon 2026-08-31 17:18:42 UTCâ?"Mon 2026-08-31 17:18:47 UTC
+-4 b4ac9861543e4e9bb084367dc70103fe Mon 2026-08-31 17:18:56 UTCâ?"Mon 2026-08-31 17:19:07 UTC
+-3 6f34279851e4481f8add512e1c539622 Mon 2026-08-31 17:19:15 UTCâ?"Mon 2026-08-31 18:27:13 UTC
+-2 3120bbcbb4e94e66a45fe118a81ff6f8 Mon 2026-08-31 18:27:22 UTCâ?"Mon 2026-08-31 18:49:28 UTC
+-1 abe0a2e9c2e84c769378712647f5048f Mon 2026-08-31 18:49:34 UTCâ?"Mon 2026-08-31 18:51:19 UTC
+ 0 e4c394b2adf046e2ab0664869893ce09 Mon 2026-08-31 19:49:24 UTCâ?"Mon 2026-08-31 19:53:39 UTC
+
+==== full post census table ====
+[19:50:25]   unit                                    is-enabled   is-active  expected   ActiveEnter(us)  Result
+[19:50:25]   clawfactory-allow-providers.timer       enabled      active     active     12595659         success
+[19:50:25]   clawfactory-egress-refresh.service      enabled      active     active     17174036         success
+[19:50:25]   clawfactory-fw.service                  enabled      inactive   inactive   0                success
+[19:50:25]   clawfactory-proxy.service               enabled      active     active     12712903         success
+[19:50:25]   clawfactory-quarantine-gc.timer         enabled      active     active     12597164         success
+[19:50:25]   clawfactory-quarantine.service          enabled      active     active     12728837         success
+[19:50:25]   clawfactory-send-gc.timer               enabled      active     active     12607673         success
+[19:50:25]   clawfactory-send.service                enabled      active     active     12746907         success
+[19:50:25] 
+==== UP.POST.6 evidence ====
+[19:50:25]         2 of 2 left inactive (i.e. were started) with Result=success: clawfactory-egress-refresh.service InactiveExit=15109251 ActiveEnter=17174036 Result='success' ExecMainStatus='0'; clawfactory-fw.service InactiveExit=12709461 ActiveEnter=0 Result='success' ExecMainStatus='0'. Judged on InactiveExitTimestampMonotonic because ActiveEnter is always 0 for a Type=oneshot with no RemainAfterExit -- clawfactory-fw.service is exactly that, and reading ActiveEnter on it reports 'never ran' for a unit whose own journal records it starting and finishing five seconds after boot. On the PRE reading this is INFO and both are expected to be 0, because neither is enabled with --now and neither has ever been started, which is what makes the post-restart reading unambiguous.
+啒乎剅䕟䥘䍔䑏㵅ര

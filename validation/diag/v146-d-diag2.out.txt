@@ -1,0 +1,80 @@
+UPTIME_S=526
+---- who is listening ----
+LISTEN 0      1000   10.255.255.254:53        0.0.0.0:*                                            
+LISTEN 0      511         127.0.0.1:8787      0.0.0.0:*    users:(("MainThread",pid=172,fd=21))    
+LISTEN 0      4096    127.0.0.53%lo:53        0.0.0.0:*    users:(("systemd-resolve",pid=93,fd=14))
+LISTEN 0      511             [::1]:8787         [::]:*    users:(("MainThread",pid=172,fd=22))    
+---- gateway user unit ----
+Result=success
+NRestarts=0
+ExecMainStatus=0
+ActiveState=active
+SubState=running
+---- gateway ExecStart as it will actually run ----
+ExecStart={ path=/usr/bin/node 
+ argv[]=/usr/bin/node /usr/lib/node_modules/openclaw/dist/index.js gateway --port 8788 
+---- the drop-in that moves it to 8788 ----
+[Service]
+ExecStart=
+ExecStart=/usr/bin/node /usr/lib/node_modules/openclaw/dist/index.js gateway --port 8788
+Environment=OPENCLAW_GATEWAY_PORT=8788
+---- gateway journal, last 15 ----
+Aug 31 18:33:24 cfv-191 node[354]: 2026-08-31T18:33:24.156+00:00 [gateway] starting channels and sidecars...
+Aug 31 18:33:24 cfv-191 node[354]: 2026-08-31T18:33:24.179+00:00 [plugins] embedded acpx runtime backend registered lazily
+Aug 31 18:33:25 cfv-191 node[354]: 2026-08-31T18:33:25.095+00:00 [browser/server] Browser control listening on http://127.0.0.1:8790/ (auth=token)
+Aug 31 18:33:52 cfv-191 node[354]: 2026-08-31T18:33:52.949+00:00 [model-pricing] OpenRouter pricing fetch failed: TypeError: fetch failed
+Aug 31 18:33:52 cfv-191 node[354]: 2026-08-31T18:33:52.954+00:00 [gateway] startup model warmup timed out after 5000ms; continuing without waiting
+Aug 31 18:33:52 cfv-191 node[354]: 2026-08-31T18:33:52.963+00:00 [diagnostic] liveness warning: reasons=event_loop_delay interval=39s eventLoopDelayP99Ms=391.1 eventLoopDelayMaxMs=27783.1 eventLoopUtilization=0.844 cpuCoreRatio=0.19 active=0 waiting=0 queued=0
+Aug 31 18:33:53 cfv-191 node[354]: 2026-08-31T18:33:53.197+00:00 [gateway] ready
+Aug 31 18:33:53 cfv-191 node[354]: 2026-08-31T18:33:53.216+00:00 [heartbeat] started
+Aug 31 18:33:55 cfv-191 systemd[264]: Stopping OpenClaw Gateway (v2026.4.27)...
+Aug 31 18:33:55 cfv-191 node[354]: 2026-08-31T18:33:55.402+00:00 [gateway] signal SIGTERM received
+Aug 31 18:33:55 cfv-191 node[354]: 2026-08-31T18:33:55.409+00:00 [gateway] received SIGTERM; shutting down
+Aug 31 18:33:56 cfv-191 node[354]: 2026-08-31T18:33:56.184+00:00 [gmail-watcher] gmail watcher stopped
+Aug 31 18:33:56 cfv-191 systemd[264]: Stopped OpenClaw Gateway (v2026.4.27).
+Aug 31 18:33:56 cfv-191 systemd[264]: openclaw-gateway.service: Consumed 49.131s CPU time.
+Aug 31 18:36:01 cfv-191 systemd[260]: Started OpenClaw Gateway (v2026.4.27).
+---- proxy journal, last 10 ----
+Aug 31 18:28:58 cfv-191 systemd[1]: Stopped ClawFactory chatCompletions gating proxy (SOUL + spend gate on 127.0.0.1:8787).
+Aug 31 18:32:58 cfv-191 systemd[1]: Started ClawFactory chatCompletions gating proxy (SOUL + spend gate on 127.0.0.1:8787).
+Aug 31 18:33:00 cfv-191 node[171]: [clawfactory-proxy] listening on 127.0.0.1:8787 (ipv4) -> real gateway 127.0.0.1:8788; gating POST /v1/chat/completions via /usr/local/sbin/clawfactory-turn-gate.sh as clawuser
+Aug 31 18:33:00 cfv-191 node[171]: [clawfactory-proxy] listening on ::1:8787 (ipv6) -> real gateway 127.0.0.1:8788; gating POST /v1/chat/completions via /usr/local/sbin/clawfactory-turn-gate.sh as clawuser
+Aug 31 18:33:55 cfv-191 systemd[1]: Stopping ClawFactory chatCompletions gating proxy (SOUL + spend gate on 127.0.0.1:8787)...
+Aug 31 18:33:55 cfv-191 systemd[1]: clawfactory-proxy.service: Deactivated successfully.
+Aug 31 18:33:55 cfv-191 systemd[1]: Stopped ClawFactory chatCompletions gating proxy (SOUL + spend gate on 127.0.0.1:8787).
+Aug 31 18:35:59 cfv-191 systemd[1]: Started ClawFactory chatCompletions gating proxy (SOUL + spend gate on 127.0.0.1:8787).
+Aug 31 18:36:01 cfv-191 node[172]: [clawfactory-proxy] listening on 127.0.0.1:8787 (ipv4) -> real gateway 127.0.0.1:8788; gating POST /v1/chat/completions via /usr/local/sbin/clawfactory-turn-gate.sh as clawuser
+Aug 31 18:36:01 cfv-191 node[172]: [clawfactory-proxy] listening on ::1:8787 (ipv6) -> real gateway 127.0.0.1:8788; gating POST /v1/chat/completions via /usr/local/sbin/clawfactory-turn-gate.sh as clawuser
+---- what pulled clawfactory-fw.service the SECOND time ----
+Aug 31 18:27:26 cfv-191 systemd[1]: clawfactory-fw.service: Deactivated successfully.
+Aug 31 18:27:54 cfv-191 clawfactory-allow-providers.sh[1321]: [read-fetch] READFETCH_STATUS hosts=0 resolved=0 failed=0 retained=0 addresses=0 backend=nftables
+Aug 31 18:27:54 cfv-191 clawfactory-allow-providers.sh[1321]: [read-fetch] backend=nftables hosts=0 addresses=0 (0 hosts means every read-fetch destination is denied)
+Aug 31 18:27:54 cfv-191 clawfactory-allow-providers.sh[1361]: [toolchain] policy says TOOLCHAIN=on
+Aug 31 18:27:54 cfv-191 clawfactory-allow-providers.sh[1361]: [toolchain] TOOLCHAIN_STATUS enabled=1 hosts=8 resolved=8 failed=0 retained=0 addresses=26 backend=nftables
+Aug 31 18:27:54 cfv-191 clawfactory-allow-providers.sh[1361]: [toolchain] backend=nftables toolchain=ON addresses=26 (skill installation, GitHub and npm are reachable)
+Aug 31 18:27:55 cfv-191 clawfactory-fw-assert.sh[1522]: [fw-assert] chain shape OK (uid-scoped, all three allowlist accepts are 443-only, read-fetch and toolchain sets present with their accepts, SMTP dropped explicitly, terminal drop present)
+Aug 31 18:27:55 cfv-191 systemd[1]: clawfactory-allow-providers.service: Deactivated successfully.
+Aug 31 18:28:58 cfv-191 systemd[1]: clawfactory-allow-providers.timer: Deactivated successfully.
+Aug 31 18:33:00 cfv-191 systemd[1]: clawfactory-fw.service: Deactivated successfully.
+Aug 31 18:33:28 cfv-191 clawfactory-allow-providers.sh[872]: [read-fetch] READFETCH_STATUS hosts=0 resolved=0 failed=0 retained=0 addresses=0 backend=nftables
+Aug 31 18:33:28 cfv-191 clawfactory-allow-providers.sh[872]: [read-fetch] backend=nftables hosts=0 addresses=0 (0 hosts means every read-fetch destination is denied)
+Aug 31 18:33:28 cfv-191 clawfactory-allow-providers.sh[912]: [toolchain] policy says TOOLCHAIN=on
+Aug 31 18:33:29 cfv-191 clawfactory-allow-providers.sh[912]: [toolchain] TOOLCHAIN_STATUS enabled=1 hosts=8 resolved=8 failed=0 retained=0 addresses=25 backend=nftables
+Aug 31 18:33:29 cfv-191 clawfactory-allow-providers.sh[912]: [toolchain] backend=nftables toolchain=ON addresses=25 (skill installation, GitHub and npm are reachable)
+Aug 31 18:33:29 cfv-191 clawfactory-fw-assert.sh[1072]: [fw-assert] chain shape OK (uid-scoped, all three allowlist accepts are 443-only, read-fetch and toolchain sets present with their accepts, SMTP dropped explicitly, terminal drop present)
+Aug 31 18:33:29 cfv-191 systemd[1]: clawfactory-allow-providers.service: Deactivated successfully.
+Aug 31 18:33:55 cfv-191 systemd[1]: clawfactory-allow-providers.timer: Deactivated successfully.
+Aug 31 18:36:01 cfv-191 systemd[1]: clawfactory-fw.service: Deactivated successfully.
+---- allow-providers timer spec ----
+[Unit]
+Description=ClawFactory: refresh LLM provider IPs every 5h
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=5h
+Unit=clawfactory-allow-providers.service
+
+[Install]
+WantedBy=timers.target
+
+啒乎剅䕟䥘䍔䑏㵅ര

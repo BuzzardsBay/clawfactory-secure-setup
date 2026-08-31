@@ -1,0 +1,163 @@
+[19:50:14] 
+[19:50:14] ========================================================================
+[19:50:14] ClawFactory v1.4.5 systemd reboot persistence, stage=Post  2026-08-31T19:50:14
+[19:50:14] ========================================================================
+[19:50:14] context: user=cfv-191\clawadmin elevated=True interactive=True
+[19:50:15]   [PASS] UP.CTX.Post :: PRECONDITION: running in the interactive elevated session, not as SYSTEM
+[19:50:15]         wsl.exe refuses NT AUTHORITY\SYSTEM by name, so a WSL measurement taken from run-command reads -1 from every wsl call and scores a false product FAIL. user=cfv-191\clawadmin, elevated=True, interactive=True
+[19:50:15] channel self-test: SUBJECT_MARKER=0  CONTROL_RC=1  EXPAND=expanded-ok
+[19:50:15]   [PASS] UP.CHAN.Post :: PRECONDITION: the WSL file channel discriminates pass from fail
+[19:50:15]         an inline nested wsl -- bash -c channel has fabricated passes on this project before: dropped echo lines, a zero exit code for a command that had just failed, and an empty variable that turned grep -q into a match-everything. The channel self-test runs a subject that must succeed and a control that must fail.
+[19:50:15] 
+[19:50:15] ========================================================================
+[19:50:15] 1. Census of the eight units (Post)
+[19:50:15] ========================================================================
+[19:50:16]    CEN> SYSTEMD_PID1=systemd
+[19:50:16]    CEN> UPTIME_S=62
+[19:50:16]    CEN> SYSTEMD_STATE=running
+[19:50:16]    CEN> UNIT|clawfactory-allow-providers.timer|enabled|active|12595659|success||12595659
+[19:50:16]    CEN> UNIT|clawfactory-egress-refresh.service|enabled|active|17174036|success|0|15109251
+[19:50:16]    CEN> UNIT|clawfactory-fw.service|enabled|inactive|0|success|0|12709461
+[19:50:16]    CEN> UNIT|clawfactory-proxy.service|enabled|active|12712903|success|0|12712903
+[19:50:16]    CEN> UNIT|clawfactory-quarantine-gc.timer|enabled|active|12597164|success||12597164
+[19:50:16]    CEN> UNIT|clawfactory-quarantine.service|enabled|active|12728837|success|0|12728837
+[19:50:16]    CEN> UNIT|clawfactory-send-gc.timer|enabled|active|12607673|success||12607673
+[19:50:16]    CEN> UNIT|clawfactory-send.service|enabled|active|12746907|success|0|12746907
+[19:50:16]    CEN> BOOT_ID=e4c394b2-adf0-46e2-ab06-64869893ce09
+[19:50:16]    CEN> WANTS_MULTIUSER=5
+[19:50:16]    CEN> WANTS_TIMERS=3
+[19:50:16]    CEN> UNITFILES_PRESENT=11
+[19:50:16]    CEN> SOCK_QUARANTINE=present
+[19:50:16]    CEN> SOCK_SEND=present
+[19:50:16]    CEN> SOCK_SENDADMIN=root:root 600
+[19:50:16]    CEN> NFT_TABLE=present
+[19:50:16]    CEN> NFT_ADDRESSES=66
+[19:50:16]    CEN> ALLOWED_IPS_FILE=46
+[19:50:16]    CEN> READER_CTL=present
+[19:50:16] 
+[19:50:16] ========================================================================
+[19:50:16] 2. Calibrate the reader, in this same run, after the census
+[19:50:16] ========================================================================
+[19:50:25]    CTL> CTL_POS_ISENABLED=enabled
+[19:50:25]    CTL> CTL_NEG_ISENABLED=Failed to get unit file state for cfv146-absent-on-purpose.service: No such file or directory
+[19:50:25]    CTL> CTL_CLEANUP_LEFT=0
+[19:50:25]   [PASS] UP.POST.CTL.POS :: POSITIVE CONTROL: the is-enabled reader can produce a known-correct ENABLED answer on this box, right now
+[19:50:25]         a throwaway unit was created and enabled in the same dispatch and read back 'enabled' (must be 'enabled'). Without this, a census reading 'not enabled' for the product's units and a census taken through a broken reader are the same transcript.
+[19:50:25]   [PASS] UP.POST.CTL.NEG :: POSITIVE CONTROL: the is-enabled reader can also say NO
+[19:50:25]         a unit that does not exist read back 'Failed to get unit file state for cfv146-absent-on-purpose.service: No such file or directory' (must NOT be 'enabled'). A reader that answered 'enabled' to everything would pass the positive control alone.
+[19:50:25]   [PASS] UP.POST.CTL.CLEAN :: the calibration left no trace of itself
+[19:50:25]         scratch unit files and wants entries left = 0. Must be 0, or the box under test is no longer the box that was measured.
+[19:50:25]   [PASS] UP.POST.LIST :: the eight units this probe holds, against the set the box reported
+[19:50:25]         the probe has clawfactory-allow-providers.timer,clawfactory-egress-refresh.service,clawfactory-fw.service,clawfactory-proxy.service,clawfactory-quarantine-gc.timer,clawfactory-quarantine.service,clawfactory-send-gc.timer,clawfactory-send.service; the box reports clawfactory-allow-providers.timer,clawfactory-egress-refresh.service,clawfactory-fw.service,clawfactory-proxy.service,clawfactory-quarantine-gc.timer,clawfactory-quarantine.service,clawfactory-send-gc.timer,clawfactory-send.service.
+[19:50:25]   [PASS] UP.POST.LIST2 :: set difference between the two lists, named rather than counted
+[19:50:25]         in the probe but not reported by the box: none. Reported by the box but not in the probe: none. A unit the product installs that this probe does not know about is the more dangerous half, because the probe would report full coverage while never having looked at it.
+[19:50:25] 
+[19:50:25]   unit                                    is-enabled   is-active  expected   ActiveEnter(us)  Result
+[19:50:25]   clawfactory-allow-providers.timer       enabled      active     active     12595659         success
+[19:50:25]   clawfactory-egress-refresh.service      enabled      active     active     17174036         success
+[19:50:25]   clawfactory-fw.service                  enabled      inactive   inactive   0                success
+[19:50:25]   clawfactory-proxy.service               enabled      active     active     12712903         success
+[19:50:25]   clawfactory-quarantine-gc.timer         enabled      active     active     12597164         success
+[19:50:25]   clawfactory-quarantine.service          enabled      active     active     12728837         success
+[19:50:25]   clawfactory-send-gc.timer               enabled      active     active     12607673         success
+[19:50:25]   clawfactory-send.service                enabled      active     active     12746907         success
+[19:50:25] 
+[19:50:25]   [PASS] UP.POST.1 :: all eight ClawFactory units read back ENABLED
+[19:50:25]         rows reported = 8 of 8; not enabled = 0
+[19:50:25]   [PASS] UP.POST.2 :: every unit is in the state its own unit file says it should be in
+[19:50:25]         units not in their expected state = 0. The expectation is per-unit and derived from the tree: six are enabled with --now and must be active; clawfactory-egress-refresh.service and clawfactory-fw.service are enabled WITHOUT --now, so before any restart neither has ever been started and inactive is correct. After a restart egress-refresh must be active (RemainAfterExit=yes) while fw.service correctly returns to inactive (it has none), which is why fw.service is judged on rows POST.6 and G3 instead.
+[19:50:25]   [PASS] UP.POST.6 :: the two boot-time oneshots: did they RUN this boot, and did they succeed?
+[19:50:25]         2 of 2 left inactive (i.e. were started) with Result=success: clawfactory-egress-refresh.service InactiveExit=15109251 ActiveEnter=17174036 Result='success' ExecMainStatus='0'; clawfactory-fw.service InactiveExit=12709461 ActiveEnter=0 Result='success' ExecMainStatus='0'. Judged on InactiveExitTimestampMonotonic because ActiveEnter is always 0 for a Type=oneshot with no RemainAfterExit -- clawfactory-fw.service is exactly that, and reading ActiveEnter on it reports 'never ran' for a unit whose own journal records it starting and finishing five seconds after boot. On the PRE reading this is INFO and both are expected to be 0, because neither is enabled with --now and neither has ever been started, which is what makes the post-restart reading unambiguous.
+[19:50:25]   [INFO] UP.POST.3 :: the wants symlinks on disk, which is what enablement IS
+[19:50:25]         multi-user.target.wants/clawfactory-* = 5, timers.target.wants/clawfactory-* = 3, unit files present = 11. is-enabled reads these; recorded separately so a disagreement between the two is visible rather than averaged away.
+[19:50:25]   [INFO] UP.POST.4 :: distro state at the moment of measurement
+[19:50:25]         pid1=systemd, is-system-running='running', uptime=62s. Sockets: quarantine=present, send=present, send-admin=root:root 600. nft table=present carrying 66 distinct addresses; allowed-ips.txt holds 46 address lines.
+[19:50:25] 
+[19:50:25] ========================================================================
+[19:50:25] 3. Do the guards themselves still hold? (Post)
+[19:50:25] ========================================================================
+[19:51:07]    GRD> BOOT_ID=e4c394b2-adf0-46e2-ab06-64869893ce09
+[19:51:07]    GRD> GW_READY_AFTER_S=0
+[19:51:07]    GRD> G1_ROOTS=/workspaces
+[19:51:07]    GRD> G1_STORE=/var/lib/clawfactory/quarantine
+[19:51:07]    GRD> G1_STORE_MODE=root:root 700
+[19:51:07]    GRD> G1_CREATED=yes
+[19:51:07]    GRD> G1_OWNER=clawuser
+[19:51:07]    GRD> G1_RM_RC=0
+[19:51:07]    GRD> G1_RM_OUT=rm: '/workspaces/cfv146/g1-POST-5148.txt' moved to ClawFactory quarantine (restorable from Studio > Recently deleted)
+[19:51:07]    GRD> G1_GONE_FROM_WORKSPACE=yes
+[19:51:07]    GRD> G1_IN_STORE=1
+[19:51:07]    GRD> G1_AGENT_CAN_LIST=no
+[19:51:07]    GRD> G1_WRAPPER_IS_NODE=yes
+[19:51:07]    GRD> G1_CTL_ROOT_RM_WORKS=yes
+[19:51:07]    GRD> G2_PING={"ok":true,"pong":true,"destinationConfigured":false}
+[19:51:07]    GRD> G2_ADMINOP_ON_REQUEST_CHANNEL={"ok":false,"code":"EPERM","error":"approve is not available on the request channel"}
+[19:51:07]    GRD> G2_AGENT_ON_ADMIN_SOCKET=DENIED:EACCES
+[19:51:07]    GRD> G2_ADMIN_SOCK_MODE=root:root 600
+[19:51:07]    GRD> G2_SENDD_USER=root
+[19:51:07]    GRD> G2_CTL_ABSENT_SOCKET=DENIED:ENOENT
+[19:51:07]    GRD> G3_AGENT_BLOCKED=6 of 6
+[19:51:07]    GRD> G3_ROOT_REACHED=3 of 3
+[19:51:07]    GRD> G3_NFT_TABLE=present
+[19:51:07]    GRD> G3_NFT_TERMINAL_DROP=4
+[19:51:07]    GRD> PROXY_8787_AS_AGENT=200
+[19:51:07]    GRD> PROXY_8788_AS_AGENT=denied
+[19:51:07]    GRD> PROXY_8788_AS_ROOT=200
+[19:51:07]    GRD> READER_CTL=present
+[19:51:07]   [PASS] UP.POST.G.CTL.NET :: POSITIVE CONTROL: the reachability instrument can reach the network at all
+[19:51:07]         root reached 1.1.1.1:443 on 3 of 3 attempts. Without this, 'the agent is denied' and 'the box has no network' are the same reading.
+[19:51:07]   [PASS] UP.POST.G.CTL.RM :: POSITIVE CONTROL: delete still works for root, so a held file is not just a broken rm
+[19:51:07]         root removed its own temp file: yes. If the wrapper had broken every delete, 'the file was held' and 'delete is broken' would look identical.
+[19:51:07]   [PASS] UP.POST.G.CTL.SOCK :: POSITIVE CONTROL: the socket client can report a refusal it did not receive a reply to
+[19:51:07]         the same client against a socket that does not exist said 'DENIED:ENOENT'. Without this, 'the agent was refused on the admin socket' and 'the client never worked' are the same reading.
+[19:51:07]   [PASS] UP.POST.G1 :: GUARD 1 HOLDS: an agent delete inside a quarantine root is HELD, not destroyed
+[19:51:07]         roots=/workspaces; canary created=yes owned by clawuser; rm rc=0 out='rm: '/workspaces/cfv146/g1-POST-5148.txt' moved to ClawFactory quarantine (restorable from Studio > Recently deleted)'; gone from the workspace=yes; copies in the root-owned store=1; store=/var/lib/clawfactory/quarantine mode root:root 700; agent can list the store=no; /usr/bin/rm is the node wrapper=yes. PROVES: the dpkg-divert survived, the wrapper is still what the agent's shell resolves rm to, the broker answered, and the payload sits where uid 1000 cannot read it. DOES NOT PROVE the advisory half -- /bin/rm, unlink, find -delete and fs.rmSync were never covered and are not covered here.
+[19:51:07]   [PASS] UP.POST.G2 :: GUARD 2 HOLDS: the request channel answers, and refuses an admin op BY NAME
+[19:51:07]         ping='{"ok":true,"pong":true,"destinationConfigured":false}'; approve-on-the-request-channel='{"ok":false,"code":"EPERM","error":"approve is not available on the request channel"}' (must carry EPERM); agent on send-admin.sock='DENIED:EACCES' (must be DENIED); admin socket=root:root 600; the broker runs as root. PROVES: the broker reloaded with its config and the request/admin split is still enforced at the socket, by a check that needs no SMTP credential. DOES NOT PROVE a full approval round-trip, which needs the credential and would record VOID without it rather than a verdict.
+[19:51:07]   [PASS] UP.POST.G3 :: THE FIREWALL HOLDS: uid 1000 has no route to a non-allowlisted address
+[19:51:07]         the agent was blocked on 6 of 6 attempts while root reached the same address on 3 of 3; nft table=present with 4 terminal-drop line(s). THIS IS THE ROW THE WHOLE JOB TURNS ON: nft rules are kernel state, so after a restart this can only be true if clawfactory-fw.service came back and replayed the persisted list.
+[19:51:07]   [PASS] UP.POST.G4 :: THE GATING PROXY HOLDS: 8787 answers the agent, 8788 does not
+[19:51:07]         as clawuser: 127.0.0.1:8787/status -> 200 (must be 200), 127.0.0.1:8788 -> denied (must be denied). As root, 8788/status -> 200, which shows the private gateway is alive and that the agent's denial is the firewall rather than a dead service. The gateway took 0s to answer 200 after this distro came up; measured on cfv-191 it needs about fifty seconds from launch to '[gateway] ready', and every reading taken inside that window shows 502 on 8787 and nothing on 8788 -- which is indistinguishable from a gateway that never came back, and produced exactly that false FAIL on the first attempt at this run.
+[19:51:07]   [PASS] UP.POST.BOOT :: the census and the guard checks were taken in the SAME distro boot
+[19:51:07]         census boot_id=e4c394b2-adf0-46e2-ab06-64869893ce09; guards boot_id=e4c394b2-adf0-46e2-ab06-64869893ce09. The gateway needed 0s to answer 200 on 8787 in this run, and the distro idle-terminates between dispatches, so a mismatch here means the two halves of this stage describe different machines.
+[19:51:07] 
+[19:51:07] ========================================================================
+[19:51:07] 4. Did they come back on their own, or did something start them?
+[19:51:07] ========================================================================
+[19:51:07]   [PASS] UP.POST.5 :: every unit STARTED, and did so within the first two minutes of the distro coming up
+[19:51:07]         distro uptime at measurement = 62s; units that never started, or started later than 120s after boot = 0. Read from InactiveExitTimestampMonotonic, which is uniform across services, timers and oneshots. This is what separates 'the units came back on their own' from 'the units are running because the probe started them'. Nothing in this run issues systemctl start.
+[19:51:07] 
+[19:51:07] ========================================================================
+[19:51:07] Result table: ClawFactory v1.4.5 systemd reboot persistence, stage=Post
+[19:51:07] ========================================================================
+[19:51:07] UP.CTX.Post              PASS   PRECONDITION: running in the interactive elevated session, not as SYSTEM
+[19:51:07] UP.CHAN.Post             PASS   PRECONDITION: the WSL file channel discriminates pass from fail
+[19:51:07] UP.POST.CTL.POS          PASS   POSITIVE CONTROL: the is-enabled reader can produce a known-correct ENABLED answer on this box, right now
+[19:51:07] UP.POST.CTL.NEG          PASS   POSITIVE CONTROL: the is-enabled reader can also say NO
+[19:51:07] UP.POST.CTL.CLEAN        PASS   the calibration left no trace of itself
+[19:51:07] UP.POST.LIST             PASS   the eight units this probe holds, against the set the box reported
+[19:51:07] UP.POST.LIST2            PASS   set difference between the two lists, named rather than counted
+[19:51:07] UP.POST.1                PASS   all eight ClawFactory units read back ENABLED
+[19:51:07] UP.POST.2                PASS   every unit is in the state its own unit file says it should be in
+[19:51:07] UP.POST.6                PASS   the two boot-time oneshots: did they RUN this boot, and did they succeed?
+[19:51:07] UP.POST.3                INFO   the wants symlinks on disk, which is what enablement IS
+[19:51:07] UP.POST.4                INFO   distro state at the moment of measurement
+[19:51:07] UP.POST.G.CTL.NET        PASS   POSITIVE CONTROL: the reachability instrument can reach the network at all
+[19:51:07] UP.POST.G.CTL.RM         PASS   POSITIVE CONTROL: delete still works for root, so a held file is not just a broken rm
+[19:51:07] UP.POST.G.CTL.SOCK       PASS   POSITIVE CONTROL: the socket client can report a refusal it did not receive a reply to
+[19:51:07] UP.POST.G1               PASS   GUARD 1 HOLDS: an agent delete inside a quarantine root is HELD, not destroyed
+[19:51:07] UP.POST.G2               PASS   GUARD 2 HOLDS: the request channel answers, and refuses an admin op BY NAME
+[19:51:07] UP.POST.G3               PASS   THE FIREWALL HOLDS: uid 1000 has no route to a non-allowlisted address
+[19:51:07] UP.POST.G4               PASS   THE GATING PROXY HOLDS: 8787 answers the agent, 8788 does not
+[19:51:07] UP.POST.BOOT             PASS   the census and the guard checks were taken in the SAME distro boot
+[19:51:07] UP.POST.5                PASS   every unit STARTED, and did so within the first two minutes of the distro coming up
+[19:51:07] 
+[19:51:07] PASS=19 FAIL=0 VOID=0 INFO=2  (counted 21 of 21 recorded rows)
+[19:51:07] positive controls registered=5 fired=5
+[19:51:07] preconditions declared=2 met=2
+[19:51:08] 
+[19:51:08] PHASE VERDICT: PASS. Every positive control fired and every precondition was met.
+[19:51:08] 
+[19:51:08] UNITPERSIST_COMPLETE rc=0
+
+啒乎剅䕟䥘䍔䑏㵅ര

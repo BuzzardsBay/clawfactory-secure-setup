@@ -1,0 +1,84 @@
+[17:15:22] 
+[17:15:22] ========================================================================
+[17:15:22] ClawFactory v1.4.5 systemd reboot persistence, stage=Install  2026-08-31T17:15:22
+[17:15:22] ========================================================================
+[17:15:22] context: user=cfv-191\clawadmin elevated=True interactive=True
+[17:15:22]   [PASS] UP.CTX.Install :: PRECONDITION: running in the interactive elevated session, not as SYSTEM
+[17:15:22]         wsl.exe refuses NT AUTHORITY\SYSTEM by name, so a WSL measurement taken from run-command reads -1 from every wsl call and scores a false product FAIL. user=cfv-191\clawadmin, elevated=True, interactive=True
+[17:15:22] 
+[17:15:22] ========================================================================
+[17:15:22] 1. The artefact, identified by digest and not by filename
+[17:15:22] ========================================================================
+[17:15:24] on-box artefact sha256   = 2fe7dad18c9eab8c005e8ee4bf9a25a6ca08bb761c11d9baf111e3eac0145e87
+[17:15:24] expected published v1.4.5 = 2fe7dad18c9eab8c005e8ee4bf9a25a6ca08bb761c11d9baf111e3eac0145e87
+[17:15:24]   [PASS] UP.I.PRE :: PRECONDITION: the bytes on the box are the published v1.4.5
+[17:15:24]         measuring reboot persistence against the wrong build would answer the question fluently and wrongly. on-box=2fe7dad18c9eab8c005e8ee4bf9a25a6ca08bb761c11d9baf111e3eac0145e87 expected=2fe7dad18c9eab8c005e8ee4bf9a25a6ca08bb761c11d9baf111e3eac0145e87
+[17:15:24] 
+[17:15:24] ========================================================================
+[17:15:24] 2. Install
+[17:15:24] ========================================================================
+[17:31:37] installer exit code = 0, elapsed 16 min (973s)
+[17:31:37] install-result.txt: INSTALLER_DONE=success
+[17:31:37] install.log length: 61501 chars
+[17:31:37]   [PASS] UP.I.CTL.LOG :: POSITIVE CONTROL: search target is searchable (the install log)
+[17:31:37]         the target is searchable: a Step 15 guard-install banner, proving the install reached the steps that create the units and that this log is readable at all was found, so an absence in this search is real
+[17:31:37]   [PASS] UP.I1 :: the install completed and says so itself
+[17:31:37]         install-result.txt='INSTALLER_DONE=success', Inno exit=0. setup.ps1's own verdict is the authority here; the Inno exit code is not, because the .iss raises no exception on setup.ps1's exit.
+[17:31:37]    LOG> [wsl:root exit] 0
+[17:31:37]    LOG> [2026-08-31 17:28:46] [INFO] Step 15g [Guard 3]: Installing the read-fetch allowlist and the toolchain access toggle (web off by default; the user opens named destinations from Studio, and controls the software-source route from the same panel).
+[17:31:37]    LOG> [wsl:root out] read_fetch section present with 0 destination(s)
+[17:31:37]    LOG> [wsl:root out] toolchain section present and PRESERVED: enabled=true
+[17:31:37]    LOG> [wsl:root out] [install-read-fetch] toolchain host lists agree between setup.ps1 and the resolver (8 hosts)
+[17:31:37]    LOG> [wsl:root out] [read-fetch] READFETCH_STATUS hosts=0 resolved=0 failed=0 retained=0 addresses=0 backend=nftables
+[17:31:37]    LOG> [wsl:root out] [read-fetch] backend=nftables hosts=0 addresses=0 (0 hosts means every read-fetch destination is denied)
+[17:31:38]    LOG> [wsl:root out] [toolchain] policy says TOOLCHAIN=on
+[17:31:38]    LOG> [wsl:root out] [toolchain] TOOLCHAIN_STATUS enabled=1 hosts=8 resolved=8 failed=0 retained=0 addresses=26 backend=nftables
+[17:31:38]    LOG> [wsl:root out] [toolchain] backend=nftables toolchain=ON addresses=26 (skill installation, GitHub and npm are reachable)
+[17:31:38]    LOG> [wsl:root out] [install-read-fetch] live chain carries @read_fetch_ipv4 and @toolchain_ipv4, both with 443-scoped accepts, and both sets exist (read in 1 attempt(s) over 0s)
+[17:31:38]    LOG> [wsl:root out] [install-read-fetch] toolchain set holds 26 address(es)
+[17:31:38]    LOG> [wsl:root out] [fw-assert] chain shape OK (uid-scoped, all three allowlist accepts are 443-only, read-fetch and toolchain sets present with their accepts, SMTP dropped explicitly, terminal drop present)
+[17:31:38]    LOG> [wsl:root out] [install-read-fetch] boot refresh installed and enabled: clawfactory-egress-refresh.service, ordered after clawfactory-fw.service
+[17:31:38]    LOG> [wsl:root out] [install-read-fetch] Guard 3 installed. Read-fetch destinations: 0 address(es) from the policy allowlist.
+[17:31:38]    LOG> [wsl:root out] [install-read-fetch] A fresh install has an empty allowlist, which means the agent can fetch nothing beyond the provider route and the software sources.
+[17:31:38]    LOG> [wsl:root out] [install-read-fetch] Toolchain switch: true with 26 address(es). Switching it off in Studio stops your agent fetching code from GitHub and npm. It does not stop skill installation: the skill hub shares a network address with ClawFactory's own site, which this switch does not cover. It never affects the AI provider.
+[17:31:38]    LOG> [wsl:root exit] 0
+[17:31:38]    LOG> [2026-08-31 17:28:48] [INFO] Step 15d [Blocker 1]: Installing the chatCompletions gating proxy (owns 8787; real gateway -> 8788).
+[17:31:38]    LOG> [wsl:root out] [chat-proxy] real gateway is on 127.0.0.1:8788
+[17:31:38]    LOG> [wsl:root out] [chat-proxy] gating proxy is live on 127.0.0.1:8787 -> 127.0.0.1:8788
+[17:31:38]    LOG> [wsl:root exit] 0
+[17:31:38]    LOG> [2026-08-31 17:30:46] [INFO] Step 15h: Provider-route gate - TCP connect to api.anthropic.com:443 as clawuser, after the last firewall write.
+[17:31:38]    LOG> [wsl:clawuser out] [provider-route] OK: uid 1000 connected to api.anthropic.com:443 on attempt 1 (addresses: 160.79.104.10 )
+[17:31:38]    LOG> [wsl:clawuser exit] 0
+[17:31:38]    LOG> [2026-08-31 17:30:46] [INFO] Provider-route gate PASSED: clawuser reached api.anthropic.com:443.
+[17:31:38]    LOG> [2026-08-31 17:30:46] [INFO] Final gateway health gate: polling http://127.0.0.1:8787/status in-WSL for up to 120s.
+[17:31:38]    LOG> [wsl:clawuser exit] 0
+[17:31:38]    LOG> [2026-08-31 17:30:46] [INFO] Final health gate: gateway responsive on attempt 1.
+[17:31:38]    LOG> [2026-08-31 17:30:46] [INFO] Priming the spend meter (usage-cost) so the first turn is not fail-safe-blocked...
+[17:31:38]    LOG> [wsl:clawuser out] [spend-prime] meter warm on attempt 1
+[17:31:38]    LOG> [wsl:clawuser exit] 0
+[17:31:38]    LOG> [2026-08-31 17:30:54] [INFO] Step 16: Registering ClawFactory WSL Host task (keeps gateway alive during idle).
+[17:31:38]    LOG> [2026-08-31 17:31:02] [INFO] Scheduled task 'ClawFactory WSL Host' registered and enabled (state=Running).
+[17:31:38]    LOG> [2026-08-31 17:31:02] [INFO] Step 17: Registering ClawFactory-PostInstall-Smoke scheduled task.
+[17:31:38]    LOG> [2026-08-31 17:31:02] [INFO] PostInstall smoke script written to C:\ProgramData\ClawFactory\run-smoke.ps1
+[17:31:38]    LOG> [2026-08-31 17:31:02] [INFO] PostInstall smoke task registered (fires at next user logon)
+[17:31:38]    LOG> [2026-08-31 17:31:02] [INFO] ==== ClawFactory Secure Setup - completed successfully ====
+[17:31:38]    LOG> [2026-08-31 17:31:03] [INFO] INSTALLER_DONE=success
+[17:31:38]    LOG> 
+[17:31:38] 
+[17:31:38] ========================================================================
+[17:31:38] Result table: ClawFactory v1.4.5 systemd reboot persistence, stage=Install
+[17:31:38] ========================================================================
+[17:31:38] UP.CTX.Install           PASS   PRECONDITION: running in the interactive elevated session, not as SYSTEM
+[17:31:38] UP.I.PRE                 PASS   PRECONDITION: the bytes on the box are the published v1.4.5
+[17:31:38] UP.I.CTL.LOG             PASS   POSITIVE CONTROL: search target is searchable (the install log)
+[17:31:38] UP.I1                    PASS   the install completed and says so itself
+[17:31:38] 
+[17:31:38] PASS=4 FAIL=0 VOID=0 INFO=0  (counted 4 of 4 recorded rows)
+[17:31:38] positive controls registered=1 fired=1
+[17:31:38] preconditions declared=2 met=2
+[17:31:38] 
+[17:31:38] PHASE VERDICT: PASS. Every positive control fired and every precondition was met.
+[17:31:38] 
+[17:31:38] UNITPERSIST_COMPLETE rc=0
+
+啒乎剅䕟䥘䍔䑏㵅ര

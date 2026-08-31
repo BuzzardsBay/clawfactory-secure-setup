@@ -7,10 +7,6 @@ tip `ab681aa`)
 **Job:** prove the guards survive a reboot.
 **No release, no tag, no signing, no ledger row.** None was produced.
 
-> **STATUS: IN PROGRESS.** Sections 0, 1 and 2 are complete and were written before any VM
-> existed. Section 3 is the run plan, recorded before `az vm create` as the convention
-> requires. Section 4 and the ending ledger are filled in as the run proceeds. If this
-> document is read while these words are still here, the run did not finish.
 
 ---
 
@@ -352,7 +348,7 @@ inside heredocs that no other subsystem reads, so the collision risk is low, but
 
 ---
 
-## 2. TASK 2 - proving it against a broken input (design; results in 2.3)
+## 2. TASK 2 - proving it against a broken input (design; results in 4.6)
 
 ### 2.1 The injection, and why it has this shape
 
@@ -509,29 +505,465 @@ brief.
 
 ---
 
+
 ## 4. Results
 
-*(filled in as the run proceeds)*
+### 4.0 The verdict
+
+**The guards survive a reboot. All eight units came back, enabled and started by systemd, and
+all three guards plus the gating proxy still hold end to end.** Measured on `cfv-191`, on the
+published v1.4.5, across a Windows restart proved by its own `LastBootUpTime`.
+
+| Stage | Verdict | Rows |
+|---|---|---|
+| Install (published v1.4.5, `/VERYSILENT`) | **PASS** | 4 PASS |
+| Pre-reboot census + guards | **PASS** | 16 PASS, 3 INFO |
+| `wsl --shutdown` restart cycle | **PASS** | 19 PASS, 2 INFO |
+| **Windows reboot** | **PASS** | **19 PASS, 2 INFO** |
+| Task 2 fault injection | **PASS** | 9 PASS |
+
+Every stage: positive controls registered and fired, preconditions declared and met, zero VOID.
+
+### 4.1 What was actually run, including what was thrown away
+
+| # | Step | Outcome |
+|---|---|---|
+| 1 | Stage files, take baseline readings | done; artefact digest-matched |
+| 2 | Install attempt 1 | **VOID (instrument)** — see 4.7 item 3. Nothing installed, no state changed |
+| 3 | Install attempt 2 | `INSTALLER_DONE=success`, 16 minutes |
+| 4 | Pre census, runs 1 and 2 | 2 FAILs, both this probe's expectations — 4.7 items 4 and 5 |
+| 5 | Pre census, run 3 | clean PASS |
+| 6 | WSL restart cycle, run 1 | 3 FAILs, all instrument — 4.7 items 6, 7, 8 |
+| 7 | WSL restart cycle, run 2 | clean PASS |
+| 8 | **`az vm restart`** | boot proved: `16:42:16` → `18:55:19` |
+| 9 | Post-reboot census + guards | clean PASS |
+| 10 | Task 2 injection | clean PASS |
+| 11 | Evidence off the box, teardown | 10 files, byte-matched; residual verified 3 times |
+
+### 4.2 The pre-reboot baseline, and why it is the load-bearing half
+
+```
+  unit                                    is-enabled   is-active  expected   ActiveEnter(us)  Result
+  clawfactory-allow-providers.timer       enabled      active     active     524990648        success
+  clawfactory-egress-refresh.service      enabled      inactive   inactive   0                success
+  clawfactory-fw.service                  enabled      inactive   inactive   0                success
+  clawfactory-proxy.service               enabled      active     active     690893287        success
+  clawfactory-quarantine-gc.timer         enabled      active     active     537374637        success
+  clawfactory-quarantine.service          enabled      active     active     536874076        success
+  clawfactory-send-gc.timer               enabled      active     active     574236153        success
+  clawfactory-send.service                enabled      active     active     573821717        success
+
+multi-user.target.wants/clawfactory-* = 5, timers.target.wants/clawfactory-* = 3, unit files = 11
+```
+
+**Those two zeros are what make the post-reboot reading unambiguous rather than merely
+suggestive.** `clawfactory-fw.service` and `clawfactory-egress-refresh.service` are enabled with
+a plain `systemctl enable`, not `enable --now`, so on this box neither had ever been started --
+the firewall was applied by `setup.ps1` invoking `clawfactory-fw-apply.sh` directly. A non-zero
+start timestamp after the restart can therefore only have been produced by systemd at boot.
+There is no other writer.
+
+### 4.3 The distro-restart cycle, and three more restarts nobody planned
+
+`wsl --shutdown` followed by letting the distro come back on its own: **19 PASS, 0 FAIL**, census
+and guards in the same `boot_id`, gateway ready 30 s after the distro came up, agent blocked 6 of
+6 against a root control of 3 of 3.
+
+And the box gave more than was asked. WSL **idle-terminates the distro between dispatches**, so
+`journalctl --list-boots` records six distro boots across the session:
+
+```
+-5 24f7e74f... 17:18:42 - 17:18:47      -2 3120bbcb... 18:27:22 - 18:49:28
+-4 b4ac9861... 17:18:56 - 17:19:07      -1 abe0a2e9... 18:49:34 - 18:51:19
+-3 6f342798... 17:19:15 - 18:27:13       0 e4c394b2... 19:49:24 - 19:53:39
+```
+
+Every boot after the install ran `clawfactory-fw.service`, ran
+`clawfactory-allow-providers.service`, and passed `clawfactory-fw-assert.sh`. **The systemd half
+of the claim is therefore repeated, not measured once.**
+
+### 4.4 THE WINDOWS REBOOT
+
+**The reboot is proved by the machine, not asserted by this document.**
+
+```
+WIN_LASTBOOT_BEFORE=2026-08-31T16:42:16   WIN_UPTIME_BEFORE_S=7906
+WIN_LASTBOOT_AFTER =2026-08-31T18:55:19   WIN_UPTIME_AFTER_S =62
+```
+
+Public IP unchanged at `20.114.24.153`; the RDP rule still present and still scoped to
+`67.164.251.99/32`; all eight evidence transcripts survived at identical byte lengths. The
+runner's last heartbeat was `18:54:59`, twenty seconds before the machine went down, and
+`query session` showed no interactive session afterwards -- auto-logon is one-shot, exactly as
+the preamble says, and the operator restarted it by hand.
+
+**The post-reboot census, verbatim:**
+
+```
+  unit                                    is-enabled   is-active  expected   ActiveEnter(us)  Result
+  clawfactory-allow-providers.timer       enabled      active     active     12595659         success
+  clawfactory-egress-refresh.service      enabled      active     active     17174036         success
+  clawfactory-fw.service                  enabled      inactive   inactive   0                success
+  clawfactory-proxy.service               enabled      active     active     12712903         success
+  clawfactory-quarantine-gc.timer         enabled      active     active     12597164         success
+  clawfactory-quarantine.service          enabled      active     active     12728837         success
+  clawfactory-send-gc.timer               enabled      active     active     12607673         success
+  clawfactory-send.service                enabled      active     active     12746907         success
+```
+
+**And the row that answers the question, verbatim:**
+
+```
+UP.POST.6  PASS  the two boot-time oneshots: did they RUN this boot, and did they succeed?
+  2 of 2 left inactive (i.e. were started) with Result=success:
+    clawfactory-egress-refresh.service  InactiveExit=15109251  ActiveEnter=17174036  Result='success'  ExecMainStatus='0'
+    clawfactory-fw.service              InactiveExit=12709461  ActiveEnter=0         Result='success'  ExecMainStatus='0'
+```
+
+Both read `0` before the restart. `clawfactory-fw.service` started **12.7 seconds** into the
+distro's boot; `clawfactory-egress-refresh.service` at **15.1 seconds**. Nothing in the run
+issues `systemctl start`.
+
+**The distro's own journal for that boot, verbatim:**
+
+```
+Aug 31 19:49:26 cfv-191 systemd[1]: Starting ClawFactory egress firewall (nftables or iptables-legacy fallback)...
+Aug 31 19:49:28 cfv-191 systemd[1]: Finished ClawFactory egress firewall (nftables or iptables-legacy fallback).
+Aug 31 19:49:30 cfv-191 clawfactory-egress-refresh.sh[409]: [egress-refresh] every host that had to be resolved was resolved; both sets are current
+Aug 31 19:49:30 cfv-191 clawfactory-egress-refresh.sh[409]: [toolchain] TOOLCHAIN_STATUS enabled=1 hosts=8 resolved=8 failed=0 retained=0 addresses=29 backend=nftables
+Aug 31 19:49:30 cfv-191 systemd[1]: Finished ClawFactory: re-resolve the Guard 3 egress sets once the network is up.
+Aug 31 19:50:01 cfv-191 clawfactory-fw-assert.sh[1016]: [fw-assert] chain shape OK (uid-scoped, all three allowlist accepts are 443-only, read-fetch and toolchain sets present with their accepts, SMTP dropped explicitly, terminal drop present)
+```
+
+Note the ordering held: the firewall replayed at 19:49:26-28, and the Guard 3 refresh ran after
+it at 19:49:30, which is what `install-read-fetch.sh`'s unit comment says the ordering exists to
+guarantee.
+
+**The distro was started by the product's own mechanism, not by the probe.** Windows came up at
+18:55:19; distro boot 0 began at **19:49:24**, when the operator logged in and the
+`ClawFactory WSL Host` scheduled task fired. The probe's first dispatch was at 19:50:0x, by which
+time all eight units had been running for thirty seconds.
+
+### 4.5 TASK 3.4 -- the guards themselves, after the restart
+
+All four end-to-end rows PASS, with their controls firing in the same run.
+
+| Row | Reading | What it proves | What it does NOT prove |
+|---|---|---|---|
+| **G1** Guard 1 | canary created under `/workspaces`, `rm` as `clawuser` → `G1_GONE_FROM_WORKSPACE=yes`, `G1_IN_STORE=1`, `G1_AGENT_CAN_LIST=no` | the `dpkg-divert` survived, the wrapper is still what the agent's shell resolves `rm` to, the broker answered, and the payload sits where uid 1000 cannot read it | the advisory half -- `/bin/rm`, `unlink`, `find -delete`, `fs.rmSync` were never covered and are not covered here |
+| **G2** Guard 2 | `{"ok":true,"pong":true}`; `{"ok":false,"code":"EPERM","error":"approve is not available on the request channel"}`; agent on `send-admin.sock` → `DENIED:EACCES` | the broker reloaded with its config and the request/admin split is still enforced at the socket, with no SMTP credential needed | a full approval round-trip, which needs the credential and would record VOID without it rather than a verdict |
+| **G3** firewall | `G3_AGENT_BLOCKED=6 of 6`, `G3_ROOT_REACHED=3 of 3`, nft table present, 4 terminal-drop lines, 66 addresses live against 46 lines in `allowed-ips.txt` | **the row the job turns on.** nft rules are kernel state, so this can only be true because `clawfactory-fw.service` came back and replayed the persisted list | that the list itself is correct -- only that it is enforced |
+| **G4** proxy | `8787` as `clawuser` → **200**; `8788` as `clawuser` → **denied**; `8788` as root → **200** | the proxy owns the client port, the private gateway is alive, and the agent's denial is the firewall rather than a dead service | anything about a real ClawChat turn |
+
+The G1 path is `/workspaces/...`, the real `quarantineRoots`. A probe pointed at `/var/tmp` or at
+the agent's home would be out of scope, where the broker correctly declares `quarantined:false`
+and the wrapper performs a real delete -- a pass for the wrong reason, which is the recorded
+Guard 4 precedent.
+
+### 4.6 TASK 2 -- the broken-input proofs
+
+Run last, on the real units, so it could not pollute the subject. The subject block was
+**extracted by marker from the shipped `resources/install-quarantine.sh`** staged onto the box
+(`sha256 dc9cae64...`, byte-identical to the repo copy) and those bytes were executed --
+10 lines, 2 `systemctl is-enabled` hits, 1 `fatal`, with the real `fatal()` definition taken from
+the same file. Injection: a **directory** at
+`/etc/systemd/system/multi-user.target.wants/clawfactory-quarantine.service`, which `systemctl
+enable` cannot replace with a symlink.
+
+| | Rigged | Result |
+|---|---|---|
+| **A. positive control** | nothing blocked | `A_PRE_ISENABLED=enabled`, shipped block `A_RC=0` |
+| **B. subject** | wants path is a directory | `B_RC=1`, message verbatim below |
+| **C. old-code control** | same fault | **`C_RC=0`, `C_OUT_LEN=0`, `C_ISENABLED_AFTER=disabled`** |
+| **D. collateral control** | same fault, different unit | `clawfactory-send.service` `D_RC=0`, `D_ISENABLED=enabled` |
+| repair | injection removed | all four of `REPAIR_U/COLL` × `enabled/active` |
+
+**C is the claim "the old code did not catch it", measured rather than asserted.** The shipped
+v1.4.5 line returned **exit 0 with zero bytes of output** while the unit sat `disabled`.
+
+**B, verbatim from the box:**
+
+```
+[quarantine] FATAL: clawfactory-quarantine.service did not enable (systemctl is-enabled said
+'disabled'). Deletes are only recoverable while the quarantine broker is running, and a unit
+that is not enabled does not come back after you restart your PC. The install would finish, the
+guard would work today, and the first restart would silently remove it. Refusing to complete.
+```
+
+**Calibrated in both directions**, as Task 2.2 requires: A proves the check passes a correctly
+enabled unit, so it is not a check that always fails; D proves the injection is targeted at one
+unit rather than breaking every enable.
+
+**Additionally, an INPUT-SHAPE SWEEP taken on the build machine** against the same extracted
+bytes with a stubbed `systemctl`. Accepts only the literal `enabled`; denies
+`enabled-runtime`, `static`, `linked`, `masked`, `disabled`, the empty string, a
+`Failed to get unit file state...` error, and a multi-line answer. `enabled-runtime` denying is
+the point rather than a side effect: runtime enablement is precisely what does not survive a
+reboot.
+
+**The two `setup.ps1` read-backs were NOT exercised against a rigged input.** They are the same
+shape and the same comparison, and both were exercised in the succeeding direction on every
+install and restart in this run, but neither has had its failure branch fired. **Recorded as
+owed, not claimed.**
+
+### 4.7 The instruments were wrong twelve times. The product was wrong zero times
+
+This is the most useful thing the run produced and it is reported at full length rather than
+summarised, because a probe that has never been wrong has usually just never been checked.
+
+**Defects that produced, or would have produced, a FALSE PRODUCT FINDING:**
+
+1. **`ActiveEnterTimestampMonotonic` cannot measure a `Type=oneshot` with no `RemainAfterExit`.**
+   Such a unit goes `inactive → activating → inactive` and never enters `active`, so the field is
+   structurally always `0`. `clawfactory-fw.service` is exactly that shape. The probe read `0`
+   and scored *"did not come back"* for a unit whose own journal recorded it starting and
+   finishing five seconds after boot, with the nft table present and uid 1000 blocked 6 of 6.
+   **This was one step from being written up as a ship-blocking finding against the egress
+   firewall** -- the `cfv-167` shape exactly. Fixed to `InactiveExitTimestampMonotonic`.
+2. **Guard checks taken inside the gateway's cold-start window.** The OpenClaw gateway needs
+   ~50 s from launch to `[gateway] ready` (18:33:24 → 18:33:53, measured). Inside it the proxy
+   answers 502 and nothing answers on 8788 -- indistinguishable from a gateway that never came
+   back. Produced a FAIL on G4 that was a pure transient. Fixed: poll on state, record the wait
+   (`GW_READY_AFTER_S`).
+3. **An expectation that contradicted the tree.** The probe asserted all eight units should read
+   `active`, on the written grounds that *"the two oneshots carry `RemainAfterExit=yes`"*.
+   `clawfactory-fw.service` has none, and both plain-enabled units had never been started.
+   One false FAIL. Fixed to a per-unit table with each unit's `file:line` beside it.
+4. **`Compare-Independent` fed two differently-worded summaries of the same fact.** It tests
+   string equality, so the row could never pass: it reported *"8 units, 0 unaccounted for"*
+   against *"8 units, 0 missing, 0 unexpected"* and called that a disagreement. **A FAIL whose
+   own evidence line said the two sets agreed.** A reviewer reading verdicts rather than evidence
+   would have carried a phantom finding into this document.
+5. **A culture-aware sort applied to one list and not the other.** `Sort-Object` orders
+   `clawfactory-quarantine.service` before `-gc.timer`; the hand-written list assumed the
+   opposite. Fixed to an ordinal sort on both sides, calibrated against that exact pair.
+
+**Defects that produced a VOID, a blind reader, or a silent no-op:**
+
+6. **A control that could never fail.** `Test-WslChannel` returns a hashtable, and a non-null
+   hashtable is truthy, so `-Met $chan` always passed. The phaselib exists to prevent exactly
+   this and it was reintroduced in the probe written to apply it. Fixed to `$chan.Ok`.
+7. **A precondition that could not hold on the box it ran on.** The Install stage asserted the
+   WSL channel, and the Install stage runs on a box with no distro. VOID, correctly, before the
+   installer launched. Fixed with `-NeedChannel`.
+8. **Census and guards taken in different distro boots, unasserted.** WSL idle-terminates the
+   distro between dispatches. Fixed: both halves stamp `/proc/sys/kernel/random/boot_id` and the
+   stage asserts they match.
+9. **`${VAR:-default}` in the input-shape stub** treats an explicitly-empty value as unset, so
+   the "empty" case silently ran as the "enabled" case and scored a false pass. Caught by the
+   sweep finding its own instrument first. Fixed to `${VAR-default}`.
+10. **A poller that returned a 16.6 KB `.out` through `az vm run-command`** blew the output
+    limit and came back **empty with `az` still exiting 0**. It showed nothing for forty minutes
+    while the `.done` barrier had existed the whole time. Had it been trusted, the conclusion
+    would have been that the install hung. Fixed: polls ask only for the barrier.
+11. **A SAS expiry built from local time and labelled `Z`.** Ten uploads returned
+    `AuthenticationFailed`, and the script printed `uploaded <file>` for every one of them,
+    because the success line sat unconditionally after the call. **That is
+    `switch-provider.ps1:349`'s defect, reproduced by this session, in this session.** Fixed to
+    UTC with per-file HTTP status and an independent blob listing.
+12. **`az.cmd` re-parsed a bracketed `--query`**, so the disk enumeration failed and the OS disk
+    was silently not deleted. Caught only because the teardown prints an **unfiltered** residual
+    rather than grepping for the VM name.
+
+**Two of these -- 10 and 12 -- were caught by rules already in the preamble.** The rest are new,
+and 1, 4 and 11 are the ones worth carrying forward.
+
+### 4.8 Observations recorded, not actioned
+
+- **WSL idle-terminates the distro** despite the `ClawFactory WSL Host` keepalive task reading
+  `Ready`. Six distro boots in one session. Not a defect of this job's subject -- with no distro
+  there is no agent to guard -- but it means "the guards are running" is only ever true while the
+  distro is up, and nothing in the product says so.
+- **The gateway's ~50 s cold start is user-visible.** For roughly the first minute after any
+  restart, `127.0.0.1:8787` answers **502**. ClawChat opened in that window fails, and nothing
+  tells the user to wait. Not measured further here.
+- **`READFETCH_STATUS hosts=0 addresses=0`** on every boot: a fresh install allowlists nothing,
+  which is the documented default, and the boot refresh correctly says so.
 
 ---
 
-## 5. Resource ledger
+## 5. TASK 4.4 -- v1.4.6, or ride v1.5?
 
-**Starting state, unfiltered, `az resource list -g clawfactory-validation -o table`, read
-2026-08-31 before anything was provisioned:**
+**Recommendation: ride v1.5. Do not cut a v1.4.6 for this.**
+
+**Nothing came back missing.** All eight units returned, both plain-enabled oneshots ran at boot,
+and all three guards plus the proxy still held. The measurement that had never been taken has now
+been taken, and it came back clean. **The current release does not make a structural claim it
+cannot support.** `SECURITY_FINDINGS.md` needs no correction, no withdrawal, and no new entry on
+this subject -- and it is worth saying plainly that the outcome could easily have gone the other
+way, because before today nobody knew.
+
+**So what did the fix buy, if the units come back anyway?** It closes the gap between *these
+units come back on a box where the enable succeeded* and *the product would tell you if an enable
+had not*. Those are different claims. The run measured the first. The read-backs address the
+second, which no measurement on a working box can ever establish, and which Task 2 shows the old
+code could not detect: **exit 0, zero bytes of output, unit `disabled`.**
+
+**Why that does not justify a release on its own:**
+
+1. **The defect it closes is invisible-until-restart and, so far, unobserved.** No install in this
+   project's history is known to have hit it. A release exists to get a fix to users who are
+   currently harmed; nobody is known to be.
+2. **Shipping it costs a full validation cycle.** `docs/VALIDATION_PREAMBLE.md` requires at least
+   one stock-image box per cycle, and this job ran one baked box, deliberately scoped. The v1.4.5
+   groundwork also leaves `#259`, `D1` and `OM-2` open on the install path, all of which touch
+   `setup.ps1` -- the file this job just edited twice. Cutting v1.4.6 now means validating those
+   edits twice: once alone, once again beside the v1.5 install-path work.
+3. **`docs/VALIDATION_PREAMBLE.md` explicitly warns against stacking unvalidated releases**, and
+   `project_v143_built_unvalidated` is the record of what that cost last time.
+
+**What riding v1.5 obliges:**
+
+- The five `.sh` read-backs have been exercised against a rigged input **and** in the succeeding
+  direction on every install in this run. The two `setup.ps1` read-backs have been exercised only
+  in the succeeding direction. **The v1.5 cycle owes the failure branch of both**, by the same
+  directory-block injection, on `clawfactory-fw.service` and `clawfactory-allow-providers.timer`.
+  Recorded in section 6 as an owed measurement.
+- The v1.5 cycle must re-run this reboot row, because `setup.ps1` will have been rewritten by
+  then and every expectation in §4.2 is derived from its current text.
+
+**If the judgement were different and a v1.4.6 were cut**, the fix is ready: seven read-backs
+across four files, all bundled, all parse-clean, all LF, with the census and the calibrated proof
+in this document. It would need a signed build, a ledger row, and one stock box.
+
+---
+
+## 6. What this job leaves owed
+
+1. **The failure branch of the two `setup.ps1` read-backs has never fired.** Same injection,
+   `clawfactory-fw.service` and `clawfactory-allow-providers.timer`. An unproven `fatal` may be a
+   no-op -- that is exactly why `interim-v141-fatalreadback.ps1` exists for the one read-back that
+   preceded these.
+2. **Four shell sites where a suppressed result is itself the claim**, from §0.4, unfixed:
+   the two `nft flush set ... || true` under a comment that says every exit after that point is
+   fail-closed; the two `nft add element ... || true` whose reported count comes from the file
+   rather than the set; and `chattr +i` on `SOUL.md`, set and never read back.
+3. **The Inno `[Code]` section** was named as a gap in the 2026-08-30 exit-code census and remains
+   one. It has its own `Exec()` result convention and deserves its own pass.
+4. **`OM-1` (the `:8787` dashboard) is untouched by this job and still stands.** Three cycles have
+   now passed it over. This run did open `127.0.0.1:8787` from inside the distro as `clawuser`,
+   which is *not* the measurement `OM-1` asks for -- that one is a browser click from the Start
+   Menu shortcut on the Windows side, under an explicit recorded suspension of hazard rule #5.
+5. **`OM-2` (reboot-and-resume) is untouched and still VOID.** This box took the import path, as
+   §3.1 said it would.
+6. **The gateway's ~50 s cold start after any restart**, during which `127.0.0.1:8787` returns
+   502 with nothing telling the user to wait. Newly observed here; not a regression, not measured
+   beyond the timings in §4.7 item 2.
+
+---
+
+## 7. Resource ledger
+
+**Starting state** is at the top of this section, unchanged: storage account, VNET, two baseline
+images, and `az vm list` empty. **No prior FAIL VMs or orphaned disks existed, so Task 0's
+deletion step was a verified no-op rather than a skipped one.**
+
+**Provisioned:** `cfv-191`, `Standard_D2s_v4`, `clawfactory-win11-baseline-v2`, non-zonal,
+`--nsg-rule NONE` with a single RDP rule added afterwards scoped to `67.164.251.99/32`. Created
+by the operator, who chose and kept the admin password; it was never generated, printed, asked
+for, or changed after provisioning, and `az vm user update` was never called.
+
+**Lifetime:** first boot `16:42:16Z`, torn down `~20:12Z`. Approximately **3 h 30 m** of one
+D2s_v4.
+
+**No licence slot to release.** ClawFactory ships free from v1.4.0 with the licence check removed,
+so the `Machine deactivated successfully` step does not apply to this release. Stated rather than
+silently skipped.
+
+**Teardown**, NIC before the public IP and NSG it references:
 
 ```
-Name                           ResourceGroup           Location    Type                               Status
------------------------------  ----------------------  ----------  ---------------------------------  ---------
-clawfactoryvalc467             clawfactory-validation  westus2     Microsoft.Storage/storageAccounts  Succeeded
-bake-vmVNET                    clawfactory-validation  westus2     Microsoft.Network/virtualNetworks  Succeeded
-clawfactory-win11-baseline     clawfactory-validation  westus2     Microsoft.Compute/images           Succeeded
-clawfactory-win11-baseline-v2  clawfactory-validation  westus2     Microsoft.Compute/images           Succeeded
+vm delete exit=0    nic delete exit=0    pip delete exit=0    nsg delete exit=0
+disk cfv-191-osdisk delete exit=0
 ```
 
-`az vm list -g clawfactory-validation` returned empty. **This is exactly the expected residual -
-the storage account, the VNET and the two baseline images, and nothing else. There were no prior
-FAIL VMs or orphaned disks to delete.** Task 0's deletion step was therefore a no-op, verified
-rather than assumed.
+**The disk was nearly left behind.** The enumerating `az disk list --query "[?starts_with(...)]"`
+was re-parsed by `cmd.exe` and failed, and the loop over its empty output deleted nothing. It was
+caught because the teardown prints an **unfiltered** resource list rather than grepping for the VM
+name, and the disk was then deleted by explicit name.
 
-*(ending state appended at teardown)*
+**Ending residual, unfiltered, read three times including once after a 30-second gap because "it
+said deleted" is not the same claim as "it is gone":**
+
+```
+clawfactoryvalc467              Microsoft.Storage/storageAccounts
+bake-vmVNET                     Microsoft.Network/virtualNetworks
+clawfactory-win11-baseline      Microsoft.Compute/images
+clawfactory-win11-baseline-v2   Microsoft.Compute/images
+```
+
+`az vm list` empty. `az disk list` empty. **Exactly the expected residual, and identical to the
+starting state.**
+
+**Evidence retained** in the `validation` container as blobs and pulled to
+`validation/diag/` on the build machine, byte-matched against what the box reported:
+`v146-install2.out.txt` (16,649), `v146-a-pre3.out.txt` (31,545), `v146-b-wslcycle.out.txt`
+(36,691), `v146-e-wsl2.out.txt` (36,913), `v146-f-post.out.txt` (36,133), `v146-h-inject.out.txt`
+(15,101), `v146-c-diag.out.txt` (3,777), `v146-d-diag2.out.txt` (14,573),
+`v146-g-postj.out.txt` (8,871), `v146-install.log` (61,597).
+
+**Credential hygiene.** No provider API key was used or read; the install ran `/PROVIDER=claude`
+with no key, and `destinationConfigured:false` in the Guard 2 ping confirms no SMTP credential was
+present. No secret, header value, or password appears in any transcript or in this document.
+
+---
+
+## 8. Close-out gate
+
+| Requirement | Status |
+|---|---|
+| Working root confirmed before starting | **DONE**, §0 header |
+| Full preamble pasted, nothing deleted | **DONE**, stated in the first output |
+| TASK 0 census from the tree, count verified | **DONE**, §0.1-§0.2 -- **eight units, not five** |
+| TASK 0.3 read-back quoted verbatim | **DONE**, §0.3 |
+| TASK 0.4 other unchecked actions in the `.sh` | **DONE**, §0.4, four named, none fixed |
+| TASK 0.5 answered at full strength | **DONE**, §0.5 -- at install time, nothing, on any surface |
+| TASK 1.1 read-back per unit | **DONE**, 5 in `.sh` + 2 in `setup.ps1` after approval |
+| TASK 1.2 stop-or-warn decided, one option, implemented | **DONE**, §1.2 -- `fatal` |
+| TASK 1.3 message in release-notes language | **DONE**, §1.3 |
+| TASK 1.4 files changed and bundling | **DONE**, §1.4 -- all three `.sh` bundled |
+| TASK 2.1 broken-input case per read-back | **DONE** for the `.sh`; **OWED** for the two `setup.ps1` sites, section 6 item 1 |
+| TASK 2.2 calibrated in both directions | **DONE**, §4.6 -- A and D |
+| TASK 3.1 one box, image stated, baseline recorded | **DONE**, §3.1 |
+| TASK 3.2 install to completion, units confirmed | **DONE**, §4.2 |
+| TASK 3.3 reboot, every unit confirmed back, verbatim | **DONE**, §4.4 |
+| TASK 3.4 guards still hold, cheapest check named | **DONE**, §4.5 |
+| TASK 3.5 report and stop if anything missing | **N/A** -- nothing was missing |
+| TASK 4.1 dispatch card via the API from PowerShell | **DONE**, section 9 |
+| TASK 4.2 `git status --short` first, per-file staging, push, no tag | **DONE**, no tag created |
+| TASK 4.3 close-out committed and printed in full | **DONE** |
+| TASK 4.4 v1.4.6 or v1.5, with reasoning | **DONE**, §6 -- ride v1.5 |
+| No release, no tag, no signing, no ledger row | **HELD** -- none produced |
+| Deallocate/delete at handoff | **DONE** -- box deleted, residual verified three times |
+
+---
+
+## 9. Dispatch
+
+Card **#320**, `status=done`, created via `POST {DISPATCH_URL}/api/agent/update` from PowerShell
+with the `x-frontier-secret` header. `python` is blocked by Windows Application Control on the
+build machine, so `dispatch_card.py` was not used. The `description` was supplied in the `create`
+call, because a card created without one can never be given one afterwards.
+
+Tags: `validation`, `v1.5`, `systemd`, `guards`.
+
+---
+
+## 10. A note on the retained transcripts
+
+The byte counts in section 7 are the **blob** sizes, which are UTF-16LE: the on-VM runner captures
+job output with PowerShell 5.1's `*>` redirection, which writes UTF-16. The copies committed under
+`validation/diag/` were converted to UTF-8 LF and are therefore about half those sizes. The
+difference is an encoding conversion, not a truncation, and it is recorded here so a future reader
+comparing the two does not read it as one.
+
+**That encoding cost a reading.** A `grep` over the UTF-16 files returned nothing at all, which is
+indistinguishable from a file that genuinely lacks the pattern. The conversion was followed by a
+calibrated re-read: a marker known to be present was found, and a marker known to be absent was
+not. The same discipline was applied before committing `v146-install.log`, which was swept for
+credentials with a planted canary and a clean control in the same invocation -- five hits, all of
+them the installer's own "no API key present" warnings, no values.
+
+`v146-install.log` is **not committed**: `*.log` is gitignored in this repository. It is retained
+as a blob in the `validation` container and on the build machine at
+`validation/diag/v146-install.log`. Stated rather than left as a silent gap in the file list.
