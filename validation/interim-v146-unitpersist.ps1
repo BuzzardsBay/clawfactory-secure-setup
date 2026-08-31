@@ -109,10 +109,62 @@ $UNITS = @(
     'clawfactory-send-gc.timer',
     'clawfactory-send.service'
 )
-# All eight are expected ENABLED and ACTIVE. The two oneshots carry
-# RemainAfterExit=yes and the two timers report active when armed, so no unit is
-# excused from the 'active' assertion; any that were would have to be named here
-# rather than quietly skipped in the check.
+
+# THE EXPECTED STATE PER UNIT, RE-DERIVED FROM THE TREE RATHER THAN ASSUMED.
+#
+# The first version of this probe asserted that all eight should read `active`,
+# on the stated grounds that "the two oneshots carry RemainAfterExit=yes". That
+# sentence is FALSE about the tree and the Pre census caught it: two rows failed
+# and neither was a product defect. The measurement being right does not make
+# the expectation right.
+#
+#   unit                                enabled with   RemainAfterExit
+#   ----------------------------------  -------------  ---------------
+#   clawfactory-allow-providers.timer   --now          n/a   setup.ps1:2798
+#   clawfactory-egress-refresh.service  plain enable   YES   install-read-fetch.sh:379 / :356
+#   clawfactory-fw.service              plain enable   NO    setup.ps1:2212 / :2199
+#   clawfactory-proxy.service           --now          n/a   install-chat-proxy.sh:87
+#   clawfactory-quarantine-gc.timer     --now          n/a   install-quarantine.sh:141
+#   clawfactory-quarantine.service      --now          n/a   install-quarantine.sh:140
+#   clawfactory-send-gc.timer           --now          n/a   install-send.sh:191
+#   clawfactory-send.service            --now          n/a   install-send.sh:190
+#
+# So BEFORE any restart the two plain-enabled units have never been started at
+# all -- the firewall was applied by setup.ps1 running clawfactory-fw-apply.sh
+# directly, not through the unit -- and both correctly read inactive with
+# ActiveEnterTimestampMonotonic = 0.
+#
+# AFTER a restart they must differ, and this is the sharpest evidence the job
+# has: a unit that read 0 before and reads non-zero after was started by systemd
+# at boot and by nothing else.
+#   egress-refresh  RemainAfterExit=yes -> stays ACTIVE
+#   fw.service      no RemainAfterExit  -> runs, exits, returns to INACTIVE.
+#                   Asserting `active` on it would manufacture a false FAIL, so
+#                   it is asserted on Result=success AND ActiveEnter > 0 AND the
+#                   nft table being present (row G3), which is the effect the
+#                   unit exists to produce.
+$EXPECT_ACTIVE_PRE = @{
+    'clawfactory-allow-providers.timer'  = 'active'
+    'clawfactory-egress-refresh.service' = 'inactive'
+    'clawfactory-fw.service'             = 'inactive'
+    'clawfactory-proxy.service'          = 'active'
+    'clawfactory-quarantine-gc.timer'    = 'active'
+    'clawfactory-quarantine.service'     = 'active'
+    'clawfactory-send-gc.timer'          = 'active'
+    'clawfactory-send.service'           = 'active'
+}
+$EXPECT_ACTIVE_POST = @{
+    'clawfactory-allow-providers.timer'  = 'active'
+    'clawfactory-egress-refresh.service' = 'active'
+    'clawfactory-fw.service'             = 'inactive'
+    'clawfactory-proxy.service'          = 'active'
+    'clawfactory-quarantine-gc.timer'    = 'active'
+    'clawfactory-quarantine.service'     = 'active'
+    'clawfactory-send-gc.timer'          = 'active'
+    'clawfactory-send.service'           = 'active'
+}
+# The units that must show they RAN at boot rather than merely being loaded.
+$ONESHOTS = @('clawfactory-egress-refresh.service', 'clawfactory-fw.service')
 
 # ---------------------------------------------------------------------------
 # CONTEXT. Asserted before anything else, in every stage.
@@ -168,7 +220,14 @@ for u in clawfactory-allow-providers.timer clawfactory-egress-refresh.service cl
   # SMALL value; one started by hand minutes later does not. This is what turns
   # "it is running" into "it came back on its own".
   ts="$(systemctl show -p ActiveEnterTimestampMonotonic --value "$u" 2>/dev/null)"
-  echo "UNIT|$u|$en|$ac|$ts"
+  # Result and ExecMainStatus are what turn "inactive" into a readable answer
+  # for a Type=oneshot with no RemainAfterExit: such a unit is inactive BOTH
+  # when it ran and succeeded and when it never ran at all, and is-active cannot
+  # tell those apart. ActiveEnterTimestampMonotonic separates them (0 = never
+  # entered active this boot) and Result says how it ended.
+  rs="$(systemctl show -p Result --value "$u" 2>/dev/null)"
+  ex="$(systemctl show -p ExecMainStatus --value "$u" 2>/dev/null)"
+  echo "UNIT|$u|$en|$ac|$ts|$rs|$ex"
 done
 echo "WANTS_MULTIUSER=$(ls -1 /etc/systemd/system/multi-user.target.wants/clawfactory-* 2>/dev/null | wc -l | tr -d ' ')"
 echo "WANTS_TIMERS=$(ls -1 /etc/systemd/system/timers.target.wants/clawfactory-* 2>/dev/null | wc -l | tr -d ' ')"
@@ -323,6 +382,12 @@ function Invoke-Controls([string]$tag) {
 }
 
 function Invoke-Guards([string]$tag) {
+    # THE TAG MUST BE UNIQUE PER RUN, not per phase. G1 asserts that exactly ONE
+    # copy of its canary reached the quarantine store, and the store is
+    # cumulative -- a second run of the same phase would find two and score a
+    # FAIL that says nothing about the product. "A second run over a box that
+    # has already been run is not the same measurement as the first."
+    $tag = "$tag-$PID"
     $body = "TAG=$tag`n" + $GUARDS
     $c = Invoke-WslFile -Tag "v146grd$tag" -User 'root' -Body $body
     foreach ($ln in @($c.Out -split "`r?`n" | Where-Object { $_ -match '=' })) { W "   GRD> $($ln.Trim())" }
@@ -342,29 +407,53 @@ function Record-Census([string]$text, [string]$ctl, [string]$phase) {
         "scratch unit files and wants entries left = $(Val $ctl 'CTL_CLEANUP_LEFT'). Must be 0, or the box under test is no longer the box that was measured."
 
     $rows = Rows $text 'UNIT'
-    $reported = @($rows | ForEach-Object { ($_ -split '\|')[1] }) | Sort-Object
-    Compare-Independent -Id "UP.$phase.LIST" -Name 'the eight units this probe holds, against the eight the box reported' `
-        -Mine ($UNITS -join ',') -Reported ($reported -join ',') `
+    $reported = @($rows | ForEach-Object { ($_ -split '\|')[1] })
+    # SET comparison, not an ordered-join comparison. The first version joined
+    # both lists after Sort-Object and failed on the Pre census because
+    # `clawfactory-quarantine-gc.timer` and `clawfactory-quarantine.service`
+    # collate differently under a culture-aware sort than the hand-written list
+    # assumed. The two lists held the SAME EIGHT NAMES. A row that fails on
+    # ordering while the sets agree is a probe defect reported as a product
+    # finding, which is worse than no row at all.
+    $missing = @($UNITS | Where-Object { $reported -notcontains $_ })
+    $extra   = @($reported | Where-Object { $UNITS -notcontains $_ })
+    Compare-Independent -Id "UP.$phase.LIST" -Name 'the eight units this probe holds, against the set the box reported' `
+        -Mine "$($UNITS.Count) units, 0 unaccounted for" `
+        -Reported "$($reported.Count) units, $($missing.Count) missing$(if ($missing.Count) { " [$($missing -join '; ')]" }), $($extra.Count) unexpected$(if ($extra.Count) { " [$($extra -join '; ')]" })" `
         -MineLabel 'the probe' -ReportedLabel 'the box' | Out-Null
 
+    $expect = if ($phase -eq 'PRE') { $EXPECT_ACTIVE_PRE } else { $EXPECT_ACTIVE_POST }
+
     W ''
-    W "  unit                                    is-enabled     is-active   ActiveEnter(monotonic us)"
+    W "  unit                                    is-enabled   is-active  expected   ActiveEnter(us)  Result"
     foreach ($r in $rows) {
         $p = $r -split '\|'
-        W ("  {0,-38}  {1,-13}  {2,-10}  {3}" -f $p[1], $p[2], $p[3], $p[4])
+        W ("  {0,-38}  {1,-11}  {2,-9}  {3,-9}  {4,-15}  {5}" -f $p[1], $p[2], $p[3], $expect[$p[1]], $p[4], $p[5])
     }
     W ''
 
     $notEnabled = @($rows | Where-Object { ($_ -split '\|')[2] -ne 'enabled' })
-    $notActive  = @($rows | Where-Object { ($_ -split '\|')[3] -ne 'active' })
+    $wrongState = @($rows | Where-Object { ($_ -split '\|')[3] -ne $expect[($_ -split '\|')[1]] })
 
     Record "UP.$phase.1" 'all eight ClawFactory units read back ENABLED' `
         $(if ($rows.Count -eq 8 -and $notEnabled.Count -eq 0) { 'PASS' } else { 'FAIL' }) `
         ("rows reported = $($rows.Count) of 8; not enabled = $($notEnabled.Count)" + $(if ($notEnabled.Count) { " [$(($notEnabled | ForEach-Object { ($_ -split '\|')[1] + '=' + ($_ -split '\|')[2] }) -join '; ')]" } else { '' }))
 
-    Record "UP.$phase.2" 'all eight ClawFactory units read back ACTIVE' `
-        $(if ($rows.Count -eq 8 -and $notActive.Count -eq 0) { 'PASS' } else { 'FAIL' }) `
-        ("not active = $($notActive.Count)" + $(if ($notActive.Count) { " [$(($notActive | ForEach-Object { ($_ -split '\|')[1] + '=' + ($_ -split '\|')[3] }) -join '; ')]" } else { '' }) + ". The two oneshots carry RemainAfterExit=yes and the two timers report active when armed, so 'active' is the correct steady state for all eight and no unit is excused here.")
+    Record "UP.$phase.2" 'every unit is in the state its own unit file says it should be in' `
+        $(if ($rows.Count -eq 8 -and $wrongState.Count -eq 0) { 'PASS' } else { 'FAIL' }) `
+        ("units not in their expected state = $($wrongState.Count)" + $(if ($wrongState.Count) { " [$(($wrongState | ForEach-Object { ($_ -split '\|')[1] + ' is ' + ($_ -split '\|')[3] + ', expected ' + $expect[($_ -split '\|')[1]] }) -join '; ')]" } else { '' }) + ". The expectation is per-unit and derived from the tree: six are enabled with --now and must be active; clawfactory-egress-refresh.service and clawfactory-fw.service are enabled WITHOUT --now, so before any restart neither has ever been started and inactive is correct. After a restart egress-refresh must be active (RemainAfterExit=yes) while fw.service correctly returns to inactive (it has none), which is why fw.service is judged on rows $phase.6 and G3 instead.")
+
+    # The oneshots: did they RUN this boot, and did they succeed? is-active
+    # cannot answer that for a unit with no RemainAfterExit -- inactive means
+    # both "ran and finished" and "never ran".
+    $oneshotRows = @($rows | Where-Object { $ONESHOTS -contains ($_ -split '\|')[1] })
+    $ranOk = @($oneshotRows | Where-Object {
+        $p = $_ -split '\|'
+        ((ToInt $p[4]) -gt 0) -and ($p[5] -eq 'success')
+    })
+    Record "UP.$phase.6" 'the two boot-time oneshots: did they RUN this boot, and did they succeed?' `
+        $(if ($phase -eq 'PRE') { 'INFO' } elseif ($ranOk.Count -eq 2) { 'PASS' } else { 'FAIL' }) `
+        ("$($ranOk.Count) of $($oneshotRows.Count) entered active with Result=success: " + (($oneshotRows | ForEach-Object { $p = $_ -split '\|'; "$($p[1]) ActiveEnter=$($p[4]) Result='$($p[5])' ExecMainStatus='$($p[6])'" }) -join '; ') + ". On the PRE reading this is INFO and both are expected to show ActiveEnter=0, because neither is enabled with --now and neither has ever been started -- which is exactly what makes the post-restart reading unambiguous: a unit that read 0 before and non-zero after was started by systemd at boot and by nothing else.")
 
     Record "UP.$phase.3" 'the wants symlinks on disk, which is what enablement IS' 'INFO' `
         "multi-user.target.wants/clawfactory-* = $(Val $text 'WANTS_MULTIUSER'), timers.target.wants/clawfactory-* = $(Val $text 'WANTS_TIMERS'), unit files present = $(Val $text 'UNITFILES_PRESENT'). is-enabled reads these; recorded separately so a disagreement between the two is visible rather than averaged away."
@@ -483,11 +572,16 @@ if ($Stage -eq 'Pre' -or $Stage -eq 'WslCycle' -or $Stage -eq 'Post') {
         # than the assertion.
         $rows = Rows $cen 'UNIT'
         $up   = ToInt (Val $cen 'UPTIME_S')
+        # BOTH ends of the window. A unit that never entered active at all reads
+        # ActiveEnter=0, and a filter that only looked for "later than 120s"
+        # would score that 0 as early and pass it. Zero is the failure this row
+        # exists to catch.
         $late = @($rows | Where-Object {
             $t = ($_ -split '\|')[4]
-            ($t -as [double]) -and ([double]$t / 1000000.0) -gt 120
+            $s = if ($t -as [double]) { [double]$t / 1000000.0 } else { -1 }
+            ($s -le 0) -or ($s -gt 120)
         })
-        Record "UP.$phase.5" 'every unit entered ACTIVE within the first two minutes of the distro coming up' `
+        Record "UP.$phase.5" 'every unit entered ACTIVE, and did so within the first two minutes of the distro coming up' `
             $(if ($rows.Count -eq 8 -and $late.Count -eq 0) { 'PASS' } else { 'FAIL' }) `
             ("distro uptime at measurement = ${up}s; units entering active later than 120s after boot = $($late.Count)" + $(if ($late.Count) { " [$(($late | ForEach-Object { ($_ -split '\|')[1] + '@' + [math]::Round(([double](($_ -split '\|')[4]))/1000000.0,1) + 's' }) -join '; ')]" } else { '' }) + ". This is what separates 'the units came back on their own' from 'the units are running because the probe started them'. Nothing in this run issues systemctl start.")
     }
