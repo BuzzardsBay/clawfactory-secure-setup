@@ -140,6 +140,17 @@ systemctl daemon-reload
 systemctl enable --now clawfactory-quarantine.service >/dev/null 2>&1 || true
 systemctl enable --now clawfactory-quarantine-gc.timer >/dev/null 2>&1 || true
 
+# READ BACK, BOTH OF THEM. `systemctl enable` is written above with `|| true`,
+# which means a unit that failed to install looks identical to one that did.
+# `enable --now` makes two claims and the socket ping below only proves the
+# second: a broker that started now but was never linked into multi-user.target
+# is gone at the next restart, and nothing on the box says so. Guard 1 is only
+# structural if it is still there after the machine comes back.
+for u in clawfactory-quarantine.service clawfactory-quarantine-gc.timer; do
+    st="$(systemctl is-enabled "$u" 2>&1 || true)"
+    [ "$st" = "enabled" ] || fatal "$u did not enable (systemctl is-enabled said '${st:-<empty>}'). Deletes are only recoverable while the quarantine broker is running, and a unit that is not enabled does not come back after you restart your PC. The install would finish, the guard would work today, and the first restart would silently remove it. Refusing to complete."
+done
+
 # --- d. prove the broker answers THE AGENT ---------------------------------
 # Probe as the agent account, not as root: the reachability that matters is the
 # one clawuser gets through the socket's 0660 root:clawuser mode. Probing as

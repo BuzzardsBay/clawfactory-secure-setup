@@ -99,3 +99,24 @@ if [ "$ok" != "1" ]; then
     exit 1
 fi
 echo "[chat-proxy] gating proxy is live on 127.0.0.1:8787 -> 127.0.0.1:$REAL_PORT"
+
+# READ BACK. `systemctl enable --now` above is written with `|| true`, which
+# means a unit that failed to install looks identical to one that did. The
+# health probe just proved the RUNNING-NOW half and cannot see the other one: a
+# proxy started now but never linked into multi-user.target is gone at the next
+# restart, and the gateway stays on the private port, so 127.0.0.1:8787 answers
+# nothing at all. That is fail-closed rather than ungated, which is the right
+# direction and still not a shippable install.
+#
+# The rollback is the SAME sequence the health-check failure above performs,
+# deliberately: it returns the box to the state it was in before this step, and
+# it is what setup.ps1's own abort message tells the user happened.
+PROXY_ENABLED="$(systemctl is-enabled clawfactory-proxy.service 2>&1 || true)"
+if [ "$PROXY_ENABLED" != "enabled" ]; then
+    echo "[chat-proxy] FATAL: clawfactory-proxy.service did not enable (systemctl is-enabled said '${PROXY_ENABLED:-<empty>}'). Every ClawChat turn is checked against your spend cap and your safety rules by this proxy, and a unit that is not enabled does not come back after you restart your PC -- chat would simply stop working, with no gate and no gateway on 127.0.0.1:8787. Rolling back and refusing to complete." >&2
+    systemctl disable --now clawfactory-proxy >/dev/null 2>&1 || true
+    rm -f "$DROPIN"
+    restart_gateway_reliably 8787 || true
+    exit 1
+fi
+echo "[chat-proxy] clawfactory-proxy.service read back as enabled; it will return after a restart"

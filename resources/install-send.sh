@@ -190,6 +190,18 @@ systemctl daemon-reload
 systemctl enable --now clawfactory-send.service >/dev/null 2>&1 || true
 systemctl enable --now clawfactory-send-gc.timer >/dev/null 2>&1 || true
 
+# READ BACK, BOTH OF THEM. `systemctl enable` is written above with `|| true`,
+# which means a unit that failed to install looks identical to one that did.
+# `enable --now` makes two claims and the socket ping below only proves the
+# second: a broker that started now but was never linked into multi-user.target
+# is gone at the next restart, and nothing on the box says so. The invariant
+# Guard 2 exists to hold -- no send path ever runs at uid 1000 -- is held by
+# this unit being present, not by it having once been started.
+for u in clawfactory-send.service clawfactory-send-gc.timer; do
+    st="$(systemctl is-enabled "$u" 2>&1 || true)"
+    [ "$st" = "enabled" ] || fatal "$u did not enable (systemctl is-enabled said '${st:-<empty>}'). Email approval is enforced by a root-owned service the agent cannot reach, and a unit that is not enabled does not come back after you restart your PC. The install would finish, approval would work today, and the first restart would silently remove it. Refusing to complete."
+done
+
 # --- f. assert the firewall shape, and refuse to finish if it is wrong ------
 /usr/local/sbin/clawfactory-fw-assert.sh || fatal "egress chain shape check failed; refusing to complete the send install"
 
