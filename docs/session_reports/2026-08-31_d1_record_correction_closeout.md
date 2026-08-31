@@ -11,9 +11,11 @@ deleted** — this job provisioned a box, so every clause applied.
 
 **§1 through §10 were written when nothing had been signed, stamped, tagged or written to the
 ledger. The operator then asked for signing, the ledger row and the tag in the same session, so
-all three were done and are recorded in §11. Nothing was published** — creating the GitHub
-Release is the operator's action. Where §1 and §8 still read as though signing were a future
-job, they are marked rather than rewritten.
+all three were done and are recorded in §11. He then published the release himself from a card,
+and §11.5 records that.** Where §1 and §8 still read as though signing were a future job, they
+are marked rather than rewritten, so the order in which things were learned stays visible.
+
+**v1.4.5 is PUBLISHED and is the Latest release.**
 
 ---
 
@@ -644,8 +646,9 @@ buttons hit the asset URL directly; any other name 404s silently.
 
 ## 9. What is owed next
 
-1. **Publish the GitHub Release** — signed, tagged and ledgered in §11; publishing is the
-   operator's action and the commands are in the card.
+1. **Confirm `clawfactory.app`'s three buttons in a browser.** The redirect was verified to name
+   `v1.4.5` (§11.5), which is the load-bearing check, but nobody has clicked the live buttons on
+   the site since this release. Cheap, and the site is the surface a new user meets first.
 2. **`build_release.ps1` recompiles at signing time, so no release can ever ship the exact bytes
    that were validated** — §3.4's correction and §11.2. Either add a path that stamps and signs
    an existing validated artifact, or document the release contract explicitly as *"same commit,
@@ -695,8 +698,9 @@ state is unchanged apart from `Secure-Setup`; nothing in Studio was touched.
 
 ## 11. Signing, the ledger row and the tag
 
-Done in this same session, after §1 through §10 were written. **Nothing was published.** Creating
-the GitHub Release is the operator's action.
+Done in this same session, after §1 through §10 were written. Signing, the ledger row and the tag
+were mine; **creating the GitHub Release was the operator's action**, taken from a card, and
+recorded in §11.5.
 
 ### 11.1 What was signed
 
@@ -755,8 +759,44 @@ Committed at `588672a`.
 `v1.4.5`, annotated, at `588672a`, **the tip of `main`** — per v1.4.4 practice, not at the build
 commit. Not yet pushed at the time §11 was written; see the operator card.
 
-### 11.5 What was NOT done
+### 11.5 Published
 
-**No GitHub Release was created and no asset was uploaded.** That is the operator's action, and
-the commands are in the card. The asset must be named exactly `ClawFactory-Secure-Setup.exe` or
-the three download buttons on `clawfactory.app` return 404.
+The operator ran the card and **v1.4.5 is published**, at
+`https://github.com/BuzzardsBay/clawfactory-secure-setup/releases/tag/v1.4.5`, 2026-08-31
+16:05:53 UTC. Verified independently afterwards rather than taken from the card's own output:
+
+```
+tag=v1.4.5  draft=false  prerelease=false  commitish=main   Latest=yes
+asset=ClawFactory-Secure-Setup.exe  size=440619864  state=uploaded
+local signed artifact                size=440619864          (exact match)
+```
+
+**The check that actually mattered was the redirect, not the status code.** `curl` returning
+`200` on `/releases/latest/download/ClawFactory-Secure-Setup.exe` does **not** prove the site is
+serving the new build, because v1.4.4 carries an asset of exactly the same name and would also
+answer `200`. The redirect chain was read instead:
+
+```
+Location: https://github.com/BuzzardsBay/clawfactory-secure-setup/releases/download/v1.4.5/ClawFactory-Secure-Setup.exe
+```
+
+It names **v1.4.5**, so the three download buttons on `clawfactory.app` now serve this build.
+There is no CDN staleness risk on the download itself: the buttons hit the GitHub URL directly
+rather than a copy served from the site.
+
+**This is the first release of this product whose predecessor was published only two days
+earlier**, and the second GitHub Release the repository has ever had.
+
+### 11.6 The release notes
+
+`docs/RELEASE_NOTES_v1.4.5.md` is the tracked canonical version.
+`Output\v1.4.5-release-body.md` is the paste-ready body that was uploaded; `Output\` is
+gitignored, so that copy is on disk only, matching the v1.4.4 precedent.
+
+Both state, in the release's own words: what v1.4.4 did to the first external install and that it
+took about 41 minutes to reach an unusable error; that D2, D4 and D5 deliver the fix and are
+independent of one another; that D1 ships inert, why, how it came to be built on a value Windows
+never emits, and that rewriting it is v1.5; that removing the WSL1 fallback is a security fix
+because eleven controls are systemd units and WSL1 has no systemd; and which three of v1.4.4's
+disclosures still stand. Both are pure ASCII with no em dashes, checked with a scan calibrated
+against this close-out, which has 79.
