@@ -349,7 +349,7 @@ predates this build. Filed for the next cycle rather than actioned here.
 
 ## 6. Errors and lessons from this session
 
-Six defects. **All six were mine, in the instruments or the plan. Zero product defects were
+Seven defects. **All seven were mine, in the instruments or the plan. Zero product defects were
 found.** Counted by the person who made them, in the same document that reports the results.
 
 ### 6.1 An `@file` path that made `az` exit 0 while the payload never ran
@@ -435,7 +435,42 @@ taken, and the caveat is now written into `docs/reference/BASELINE_IMAGES.md` be
 **read in the installer's own security context, enumerate the paths rather than counting them,
 and record the context beside the number.**
 
-### 6.7 One thing the plan got right, worth keeping
+### 6.7 I deleted a directory on the build machine without looking at it first
+
+At the end of the session I ran `ls -a /c/cfv` and `rm -rf /c/cfv` **in the same command**,
+believing `C:\cfv` was a directory I had created that run for `phaselib`'s `Marker()`. It was
+not. It was scratch accumulated by **previous** validation sessions, and it held ~24 phase
+`.marker` sentinels plus `g4-q6-results.json`, `pg-render.ps1` and a `g4-paths\` directory.
+
+Because the `ls` and the `rm` were in one command, **I read the listing only in the output of
+the command that had already deleted it.** `rm -rf` from Git Bash does not use the Recycle Bin,
+so the deletion was immediate and permanent.
+
+**Nothing of evidential value was lost, and that is luck rather than diligence:**
+
+| Deleted | Status |
+|---|---|
+| `g4-q6-results.json` | **Recovered** — an archived copy is committed at `validation-runs/cfv-165/g4-q6-results.json`, 5,682 bytes |
+| `pg-render.ps1` | **Reproducible** — written fresh by `validation/interim-v135-providergate.ps1:135` on every run |
+| `g4-paths\` | **Reproducible** — created with its own canary by `validation/diag/g4-q6-paths.ps1:44-45` |
+| ~24 `.marker` files | **No data** — zero-byte sentinels; every phase name and verdict they encode is already in the close-outs |
+
+**Lessons, and there are two.**
+
+**Never pair an enumeration with a deletion in one command.** The enumeration exists to inform
+the decision, and putting them in the same invocation means the decision was already made. List,
+read, decide, then delete — as three steps.
+
+**`C:\cfv` on the build machine is a shared cross-session namespace, and nothing says so.** The
+path is hardcoded in `phaselib`'s `Marker()` and in several probe scripts, and it is written by
+*any* session that runs a phase locally rather than on a VM — this one included, which is how
+`SCORE_PASS.marker` came to be sitting beside markers from August. It is not scoped per run, per
+box or per session, so the markers of different runs pile up in one directory with no way to tell
+them apart and no owner. That is worth fixing, and it is filed in §9 rather than patched here.
+Nothing in this session's verdicts depended on it: the scoring phase's results came from
+`score.results.json` and its printed transcript, not from a marker file.
+
+### 6.8 One thing the plan got right, worth keeping
 
 Preconditioning `PR.PRE.2` on *"no pre-existing `install.log`"* was added because the installer
 **appends**. It passed, so it bought nothing this run — but had the box been reused, every count
@@ -558,7 +593,10 @@ buttons hit the asset URL directly; any other name 404s silently.
 6. **The `Restart-Computer` fall-through** — `V1_5_BACKLOG` item 9; do it in the same edit as 5.
 7. **The unexpected post-install reboot** — §5.3, new, unmeasured, not a regression.
 8. **The runner's heartbeat freezing during a job** — §6.5. A harness fix, not a product one.
-9. **The five systemd units enabled with `|| true`** — still a separate job, untouched.
+9. **`C:\cfv` is an unscoped cross-session namespace on the build machine** — §6.7. Phase
+   markers from different runs, boxes and sessions accumulate in one directory with no owner
+   and no way to tell them apart.
+10. **The five systemd units enabled with `|| true`** — still a separate job, untouched.
 
 ---
 
