@@ -45,7 +45,7 @@ by losing a run to it.
 Paste as a block into the prompt. Delete only clauses that provably do not apply, and say
 in the prompt which you deleted and why.
 
-```
+````
 CLOSE-OUT IS A GATE, NOT A DELIVERABLE ON REQUEST
 
 The session is not finished until the close-out exists, is committed, and has been PRINTED
@@ -159,6 +159,53 @@ az vm user update after provisioning. The operator sets it once, at provisioning
 A probe whose subject expires on a timer cannot be staged in advance and handed to a
 person. Stage it IMMEDIATELY before they act. A hand check with a ten-minute fuse expired
 before the operator reached it, twice, in one session.
+
+CARD FORMAT. THIS IS A HARD RULE, NOT A STYLE PREFERENCE
+
+Every point where the job needs the operator, the request goes in a card built to these
+rules. Analysis, reasoning and status go OUTSIDE the card. Nothing inside a card is FYI.
+
+THE SINGLE MOST IMPORTANT RULE: every command sits in its own fenced code block, alone,
+with nothing else inside that fence. Not indented. Not nested inside a larger fence. Not
+mixed with prose. The operator copies commands out of the rendered code box, and a command
+that shares a fence with instructions, or sits inside a nested fence, does not render as a
+copyable box and cannot be copied cleanly.
+
+- One command per fenced block. One fenced block per step. If two commands must run in
+  sequence, that is TWO numbered steps with TWO fences, not one fence with two lines.
+- Every command is copy-paste ready with every value already substituted. The ONLY
+  placeholder ever permitted is PUT-PASSWORD-HERE.
+- No prose, no comments and no # lines inside a fence. Explanation goes in the sentence
+  ABOVE the fence.
+- No language tag on the fence unless the content really is PowerShell or bash and the
+  rendering benefits. A bare fence is fine and is safer.
+- Every step says what success looks like, concretely, in the line AFTER the fence.
+- Failure handling goes at the END of the card, one line per step, outside any fence.
+- Send a PushNotification when a card is printed, then WAIT. Do not continue past a card.
+
+The shape, where the fenced blocks are real fences and everything else is ordinary prose:
+
+DO THIS
+
+1. Create the box. Replace PUT-PASSWORD-HERE with the password from your paper.
+
+```
+az vm create -g clawfactory-validation -n cfv-190 ...
+```
+
+You should see: a table ending with "powerState": "VM running".
+
+2. Connect to it.
+
+```
+mstsc /v:20.10.30.40
+```
+
+You should see: a Windows login prompt. Sign in as clawadmin.
+
+Then reply: box up
+
+If step 1 fails with a quota error, send me the message and stop.
 
 MEASUREMENT DISCIPLINE
 
@@ -291,7 +338,7 @@ both pushed. DO NOT TAG unless the prompt says to.
 python is blocked by Windows Application Control on the build machine, so
 dispatch_card.py will not run. Use the Dispatch API directly from PowerShell with
 x-frontier-secret.
-```
+````
 
 ### Notes on using PROMPT 15
 
@@ -477,3 +524,51 @@ one-time suspension of hazard rule #5, recorded as such in the run plan before i
 
 **If the measurement is not taken, say so in the close-out and leave this entry standing.**
 A cycle that skips it has not closed it.
+
+> **STILL OPEN after the v1.4.5 cycle, 2026-08-31.** That cycle provisioned two boxes and
+> did not take this measurement: no suspension of hazard rule #5 was recorded in its run
+> plan, so per the paragraph above the entry stands and the next cycle still owes it. Two
+> cycles have now passed it over. Recorded here rather than only in a close-out, because a
+> second silent skip is how an entry like this dies.
+
+---
+
+## OM-2. The reboot-and-resume path has never been reached on a first-run machine
+
+**Owed since 2026-08-30, from `PR.C8`, which was scored VOID with a named reason.**
+
+`Step-EnsureWsl`'s reboot-and-resume subsystem — `Invoke-WslRebootAndResume`, the
+`ClawFactory-Resume` scheduled task, the resume flag, and the `$Resume` branch that completes
+the install after the restart — **was not exercised on either box of the v1.4.5 cycle, by any
+valid route**, and no earlier cycle reached it on a machine in the first-run state.
+
+- On the stock box, the D1 gate did not fire (see `docs/FAILURE_CATALOGUE.md` 15.1) and
+  `$kernelOk` was true after `Update-WslEngine`, so `Step-EnsureWsl` took the import path:
+  reboot branch taken = 0, bundled-import = 1.
+- On the baked box, the succeeding path completed and no reboot was needed.
+
+**The claim this leaves open is stronger than "untested".** On a modern Windows 11 24H2
+machine with a working `wsl --update`, the reboot-and-resume path appears to be
+**unreachable by the normal first-run flow entirely**. If that is right, a whole subsystem —
+including a scheduled task that runs as SYSTEM at startup — ships on every release and is
+reached by nobody, which is its own finding and not a reassurance.
+
+**NAMED CONSTRUCTION REQUIREMENT.** This row cannot be taken by choosing a different image or
+a different size. It needs **a machine on which `wsl --update` cannot install the WSL engine,
+so that `wsl --status` still fails afterwards and `$kernelOk` is false.** That is a real
+scenario — an offline machine, a blocked Store/CDN route, a policy-restricted host — but it is
+**not one an Azure VM in the standard validation configuration can be put into**, which is why
+the row voided rather than failed.
+
+Candidate constructions, none yet attempted, listed so the next cycle starts from a list
+rather than from the problem:
+
+- Block the WSL engine's download route at the NSG or with a host firewall rule *before*
+  `Update-WslEngine` runs, and prove the block landed with a control in the same run.
+- A policy-restricted host: the WSL MSI install path denied by AppLocker or WDAC.
+- Any of the above, with the same box then unblocked so the `$Resume` branch can complete —
+  otherwise the row measures only the stop and not the resume, and it must measure both.
+
+**Do not let this disappear into a pass.** `PR.C8` is VOID, not PASS, and a cycle that does not
+construct the state records it VOID again with the reason, rather than dropping the row.
+
