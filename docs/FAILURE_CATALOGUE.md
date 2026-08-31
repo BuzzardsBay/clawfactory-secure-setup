@@ -1179,6 +1179,102 @@ Full record: `docs/reference/BASELINE_IMAGES.md` and
 
 ---
 
+## Class 15: a fix certified against a value its own proof supplied
+
+Every earlier class is about an instrument that measured the wrong thing, measured
+nothing, or measured in the wrong order. This one is about a proof that was **correct**
+and still certified nothing, because the input it proved the code against was manufactured
+by the proof and had never been observed coming out of the system under test.
+
+The catalogue already carries the clause that names this — practice 14, *a probe is
+calibrated against a rigged input; a run is not*. It is its own class because the clause
+failed on code written to satisfy the clause, in the same release, by the session that
+quoted it.
+
+### 15.1 The pending-reboot gate, proved against an `EnablePending` Windows never emits
+
+**Claimed.** That v1.4.5's D1 fixes the case the first external install failed in: a machine
+where `wsl --update` has enabled `VirtualMachinePlatform` and Windows needs a restart before
+it takes effect. `setup.ps1`'s comment block at `Test-WslRebootPending` asserted the gate
+catches it; `docs/V1_5_BACKLOG.md` and
+`docs/session_reports/2026-08-30_v145_install_path_fixes_closeout.md` §3.8 both described D1
+as fixing the pending-reboot case; and `validation/verify-v145-fixes.ps1` scored it
+`PASS 13 / FAIL 0`.
+
+**True.** On stock Windows 11 24H2, in that exact state, reproduced by the product's own
+route on box `cfv-186` on 2026-08-30:
+
+| Reading | Before restart | After restart |
+|---|---|---|
+| `VirtualMachinePlatform` | `Enabled` | **`Enabled`** |
+| `EnablePending`, on any of the three features | never observed | never observed |
+| `Test-WslRebootPending` | **`False`** | `False` |
+| CBS `RebootPending` | `True` | **`False`** |
+| `PendingFileRenameOperations` | `True` | **`False`** |
+
+The typed feature state is **identical on both sides of the restart**. The gate returns
+`False` in the state it was written to catch. It has never fired and cannot fire on this
+path, and the branch it guards is unreachable in any case, because `Update-WslEngine` runs
+before it and leaves `wsl --status` exiting 0.
+
+**What went wrong.** Rows `D1.1`, `D1.2` and `D1.3` of the proof harness drove
+`Test-WslRebootPending` by injecting a constructed hashtable —
+`@{VirtualMachinePlatform='EnablePending'}` — through the function's **own `$States`
+parameter**, which exists for exactly that purpose. Each row returned the expected verdict.
+Nothing was faked and nothing was sloppy: the comparison genuinely works, the negative
+controls (`D1.2`, `D1.3`) genuinely prove the gate does not always fire, and `D1.4` genuinely
+proves the gate is not a match on an English sentence.
+
+**The harness proved that the code does the right thing when handed `EnablePending`. Nobody
+asked whether Windows ever hands it that.** The one row that would have asked — `PR.C6`,
+which reads `Get-WindowsOptionalFeature` for real — needs elevation, was correctly identified
+as unrunnable in that session's shell, and was correctly deferred to the validation job. The
+defect is not the deferral. It is that between the deferral and the run, **the fix was
+described in three places as working**, in a product whose own preamble says the comments are
+the audit trail. Thirteen green rows and a deferred fourteenth read, in a close-out, exactly
+like a proven fix.
+
+**Found by.** `PR.C6`, taken on the first stock image this project has ever validated
+against. It **FAILED**, with `PR.CTL0`, `PR.CTL1` and `PR.CTL2` all firing in the same run,
+so the state was genuine rather than an artefact of the box.
+
+**Why this is not Class 10 or Class 11.** Class 10 is an instrument carrying the defect it
+audits; this instrument was clean. Class 11 is a correct probe run in the wrong order; this
+probe was never run at all, and its absence was recorded. What is new is the **substitution**:
+a proxy signal was chosen over a rejected one for a good reason — matching the English
+sentence *"Changes will not be effective until the system is rebooted"* would silently stop
+working on every non-English Windows — and the substitute was then verified against itself.
+**A rejected signal was measured against reality; the chosen one never was.** CBS
+`RebootPending` was read, logged, and refused, and it is the reading that actually changes
+across the restart.
+
+**Cost, stated plainly.** Low, and that is luck rather than design. 1250 ms on every install,
+and a false sentence in three documents and one shipped comment block. D2, D4 and D5 —
+verified against inputs the *old* code accepts, which is a different and stronger standard —
+deliver the whole user-visible fix without D1: 91 seconds to a named, actionable message,
+against the 41 minutes the first external user spent reaching a message about a Linux user
+account. Had D1 been the fix, the release would have shipped fixing nothing while reporting
+a fix.
+
+**Changed.** The comment block, `docs/V1_5_BACKLOG.md` and the build close-out's §3.8 all now
+state that the gate does not fire, name the two signals the run measured working, and keep
+the superseded claims visible rather than deleting them. The rewrite is `V1_5_BACKLOG` item 8.
+A practice is added below as rule 26.
+
+**The general form, for the next person.** When a fix reads a value out of a system and
+branches on it, the proof owes **two** separate things, and passing the first looks like
+passing both:
+
+1. *Given the value, does the branch do the right thing?* — cheap, riggable, and what a
+   harness with an injection parameter measures.
+2. *Does the system ever produce the value?* — needs the real system in the real state, and
+   is the only one of the two that can invalidate the design.
+
+An injection parameter makes (1) easy and (2) invisible. Where (2) cannot be taken yet, the
+fix is **UNPROVEN**, and every document describing it says so in those words until it is.
+
+---
+
 ## The instrument-defect record
 
 This is the most transferable thing in the project, and it is the least flattering.
@@ -1354,6 +1450,14 @@ above, and each is applied mechanically rather than remembered.
     convenient: `systemctl enable --now` makes two claims and the ping only ever tests one
     of them. Entry 13.1's D2, and the census in
     `docs/session_reports/2026-08-30_pre_v145_groundwork_closeout.md`.
+26. **A fix that reads a value and branches on it owes two proofs, and the easy one looks
+    like both.** *Given the value, does the branch behave?* is riggable through the
+    function's own injection parameter and proves only the comparison. *Does the system ever
+    produce the value?* needs the real system in the real state and is the only one that can
+    invalidate the design. Until the second is taken, the fix is **UNPROVEN** and every
+    document describing it — comment block included — says so in that word, rather than
+    describing it as working. Where a signal was rejected in favour of a substitute, note
+    that the rejected one may be the only one anybody measured. Entry 15.1.
 
 ---
 

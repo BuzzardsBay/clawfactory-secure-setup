@@ -39,6 +39,41 @@ and `$kernelOk` comes from `wsl --status`'s exit code at `923` — so **`wsl --s
 `VirtualMachinePlatform` is `EnablePending`**, which is precisely the assumption D1's design
 turned on. `cfv-183` was torn down. Full reading: the close-out's §9.
 
+> **CORRECTION, 2026-08-31, by measurement. The two paragraphs above are superseded and
+> are kept rather than deleted.**
+>
+> **Claimed** (above, and in `docs/session_reports/2026-08-30_v145_install_path_fixes_closeout.md`
+> §3.8): that D1 fixes the pending-reboot case, and that on the external machine
+> `wsl --status` exits 0 **while `VirtualMachinePlatform` is `EnablePending`**.
+>
+> **Measured**, on stock `MicrosoftWindowsDesktop:windows-11:win11-24h2-pro` (box `cfv-186`,
+> 2026-08-30), in the external-failure state reproduced by the product's own route and
+> corroborated by two controls that both fired:
+>
+> | Reading | Before restart | After restart |
+> |---|---|---|
+> | `VirtualMachinePlatform` | `Enabled` | `Enabled` |
+> | `EnablePending` anywhere | never observed | never observed |
+> | `Test-WslRebootPending` | `False` | `False` |
+> | CBS `RebootPending` | `True` | `False` |
+> | `PendingFileRenameOperations` | `True` | `False` |
+>
+> **True now.** The `EnablePending` sentence above was an **inference** from the external
+> machine's `install.log`, not a reading of that machine's feature state, and the inference
+> is wrong. `VirtualMachinePlatform` reads `Enabled` on both sides of the restart, so the
+> typed state carries no information about a pending restart and `Test-WslRebootPending`
+> returns `False` in exactly the state it was written for. **D1 does not fire, and does not
+> fix the pending-reboot case.** Independently of that, the branch it guards is unreachable:
+> `Update-WslEngine` runs before the gate and leaves `wsl --status` exiting 0.
+>
+> **v1.4.5 ships with D1 inert, deliberately.** The whole of the user-visible fix is
+> delivered by **D2, D4 and D5**, none of which depends on D1: 91 seconds to a named message
+> leading with the correct advice, against the 41 minutes the first external user spent
+> reaching a message about a Linux user account. The rewrite is item 8 below.
+>
+> Full record: `docs/session_reports/2026-08-30_v145_validation_closeout.md` §1 Residual 1,
+> §3.1 and §3.2.
+
 ### v1.4.5-A. Remove the WSL1 fallback. **Security fix, not an install fix.**
 
 **Specification only. Nothing in this session edited `setup.ps1`.**
@@ -154,9 +189,25 @@ complete tree-wide census of every WSL1 reference:
 | `resources/launcher.ps1:196` | comment explaining why the launcher probes HTTP instead of `systemctl is-active` — *"returned inactive on systemd-less WSL installs (WSL1 fallback or systemd-disabled)"* | **keep the code, keep the comment.** The HTTP probe is correct independently, and "systemd-disabled" remains reachable |
 | `resources/uninstall.ps1:420` | comment *"uses iptables on WSL1"* on the `nft delete table` line | reword; the iptables-legacy backend remains reachable on a WSL2 kernel without nftables (`setup.ps1:1681`) |
 | `validation/uninstall-teardown-extract.sh:4` | the same comment in the extracted copy | reword with it |
+| `README.md:45` | the system-requirements bullet — *"WSL2 is required and there is no WSL1 fallback: if virtualization is unavailable the installer stops with a named message rather than installing something that cannot run ClawFactory's controls"* | **already correct as shipped in v1.4.5.** Listed so the census is complete, not because it needs an edit |
+| `README.md:119` | the *"No WSL1 fallback (changed in v1.4.5)"* paragraph explaining the removal and what the installer does instead | **already correct as shipped in v1.4.5.** Same |
 
 Nothing branches on the distro version anywhere. There is no `wsl --list --verbose` parse,
 no `--set-version` read-back, and no `$variant` consumer.
+
+> **CARRIED FORWARD 2026-08-31.** The two `README.md` rows above were missing from this
+> table when it was written, and their absence was noted twice — in
+> `docs/session_reports/2026-08-30_v145_install_path_fixes_closeout.md` §10 item 4 and again
+> in `docs/session_reports/2026-08-30_v145_validation_closeout.md` §10 item 8 — without being
+> added either time. They are added here. Both were re-derived from the tree on 2026-08-31,
+> not copied from the close-outs that noticed them.
+>
+> **Nine sites, not seven.** The table's own claim to be *"the complete tree-wide census of
+> every WSL1 reference"* was false at seven rows. Neither new row needs an edit: `README.md`
+> was updated in the v1.4.5 build and both sentences describe the shipped behaviour
+> correctly. The defect was in the census, not in the file — which is the point, because a
+> census that claims completeness is read as one, and the next person to plan a WSL1 change
+> from this table would have planned it against seven of nine sites.
 
 ### v1.4.5-B. The exit-code fixes on the changed surface
 
@@ -707,6 +758,87 @@ planted and both **missed**, with the total unchanged at 65.
 
 **Do not fix any of these in the v1.4.5 build.** They are listed so that the v1.5 build has
 a work list rather than a rediscovery.
+
+### 8. Rewrite D1. It is inert as shipped in v1.4.5, and shipped saying so
+
+**Added 2026-08-31 from the v1.4.5 validation run.** Not a regression and not a v1.4.5
+blocker — the operator's decision was to ship v1.4.5 with D1 inert, because D2, D4 and D5
+carry the whole user-visible fix without it. This entry exists so the rewrite starts from
+evidence rather than from the design that produced the inert version.
+
+**What is wrong.** `Test-WslRebootPending` gates on the typed `FeatureState` of
+`VirtualMachinePlatform`, `Microsoft-Windows-Subsystem-Linux` and `HypervisorPlatform`,
+firing only on `EnablePending` / `DisablePending`. On Windows 11 24H2 that value is never
+emitted: `VirtualMachinePlatform` reads `Enabled` both before and after the restart. The
+signal is identical on both sides of the thing it is supposed to detect.
+
+**How it came to be built on an unproduced value.** The fix was proved by injecting a
+synthetic `@{VirtualMachinePlatform='EnablePending'}` hashtable through the function's own
+`$States` parameter (rows `D1.1`/`D1.2`/`D1.3` of `validation/verify-v145-fixes.ps1`). That
+proves the comparison works. It does not prove Windows ever emits that value, and the run
+that would have asked was never taken. *A probe is calibrated against a rigged input; a run
+is not.* See `docs/FAILURE_CATALOGUE.md` entry 15.1.
+
+**The two signals the run measured working.** Both were read on `cfv-186` in the reproduced
+state, with the restart as the control:
+
+1. **CBS `RebootPending`** — `HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based
+   Servicing\RebootPending` — read **`True` before** the restart and **`False` after**. D1
+   reads it, logs it, and refuses to gate on it, on the ground that it is routinely present
+   on a healthy machine after any Windows Update. That concern is real, and it argues for
+   **combining** the key with a WSL-specific condition, not for discarding it in favour of a
+   value that is never set.
+2. **`wsl --status`'s OUTPUT.** It says in plain text `WSL2 is unable to start since
+   virtualization is not enabled on this machine` **while the call exits zero**. The product
+   reads the exit code and discards the output — the same mistake D1 was written to correct,
+   committed one call later, at the `$kernelOk` assignment immediately below the gate.
+
+**A second, independent problem the rewrite has to solve.** Even with a working signal, the
+branch is unreachable on the first-run path as the file stands: `Step-EnsureWsl` calls
+`Update-WslEngine` before consulting the gate, and after that call `wsl --status` exits 0.
+Moving the gate, or gating on `Update-WslEngine`'s own captured output, is part of this item
+and not a separate one.
+
+**A non-English-prose constraint still applies.** The original reason for rejecting a match
+on *"Changes will not be effective until the system is rebooted"* was sound: an
+English-sentence gate silently stops working on every other Windows language. Signal 1 is
+language-independent. Signal 2 is not, and if it is used it must be as corroboration behind
+a language-independent condition, or via `wsl --status`'s exit code plus a structured read,
+never as the sole gate.
+
+**Scope note.** `setup.ps1:1175`'s call site and the resume-path loop guard at `setup.ps1:1121`
+are both currently unreachable for the same reason, and the `Restart-Computer` fall-through in
+item 9 below shares the code path. Do them in one edit.
+
+### 9. The fall-through after `Restart-Computer -Force`
+
+**Added 2026-08-31 from the v1.4.5 validation run.** Observed on a voided box-F attempt that
+reached the reboot branch:
+
+```
+[INFO]  Restart required: wsl --status still reports the kernel unavailable after wsl --install
+[INFO]  Scheduled Task 'ClawFactory-Resume' registered
+[INFO]  Resume flag written
+[INFO]  Silent mode: skipping restart-required dialog; rebooting now.
+[INFO]  Step 3: Writing initial /etc/wsl.conf ...
+[ERROR] Install failed: Failed to write /etc/wsl.conf
+[ERROR] Top-level handler caught: Failed to write /etc/wsl.conf
+```
+
+`Restart-Computer -Force` **initiates** a restart and returns; it does not halt the script.
+`Step-EnsureWsl` ends with `Invoke-WslRebootAndResume` and the main body is a flat sequence,
+so in the seconds before Windows terminates the process the installer runs two further steps
+against a machine with no WSL and logs a **fatal error immediately before what is meant to be
+a pause**.
+
+**Pre-existing, not a v1.4.5 regression.** Severity **low**: the resume flag and the scheduled
+task are both written *before* the fall-through, so the restart-and-resume contract is not
+broken; the damage is a misleading log entry on a path §4.1 of the validation close-out shows
+is rarely reached. But **D1 adds a second call site with the same shape** at `setup.ps1:1176`,
+and that one is mid-function, so a fall-through there would also run the `$kernelOk` test and
+could register the resume task twice. That site is currently unreachable, which is the only
+reason this is not worse — and it stops being true the moment item 8 is done. **Fix item 9 in
+the same edit as item 8, or before it.**
 
 ---
 

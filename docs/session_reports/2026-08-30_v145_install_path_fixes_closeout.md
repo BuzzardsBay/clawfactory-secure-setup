@@ -8,6 +8,14 @@ regression harness. **Nothing was signed, tagged, released, pushed as an artifac
 to `released-versions.tsv`.** No VM was provisioned; no validation run was taken; no `.sh`
 file was touched.
 
+> **CORRECTED 2026-08-31: §3.8's claim about D1 is superseded by measurement.** This document
+> describes D1 as fixing the pending-reboot case. It does not fix it, and it does not fire.
+> The correction is in place at §3.8 and the finding is
+> `docs/session_reports/2026-08-30_v145_validation_closeout.md` §1 Residual 1, §3.1 and §3.2.
+> Nothing else in this document is affected; D2, D4, D5, D6, D7, D8 and 850 all stand as
+> written, and they are what delivers the user-visible fix. The original text is kept
+> throughout rather than rewritten.
+
 ---
 
 ## 0. PROMPT 15 preamble, as applied
@@ -443,6 +451,55 @@ effective until the system is rebooted."* — captured at 256, normalised at 263
 referenced nowhere. And `PR.C1`, answered from the field rather than from a rig: the log line
 `WSL2 kernel loaded but Ubuntu missing` sits inside `if ($kernelOk)`, so **`wsl --status` exits
 0 while `VirtualMachinePlatform` is `EnablePending`**.
+
+> **CORRECTION, 2026-08-31, by measurement. Everything above in §3.8 is superseded and is
+> kept rather than deleted.**
+>
+> **Claimed above:** that `Test-WslRebootPending` gates the pending-reboot case, and — in the
+> Evidence tie — that on the external machine `wsl --status` exits 0 **while
+> `VirtualMachinePlatform` is `EnablePending`**.
+>
+> **Measured** on stock `MicrosoftWindowsDesktop:windows-11:win11-24h2-pro` (box `cfv-186`,
+> 2026-08-30), in the external-failure state reproduced by the product's own route —
+> `wsl --update`, elevated and interactive, exit 0, printing the sentence quoted above — with
+> `PR.CTL0` (`VirtualMachinePlatform = Disabled` at start), `PR.CTL1` (the enable happened) and
+> `PR.CTL2` (the restart landed) all firing in the same run:
+>
+> | Reading | Before restart | After restart |
+> |---|---|---|
+> | `VirtualMachinePlatform` | `Enabled` | `Enabled` |
+> | `EnablePending`, on any of the three features | never observed | never observed |
+> | `Test-WslRebootPending` | `False` | `False` |
+> | CBS `RebootPending` | `True` | `False` |
+> | `PendingFileRenameOperations` | `True` | `False` |
+>
+> **True now.** The Evidence tie's `EnablePending` sentence was an **inference** from the
+> external machine's `install.log` — the log proves `wsl --status` exited 0 in a state needing
+> a restart, and the rest was supplied by the design. The feature state was never read on that
+> machine. On a box put into the same state deliberately, the typed state reads `Enabled` on
+> both sides of the restart. So `Test-WslRebootPending` returns `False` in exactly the state it
+> was written to catch: **the gate does not fire, and D1 does not fix the pending-reboot case.**
+>
+> Independently of the signal, the branch is unreachable on the first-run path: `Step-EnsureWsl`
+> calls `Update-WslEngine` before the gate, and after that call `wsl --status` exits 0, so the
+> installer's own preceding step has already made the machine look healthy to the only other
+> test on the path.
+>
+> **What §4.2 below got right, and what it did not.** §4.2 correctly records that the *read* was
+> not measured and defers it to `PR.C6`. `PR.C6` was then taken, and it **FAILED**. The gap was
+> not that the assertion was undeferred; it was that the rows above it (`D1.1`/`D1.2`/`D1.3`)
+> proved the *comparison* against a synthetic `EnablePending` injected through the function's own
+> `$States` parameter, and a passing comparison against a rigged input reads exactly like a
+> working gate. *A probe is calibrated against a rigged input; a run is not.* Recorded as
+> `docs/FAILURE_CATALOGUE.md` entry 15.1.
+>
+> **The remainder of §3.8 stands.** The refusal to gate on the English sentence is still correct
+> for the reason given, and `D1.4` still proves the gate is not that sentence. What is wrong is
+> only the claim that the substituted signal works.
+>
+> **v1.4.5 ships with D1 inert, by the operator's decision**, because D2/D4/D5 deliver the whole
+> user-visible fix without it. The rewrite is `docs/V1_5_BACKLOG.md` item 8, which carries the
+> two signals this run measured working: CBS `RebootPending`, and `wsl --status`'s *output*.
 
 ---
 
