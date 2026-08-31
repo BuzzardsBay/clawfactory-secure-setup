@@ -118,6 +118,18 @@ $UNITS = @(
 # CONTEXT. Asserted before anything else, in every stage.
 # ---------------------------------------------------------------------------
 function Assert-Context {
+    <# -NeedChannel is NOT a convenience switch. The Install stage runs on a box
+       with NO DISTRO -- neither baseline image carries one, and the installer is
+       what imports it -- so \\wsl$\Ubuntu does not exist and the channel
+       self-test cannot pass there. Measured, not assumed: the first attempt at
+       this run asserted the channel in the Install stage and VOIDed with
+       "The specified network name is no longer available" before the installer
+       was launched. A precondition that cannot hold on the box it runs on is a
+       broken instrument, and the runner correctly refused to report anything
+       through it rather than installing and calling the result a product
+       verdict. The channel is required by every stage that USES it, and by no
+       other. #>
+    param([switch]$NeedChannel)
     $id   = [Security.Principal.WindowsIdentity]::GetCurrent()
     $prin = New-Object Security.Principal.WindowsPrincipal($id)
     $elev = $prin.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -127,6 +139,7 @@ function Assert-Context {
         -Met ($elev -and (-not $isSystem) -and [Environment]::UserInteractive) `
         -Reason "wsl.exe refuses NT AUTHORITY\SYSTEM by name, so a WSL measurement taken from run-command reads -1 from every wsl call and scores a false product FAIL. user=$($id.Name), elevated=$elev, interactive=$([Environment]::UserInteractive)"
     if (-not $ok) { return $false }
+    if (-not $NeedChannel) { return $true }
     # The channel itself, subject and control in one run, before any measurement.
     # NOTE .Ok. Test-WslChannel returns a HASHTABLE, and a non-null hashtable is
     # truthy, so `-Met $chan` would be a control that can never fail -- which is
@@ -433,7 +446,7 @@ if ($Stage -eq 'Install') {
 
 # ===========================================================================
 if ($Stage -eq 'Pre' -or $Stage -eq 'WslCycle' -or $Stage -eq 'Post') {
-    if (-not (Assert-Context)) { Complete-Phase -ResultsJson $ResultsJson -MarkerPrefix 'UP'; Finish 4 }
+    if (-not (Assert-Context -NeedChannel)) { Complete-Phase -ResultsJson $ResultsJson -MarkerPrefix 'UP'; Finish 4 }
 
     if ($Stage -eq 'WslCycle') {
         Section '0. Shut the distro down, then let it come back on its own'
@@ -485,7 +498,7 @@ if ($Stage -eq 'Pre' -or $Stage -eq 'WslCycle' -or $Stage -eq 'Post') {
 
 # ===========================================================================
 if ($Stage -eq 'Inject') {
-    if (-not (Assert-Context)) { Complete-Phase -ResultsJson $ResultsJson -MarkerPrefix 'UP'; Finish 4 }
+    if (-not (Assert-Context -NeedChannel)) { Complete-Phase -ResultsJson $ResultsJson -MarkerPrefix 'UP'; Finish 4 }
 
     Section '1. TASK 2 -- the new read-back, against a unit that did not enable'
 
