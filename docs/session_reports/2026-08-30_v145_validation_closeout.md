@@ -325,17 +325,29 @@ rather than reused, because *a second run over a box that has already been run i
 measurement as the first*. VM, NIC, public IP, NSG and OS disk swept explicitly, NIC first.
 Residual re-checked with an unfiltered list and confirmed back to the four resources above.
 
-**Current state: both live boxes DEALLOCATED**, verified `VM deallocated`.
+**Final state: TORN DOWN.** `cfv-186` and `cfv-187` were deallocated at the handoff, then deleted
+in full along with `cfv-186-nic` / `cfv-187-nic`, `cfv-186-pip` / `cfv-187-pip`, `cfv-shared-nsg`
+and both OS disks. NIC before public IP and NSG, because it references them. Every `az` call
+checked; all exit 0.
+
+**Closing residual, unfiltered — exactly the four expected resources:**
 
 ```
-cfv-186   VM deallocated      (box E, stock)
-cfv-187   VM deallocated      (box F, baked)
+clawfactoryvalc467              Microsoft.Storage/storageAccounts
+bake-vmVNET                     Microsoft.Network/virtualNetworks
+clawfactory-win11-baseline      Microsoft.Compute/images
+clawfactory-win11-baseline-v2   Microsoft.Compute/images
 ```
 
-Still allocated and awaiting your teardown decision: `cfv-186`, `cfv-187`, their OS disks,
-`cfv-186-nic` / `cfv-187-nic`, `cfv-186-pip` / `cfv-187-pip` (static), `cfv-shared-nsg`.
-Teardown command is in the handoff card. Evidence transcripts are in the validation blob container
-and locally in the session scratchpad; nothing needed from the boxes remains.
+**"It said deleted" is not "it is gone" — and this run caught one.** On the first post-teardown
+check, `cfv-187_disk1_589415d5…` was **still listed by `az resource list`** while `az disk list`
+already returned empty. A re-check moments later showed it gone from both. **Recorded as a
+propagation race, not a failed delete**, which is the distinction the preamble requires be written
+down rather than assumed.
+
+Evidence transcripts (`e01`/`e02`/`e03`/`f01` job output, phase results JSON, and box F's full
+`install.log`) are retained in the `validation` blob container and locally in the session
+scratchpad. Nothing needed from the boxes remains.
 
 **RDP** was scoped to `67.164.251.99/32` on a single shared NSG for the whole run. Never
 `0.0.0.0/0`; both VMs were created with `--nsg-rule NONE` and the scoped rule attached before any
