@@ -313,6 +313,69 @@ function Test-WslRebootPending {
     # constructed pending state on a machine that is not in one; when omitted the
     # real read happens here.
     #
+    # ===================================================================
+    # SUPERSEDED 2026-08-31 BY MEASUREMENT: THIS GATE DOES NOT FIRE.
+    # The claim above and at the call site below is left in place rather
+    # than deleted, because an audit trail that quietly rewrites itself is
+    # worth less than one that shows the change.
+    # ===================================================================
+    #
+    # CLAIMED: that reading the typed FeatureState detects the pending-reboot
+    # state the first external install failed in, and that this gate stops the
+    # install in it.
+    #
+    # MEASURED, on stock Windows 11 24H2 (box cfv-186, 2026-08-30). The
+    # external-failure state was reproduced by the product's own route --
+    # wsl --update, elevated and interactive, exit 0, printing verbatim
+    # "Installing Windows optional component: VirtualMachinePlatform | The
+    # requested operation is successful. Changes will not be effective until
+    # the system is rebooted." Both controls fired, so the state was genuine:
+    #
+    #     VirtualMachinePlatform, BEFORE the restart : Enabled
+    #     VirtualMachinePlatform, AFTER  the restart : Enabled
+    #     EnablePending                              : NEVER OBSERVED, at any point
+    #     Test-WslRebootPending                      : False
+    #
+    # TRUE NOW: the typed feature state reads Enabled on both sides of the
+    # restart, so it carries no information about whether a restart is pending,
+    # and this function returns False in the exact state it was written to
+    # catch. The gate does not fire on the first-run path.
+    #
+    # And it would not matter if it did. Step-EnsureWsl calls Update-WslEngine
+    # (wsl --update) BEFORE reaching the gate, and after that call wsl --status
+    # exits 0, so $kernelOk is true. The installer's own preceding step has
+    # already made the machine look healthy to the only other test on the path.
+    # The branch this gate guards is made unreachable by Update-WslEngine
+    # running first. Full record:
+    # docs/session_reports/2026-08-30_v145_validation_closeout.md, 3.1 and 3.2.
+    #
+    # HOW THIS CAME TO BE BELIEVED. The fix was proven by injecting a synthetic
+    # @{VirtualMachinePlatform='EnablePending'} hashtable through the $States
+    # parameter below. That proves the comparison works. It does not prove that
+    # Windows ever emits that value, and the run that would have asked was never
+    # taken. A probe is calibrated against a rigged input; a run is not.
+    #
+    # TWO SIGNALS THE SAME RUN MEASURED WORKING, so that the v1.5 rewrite starts
+    # from evidence rather than from design:
+    #
+    #   1. CBS RebootPending -- HKLM\...\Component Based Servicing\RebootPending
+    #      -- read True before the restart and False after. It is read and logged
+    #      below and is not allowed to gate. The reasoning in the next paragraph
+    #      for refusing it stands, but it argues for COMBINING it with a
+    #      WSL-specific condition, not for discarding it in favour of a value
+    #      that is never set.
+    #
+    #   2. wsl --status's OUTPUT. It says in plain text "WSL2 is unable to start
+    #      since virtualization is not enabled on this machine" while the call
+    #      EXITS ZERO. The product reads the exit code and discards the output,
+    #      which is the same mistake D1 was written to correct, committed one
+    #      call later.
+    #
+    # The rewrite is v1.5 work, not v1.4.5's. v1.4.5 ships this function inert
+    # and says so: D2, D4 and D5 deliver the whole user-visible fix and none of
+    # them depends on D1.
+    # ===================================================================
+    #
     # WHAT IS DELIBERATELY *NOT* PART OF THE CONDITION. The design this came from
     # proposed HKLM\...\Component Based Servicing\RebootPending and
     # ...\WindowsUpdate\Auto Update\RebootRequired as a belt-and-braces second
@@ -1118,6 +1181,13 @@ function Step-EnsureWsl {
         # v1.4.5 (D1), the loop guard. On the resume path we STOP; we never reboot a
         # second time. No counter is needed for that: this branch is reachable only
         # from a restart we ourselves scheduled, so $Resume IS the count.
+        #
+        # SUPERSEDED 2026-08-31: unreachable in practice, for two reasons at
+        # once. Test-WslRebootPending cannot return True on Windows 11 24H2
+        # (see the block at its definition), and the restart this branch is
+        # meant to follow is one only that same gate can schedule. Left in
+        # place because it costs nothing and is correct if D1 is rewritten in
+        # v1.5; recorded here so nobody reads it as a live loop guard.
         if (Test-WslRebootPending) {
             throw ("Windows still reports that a restart is pending after restarting. Please restart this " +
                    "computer manually and run the ClawFactory installer again. If this repeats, the details " +
@@ -1172,6 +1242,20 @@ function Step-EnsureWsl {
     # Placed AFTER Test-WslFunctional rather than before it, deliberately: if WSL
     # already works, a pending feature state is not a reason to restart someone's
     # computer.
+    #
+    # SUPERSEDED 2026-08-31 BY MEASUREMENT. "This is the branch the first
+    # external install took" is FALSE. Measured on stock Windows 11 24H2
+    # (cfv-186, 2026-08-30) in that same reproduced state: Test-WslRebootPending
+    # returns False, so this branch is not taken -- not on the external machine,
+    # not on any first-run machine. VirtualMachinePlatform reads Enabled both
+    # before and after the restart and EnablePending was never observed. The
+    # narrative above about what wsl --update printed and what happened next is
+    # accurate and is retained; only the sentence claiming this gate catches it
+    # is wrong. Independently, Update-WslEngine runs above and leaves
+    # wsl --status exiting 0, which makes this branch unreachable regardless of
+    # what the gate returns. See the block at Test-WslRebootPending's definition
+    # and docs/session_reports/2026-08-30_v145_validation_closeout.md 3.1/3.2.
+    # The user-visible fix on this path is delivered by D2, D4 and D5.
     if (Test-WslRebootPending) {
         Invoke-WslRebootAndResume `
             -Reason 'a Windows feature WSL2 needs is in a pending state and cannot take effect until restart' `
