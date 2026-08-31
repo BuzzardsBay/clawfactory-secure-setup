@@ -932,7 +932,7 @@ present. No secret, header value, or password appears in any transcript or in th
 | TASK 4.1 dispatch card via the API from PowerShell | **DONE**, section 9 |
 | TASK 4.2 `git status --short` first, per-file staging, push, no tag | **DONE**, no tag created |
 | TASK 4.3 close-out committed and printed in full | **DONE** |
-| TASK 4.4 v1.4.6 or v1.5, with reasoning | **DONE**, §6 -- ride v1.5 |
+| TASK 4.4 v1.4.6 or v1.5, with reasoning | **DONE**, §5 -- ride v1.5 |
 | No release, no tag, no signing, no ledger row | **HELD** -- none produced |
 | Deallocate/delete at handoff | **DONE** -- box deleted, residual verified three times |
 
