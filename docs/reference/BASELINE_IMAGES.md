@@ -93,6 +93,22 @@ capture.
    `C:\ProgramData\ClawFactory` and the public desktop `.lnk` are the installer's three
    principal write targets, and a real user's machine has none of them excluded. **Whether
    they survived is unknown**: never read back, on any box, in any run.
+
+   > **CORRECTED 2026-08-31 by measurement on `cfv-187`, a box provisioned from
+   > `clawfactory-win11-baseline-v2`. Item 3 above is FALSE on a provisioned box.**
+   > `wuauserv` reads **`Running` / `Manual`**. The bake disabled it; the
+   > generalize/specialize cycle **restored it**. So the claim that
+   > `HKLM:\...\WindowsUpdate\Auto Update\RebootRequired` cannot be set by the update
+   > service on these boxes does not hold, and any reasoning that rested on it — including
+   > the reading of which of D1's two secondary signals were reachable on this fleet — is
+   > unsupported. The item is kept above rather than deleted. **What the boxes still cannot
+   > measure is item 2's pending-reboot state, and that is unaffected by this correction.**
+
+   > **CORRECTED 2026-08-31 by measurement on `cfv-187`. Item 4's "whether they survived is
+   > unknown" is now answered: THEY SURVIVED.** All three `Add-MpPreference` exclusions are
+   > present on a box provisioned from `-v2` today — `C:\Program Files\ClawFactory`,
+   > `C:\ProgramData\ClawFactory`, and `C:\Users\Public\Desktop\ClawFactory.lnk`. The
+   > consequence is larger than the correction and is recorded as an open measurement in §3.
 5. **Anything that depends on the Store appx surface**, which the pre-sysprep cleanup
    strips wholesale.
 
@@ -153,6 +169,14 @@ Neither image can ever be a Windows machine that has never had WSL. Both have bo
 features `Enabled` and both have taken the reboot that follows. `-v2` additionally has the
 engine.
 
+> **CONFIRMED 2026-08-31 by direct measurement, not inference.** `VirtualMachinePlatform`
+> reads **`Enabled`** on a box provisioned from `clawfactory-win11-baseline-v2` **today**
+> (`cfv-187`, 2026-08-30). The claim above no longer rests only on the June 2026 reading of
+> `cfv-133` and the May bake script's own `RESULT:` line. And the matching negative was taken
+> in the same run: `VirtualMachinePlatform` reads **`Disabled`** on a stock
+> `MicrosoftWindowsDesktop:windows-11:win11-24h2-pro` box (`cfv-186`) — `PR.CTL0`, the first
+> time that control has fired on this fleet since 2026-05-06.
+
 The regression rig written on 2026-08-30 —
 `validation/interim-v145-pendingreboot.ps1` — is built on this fact and refuses to run
 against a baked image: its `PR.CTL0` row asserts `VirtualMachinePlatform` reads `Disabled`
@@ -167,6 +191,54 @@ at start, and voids the run if it does not. It specifies
 - whether `VirtualMachinePlatform` reads `Enabled` on a box provisioned from either image
   **today**. The claim rests on one measurement on `cfv-133` in June 2026 and on the bake
   script's own `RESULT:` line in May. Both are strong; neither is current.
+
+**Two of the three above were settled on 2026-08-30 and one was strengthened; the list is
+kept so the method is visible.** Read back on `cfv-187` before the installer was copied,
+exactly as the paragraph below suggests: the three Defender exclusions **survived**;
+`wuauserv` is **`Running` / `Manual`**, not disabled; and `VirtualMachinePlatform` reads
+**`Enabled`** on a box provisioned today. See the corrections in §1 and §2.
+
+**And one open measurement the file did not ask for, found by the same dispatch. It is the
+same class as the WSL drift above and is recorded here for that reason.**
+
+**OM-B1. Nothing has ever measured what Windows Defender does to a real ClawFactory install.**
+
+The baked fleet carries three Defender exclusions, added by the 2026-05-06 bake and confirmed
+on 2026-08-30 to have survived sysprep:
+
+```
+C:\Program Files\ClawFactory
+C:\ProgramData\ClawFactory
+C:\Users\Public\Desktop\ClawFactory.lnk
+```
+
+Those are the installer's three principal write targets: its program directory, its data and
+log directory, and the desktop shortcut it creates. **A stock box has none.** Measured
+directly on `cfv-186` in the same run: zero exclusions.
+
+So **every validation this project has run since 2026-05-06 — four months, and every box on
+both images — has installed with antivirus told in advance to ignore exactly the paths the
+installer writes to.** No run has ever observed Defender's real-time scanning, its
+reputation checks, or its behavioural blocking act on this product, and no run could have.
+A real user's machine has all of them.
+
+This is not a claim that Defender breaks the install. It is the statement that **nobody
+knows**, that nothing in the transcripts of four months distinguishes "Defender is fine with
+this" from "Defender was never asked", and that the boxes went on passing while the question
+was gone. That is entry 14.1's mechanism, on a different subject, found the same day.
+
+**What it would need.** A stock box, no exclusions, Defender left exactly as Windows ships
+it, and a full install run to completion — with, at minimum, `Get-MpComputerStatus` and the
+`Microsoft-Windows-Windows Defender/Operational` event log read after the install, and the
+elapsed install time compared against the excluded fleet's. It is one box, and it is the
+only measurement here that cannot be taken on a baked image at all. **Take it before the
+next release that changes what the installer writes**, and note that the bundled rootfs
+tarball is ~258 MB of compressed archive being unpacked into a write target, which is the
+shape of a workload real-time scanning is most likely to slow.
+
+**Not a v1.4.5 blocker**, and recorded rather than actioned here: v1.4.5 changes no write
+target and no installed path. It is owed by the next full validation cycle.
+
 
 The first box of the next cycle can settle all three in one `az vm run-command` before the
 installer is copied, and should.
