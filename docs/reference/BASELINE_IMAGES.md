@@ -240,6 +240,16 @@ shape of a workload real-time scanning is most likely to slow.
 target and no installed path. It is owed by the next full validation cycle.
 
 
+> **AND THE INSTRUMENT FOR IT IS ALREADY IN DOUBT, 2026-08-31.** On `cfv-190`, a second
+> stock box, `(Get-MpPreference).ExclusionPath` was read twice within two minutes and gave
+> **two different answers**: **0** when read as SYSTEM through `az vm run-command`, and **1**
+> when read as `clawadmin` in the elevated interactive session. Neither read is known to be
+> the right one, and the box has been torn down, so this cannot now be resolved. It does not
+> change the finding — `cfv-186` read zero exclusions against a baked fleet's three — but it
+> does change how the measurement above must be taken: **read `Get-MpPreference` in the same
+> security context the installer runs in, enumerate the paths rather than counting them, and
+> record the context beside the number.** A count without its context is not a measurement.
+
 The first box of the next cycle can settle all three in one `az vm run-command` before the
 installer is copied, and should.
 
