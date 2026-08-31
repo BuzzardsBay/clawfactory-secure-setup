@@ -128,9 +128,13 @@ function Assert-Context {
         -Reason "wsl.exe refuses NT AUTHORITY\SYSTEM by name, so a WSL measurement taken from run-command reads -1 from every wsl call and scores a false product FAIL. user=$($id.Name), elevated=$elev, interactive=$([Environment]::UserInteractive)"
     if (-not $ok) { return $false }
     # The channel itself, subject and control in one run, before any measurement.
+    # NOTE .Ok. Test-WslChannel returns a HASHTABLE, and a non-null hashtable is
+    # truthy, so `-Met $chan` would be a control that can never fail -- which is
+    # the exact defect the whole phaselib exists to prevent.
     $chan = Test-WslChannel
+    W "channel self-test: $(($chan.Detail -split "`r?`n" | Where-Object { $_ -match '=' }) -join '  ')"
     return (Require-Precondition -Id "UP.CHAN.$Stage" -Name 'the WSL file channel discriminates pass from fail' `
-        -Met $chan `
+        -Met $chan.Ok `
         -Reason 'an inline nested wsl -- bash -c channel has fabricated passes on this project before: dropped echo lines, a zero exit code for a command that had just failed, and an empty variable that turned grep -q into a match-everything. The channel self-test runs a subject that must succeed and a control that must fail.')
 }
 
