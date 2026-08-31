@@ -6,9 +6,14 @@
 **PROMPT 15 preamble:** pasted from `docs/VALIDATION_PREAMBLE.md` in full. **No clauses were
 deleted** — this job provisioned a box, so every clause applied.
 
-**Nothing was signed, stamped, tagged or released. No row was written to
-`released-versions.tsv`. No code behaviour changed.** The only change to a shipped file is 84
-added comment lines in `setup.ps1`, proved comment-only mechanically.
+**No code behaviour changed.** The only change to a shipped file is 84 added comment lines in
+`setup.ps1`, proved comment-only mechanically.
+
+**§1 through §10 were written when nothing had been signed, stamped, tagged or written to the
+ledger. The operator then asked for signing, the ledger row and the tag in the same session, so
+all three were done and are recorded in §11. Nothing was published** — creating the GitHub
+Release is the operator's action. Where §1 and §8 still read as though signing were a future
+job, they are marked rather than rewritten.
 
 ---
 
@@ -30,8 +35,14 @@ compiled twice on the same day is byte-identical; the same input compiled on 202
 *"the compile is deterministic (measured 2026-08-05)"* — true within a day, false across days.
 Because `build_release.ps1` always recompiles, a signing job run on a later day than its
 validation ships bytes that were never validated. **The operator's decision, taken during this
-session: the signing job runs today.** That makes validated bytes equal shipped bytes without
-any code change.
+session: the signing job runs today.**
+
+> **That last sentence was wrong, and the signing build in the same session proved it.** Running
+> today did **not** reproduce the validated bytes. The compile embeds build-time metadata, so
+> `build_release.ps1` — which always recompiles — can **never** reproduce a previously validated
+> artifact. See the superseding block in §3.4 and the signing record in §11. What the release
+> rests on is *same commit, same gates, and a measured 2,592-byte build-metadata difference*,
+> not byte identity.
 
 **A bonus the re-take produced that was not asked for.** The whole D1 finding was reproduced
 independently on a second box, *by the shipped product's own logging*, and the log is quoted
@@ -211,6 +222,54 @@ a finding.
 
 **Resolved for this release by sequencing, not by code:** the operator confirmed the signing
 job runs today. Recorded so the next cycle does not rediscover it.
+
+> **SUPERSEDED THE SAME DAY, BY THE SIGNING BUILD. The paragraph above is WRONG and is kept
+> rather than deleted.**
+>
+> **Claimed above:** that the compile is byte-deterministic *within* a day, and that running
+> the signing job today would therefore reproduce the validated bytes.
+>
+> **Measured:** it did not. `scripts\build_release.ps1`, run at 15:43 UTC on the same day from
+> the same commit with all nine gates passing, produced
+> **`28e14e56e217b73d4e391c85700f5127afefa8866fc8a81c66897bc7e0158c08`**, 440,604,218 bytes —
+> the same size as the validated `5ab7a0b5…` and a different digest.
+>
+> **What the difference actually is**, measured by byte comparison rather than inferred:
+>
+> ```
+> differing byte positions : 2526
+> contiguous span          : 2592 bytes at offset 0x1A310426 (439,419,942)
+> everything else          : byte-identical across all 440,604,218 bytes
+> ```
+>
+> **0.0006% of the file, in one region near the end.** The entire 258 MB rootfs, all 54 bundled
+> resources and `setup.ps1` itself are identical. The differing bytes are high-entropy, which is
+> what a compressed block looks like when a few plaintext bytes inside it changed. A third
+> compile minutes after the signing build reproduced `28e14e56…` **exactly**.
+>
+> **So the granularity is finer than a day and coarser than minutes.** Compiles ~3 minutes apart
+> reproduce each other; compiles ~80 minutes apart do not. I am not naming the mechanism this
+> time. What is measured is the above; the earlier "embedded compile date string" guess was a
+> mechanism asserted from two data points and it did not survive the third.
+>
+> **The real conclusion, and it is larger than the one it replaces.** `build_release.ps1`
+> recompiles at signing time, and the compile embeds build-time metadata. So the signed artifact
+> is **never** byte-identical to a previously validated one — not "when the day rolls over",
+> but always. *Validated bytes equal shipped bytes* is **not achievable through this route at
+> all**, and sequencing does not fix it. It has been silently true for every release of this
+> product.
+>
+> **What does hold, and what the release therefore rests on:** the signed artifact and the
+> validated artifact were built from the identical commit, with all nine gates passing, and the
+> worktree gate proved the bundled bytes were the committed bytes in both builds. They differ
+> only in a 2,592-byte build-metadata region. The *product* is identical; the *bytes* differ in
+> metadata. That is a defensible basis for shipping and it is a weaker claim than the one this
+> job set out to make, so it is stated in the weaker form.
+>
+> **Owed:** either a `build_release.ps1` path that stamps and signs an existing validated
+> artifact instead of recompiling, or an explicit, documented acceptance that the release
+> contract is *"same commit, same gates"* rather than *"same bytes"*. Filed in §9. **Not fixed
+> here** — it is a change to the build script and outside this job.
 
 ---
 
@@ -551,6 +610,11 @@ bytes   440604218
 artifact is preserved at `Output\ClawFactory-Secure-Setup-1.4.5-prior-8a035fad.exe` as the
 record of what the previous validation ran against; do not ship it.
 
+> **§8 was written as a brief for a later job. That job ran in this same session — see §11 for
+> what was actually signed, tagged and recorded. The "Run it TODAY" reasoning below is
+> superseded by §3.4's correction: running today did not reproduce the validated bytes, and no
+> scheduling choice can, because `build_release.ps1` recompiles. Kept as written.**
+
 **Run it TODAY.** Per §3.4, the compile is byte-deterministic within a day and not across days.
 `build_release.ps1` recompiles, so a signing run on a later date will produce a *different*
 unsigned digest from the one above, and the bytes shipped will not be the bytes validated on
@@ -580,23 +644,30 @@ buttons hit the asset URL directly; any other name 404s silently.
 
 ## 9. What is owed next
 
-1. **Sign and release** — §8, today.
-2. **`PR.C8`** — now filed as **`OM-2`** in `docs/VALIDATION_PREAMBLE.md` with its named
+1. **Publish the GitHub Release** — signed, tagged and ledgered in §11; publishing is the
+   operator's action and the commands are in the card.
+2. **`build_release.ps1` recompiles at signing time, so no release can ever ship the exact bytes
+   that were validated** — §3.4's correction and §11.2. Either add a path that stamps and signs
+   an existing validated artifact, or document the release contract explicitly as *"same commit,
+   same gates"* rather than *"same bytes"*. The comment at `scripts/build_release.ps1:644` that
+   asserts the compile is deterministic should be corrected in the same edit; it is the premise
+   the build stamp's design leans on.
+3. **`PR.C8`** — now filed as **`OM-2`** in `docs/VALIDATION_PREAMBLE.md` with its named
    construction requirement: a machine on which `wsl --update` cannot install the engine, which
    no Azure VM in the standard configuration can be. VOID, not PASS, and it stays VOID until
    constructed.
-3. **`OM-1`, the `:8787` dashboard** — untouched by this cycle too. **Two consecutive cycles
+4. **`OM-1`, the `:8787` dashboard** — untouched by this cycle too. **Two consecutive cycles
    have now passed it over**, and that is recorded in the entry itself rather than only here.
-4. **`OM-B1`, Defender** — new. Four months of validation ran with antivirus told to ignore the
+5. **`OM-B1`, Defender** — new. Four months of validation ran with antivirus told to ignore the
    installer's own write targets. Owed by the next full cycle, with the context caveat of §6.6.
-5. **D1 rewrite** — `docs/V1_5_BACKLOG.md` item 8, with the two measured signals.
-6. **The `Restart-Computer` fall-through** — `V1_5_BACKLOG` item 9; do it in the same edit as 5.
-7. **The unexpected post-install reboot** — §5.3, new, unmeasured, not a regression.
-8. **The runner's heartbeat freezing during a job** — §6.5. A harness fix, not a product one.
-9. **`C:\cfv` is an unscoped cross-session namespace on the build machine** — §6.7. Phase
+6. **D1 rewrite** — `docs/V1_5_BACKLOG.md` item 8, with the two measured signals.
+7. **The `Restart-Computer` fall-through** — `V1_5_BACKLOG` item 9; do it in the same edit as 6.
+8. **The unexpected post-install reboot** — §5.3, new, unmeasured, not a regression.
+9. **The runner's heartbeat freezing during a job** — §6.5. A harness fix, not a product one.
+10. **`C:\cfv` is an unscoped cross-session namespace on the build machine** — §6.7. Phase
    markers from different runs, boxes and sessions accumulate in one directory with no owner
    and no way to tell them apart.
-10. **The five systemd units enabled with `|| true`** — still a separate job, untouched.
+11. **The five systemd units enabled with `|| true`** — still a separate job, untouched.
 
 ---
 
@@ -619,3 +690,73 @@ commits per logical change:
 
 One further commit carries this close-out and the OM-B1 instrument caveat. Both repositories'
 state is unchanged apart from `Secure-Setup`; nothing in Studio was touched.
+
+---
+
+## 11. Signing, the ledger row and the tag
+
+Done in this same session, after §1 through §10 were written. **Nothing was published.** Creating
+the GitHub Release is the operator's action.
+
+### 11.1 What was signed
+
+`scripts\build_release.ps1` was run as the only sanctioned route. All nine gates passed, it
+compiled, stamped, signed and appended the ledger row, exit 0.
+
+```
+unsigned sha256 : 28e14e56e217b73d4e391c85700f5127afefa8866fc8a81c66897bc7e0158c08
+unsigned bytes  : 440604218
+signed sha256   : 2fe7dad18c9eab8c005e8ee4bf9a25a6ca08bb761c11d9baf111e3eac0145e87
+signed bytes    : 440619864
+signature       : Valid
+subject         : CN=Bret Mckinney, O=Bret Mckinney, L=West Valley City, S=ut, C=US
+issuer          : CN=Microsoft ID Verified CS EOC CA 04, O=Microsoft Corporation, C=US
+timestamp       : Microsoft Public RSA Time Stamping Authority (countersigned)
+build stamp     : consumed by the signer, correctly absent afterwards
+```
+
+The certificate's `NotAfter` is 2026-09-01. **That is normal and not an alarm** — Trusted Signing
+issues short-lived certificates and rotates them automatically; the countersigned timestamp is
+what keeps the signature valid after the certificate expires.
+
+### 11.2 The digest that was validated is not the digest that was signed
+
+Stated plainly because it is the weakest link in this release and it should not be discovered by
+someone else later.
+
+| | digest | bytes |
+|---|---|---|
+| Validated on `cfv-190` | `5ab7a0b5…` | 440,604,218 |
+| Signed and shipped | `28e14e56…` (unsigned form) | 440,604,218 |
+
+Same commit, same size, all nine gates passing in both builds, and the worktree gate proving in
+both that the bundled bytes were the committed bytes. Measured difference, by byte comparison:
+**2,526 differing bytes inside a single contiguous 2,592-byte region** at offset `0x1A310426`,
+and byte-identical everywhere else. A third compile minutes after the signing build reproduced
+`28e14e56…` exactly, so the compile is reproducible over short intervals and not over longer
+ones.
+
+**The claim this release makes is therefore "same commit, same gates", not "same bytes."** That
+is weaker than the claim this job set out to make, and it is stated in the weaker form on
+purpose. §3.4 carries the full correction and §9 carries what is owed to fix it properly.
+
+### 11.3 The ledger
+
+```
+1.4.5	ClawFactory-Secure-Setup.exe	unsigned	28e14e56...	440604218	2026-08-31	written by scripts/build_release.ps1 after all gates passed and the artifact was signed
+```
+
+13 rows now. The ledger records the **unsigned** digest by design, because signing embeds a
+countersigned timestamp and the signed digest differs on every run over identical input.
+Committed at `588672a`.
+
+### 11.4 The tag
+
+`v1.4.5`, annotated, at `588672a`, **the tip of `main`** — per v1.4.4 practice, not at the build
+commit. Not yet pushed at the time §11 was written; see the operator card.
+
+### 11.5 What was NOT done
+
+**No GitHub Release was created and no asset was uploaded.** That is the operator's action, and
+the commands are in the card. The asset must be named exactly `ClawFactory-Secure-Setup.exe` or
+the three download buttons on `clawfactory.app` return 404.
