@@ -88,3 +88,21 @@ human checks and are not:
 
 **What remains is only ever what a person must see or authorise:** the by-eye checks, a
 live credential, and a public action.
+
+## The by-eye checks stay with the operator, by decision
+
+**Decided 2026-09-01.** M-1…M-9 could in principle be moved into the VM — screenshots for
+the reads, UI Automation for the clicks — which the operator's password decision made
+technically possible. **It was considered and declined**, on two grounds, and the reasoning
+is recorded so a future job does not re-propose it as an obvious win:
+
+1. **A human is the better instrument for reading UI copy.** Pixel-scraping an Electron
+   panel to verify wording is exactly the class of measurement this project keeps being
+   burned by — this job alone found 9 instrument defects against 0 product defects. A
+   misread panel is a wrong verdict about the very thing under test.
+2. **The operator needs his PC.** *"It's not that big a hassle and I'll still need my PC
+   available."*
+
+**Driving `mstsc` on the operator's own desktop remains out.** That rule dates from
+2026-05-14 and its reason is **ergonomic, not security** — validation is meant to feel like
+a background job rather than a UI takeover. It was re-examined on 2026-09-01 and stands.

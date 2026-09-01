@@ -375,10 +375,19 @@ once. That would give a standing interactive session, and therefore:
 1. **The WSL runner becomes unattended too.** §3.3's honest split — *"WSL work is not, and cannot
    be, without a credential"* — was true only while the credential was the operator's. It no
    longer is. This is the single largest remaining gap and the decision closes the route to it.
-2. **Screenshots become possible.** A user-context runner can capture the Studio panels, which
-   would turn M-1 from *"sit at the keyboard for 30–45 minutes"* into *"approve these ten
-   images"*. That does not remove the human — someone must still look — but it removes the
-   keyboard time and the scheduling problem.
+2. ~~**Screenshots become possible.**~~ **PROPOSED AND DECLINED, 2026-09-01.** A user-context
+   runner could capture the Studio panels and drive the clicks with UI Automation, turning M-1
+   from *"sit at the keyboard"* into *"approve these ten images"*. The operator declined, and
+   the reasoning is worth keeping because it is better than the proposal:
+
+   - **A human is the better instrument for reading UI copy.** Pixel-scraping an Electron panel
+     to verify wording is the exact class of measurement this project keeps being burned by —
+     see §4.7's tally. A misread panel is a wrong verdict about the thing under test.
+   - *"It's not that big a hassle and I'll still need my PC available."*
+
+   **So item 1 above is the whole of what §6.4 unlocks, and it is still worth building.** The
+   WSL runner becoming unattended is a transport win with no measurement quality attached to it.
+   Panel-reading is not, and should stay human.
 
 **The cost, stated plainly:** a cleartext password in `HKLM\...\Winlogon\DefaultPassword` on a
 throwaway box with no inbound path, deleted within hours. It cannot reach a customer machine —
