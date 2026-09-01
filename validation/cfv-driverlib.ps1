@@ -303,7 +303,13 @@ function Invoke-CfvBox {
                 }
                 return New-CfvResult -Condition 'DispatchConflict' -Name $Name -Nonce $nonce -AzExit $rc -Text '' -Stderr $stderrText -Elapsed $elapsed
             }
-            if ($stderrText -match '(?i)not found|deallocated|VM.*not running|is not currently|ResourceNotFound') {
+            # The literal message Azure returns for a stopped/deallocated VM,
+            # measured on cfv-192: "(OperationNotAllowed) The operation requires
+            # the VM to be running (or set to run)." None of the patterns guessed
+            # in advance matched it, so a deallocated box reported DispatchFailed
+            # -- exactly the collapse this vocabulary exists to prevent, and it
+            # was only found by actually deallocating a box and dispatching into it.
+            if ($stderrText -match '(?i)requires the VM to be running|OperationNotAllowed|ResourceNotFound|not found|deallocated|VM.*not running|is not currently') {
                 return New-CfvResult -Condition 'BoxUnreachable' -Name $Name -Nonce $nonce -AzExit $rc -Text '' -Stderr $stderrText -Elapsed $elapsed
             }
             return New-CfvResult -Condition 'DispatchFailed' -Name $Name -Nonce $nonce -AzExit $rc -Text '' -Stderr $stderrText -Elapsed $elapsed

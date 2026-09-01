@@ -85,7 +85,12 @@ Write-Host '=== CRITICAL: failure modes that could produce a FALSE PASS ===' -Fo
 # --- D1. Output over the limit. az exits ZERO and returns EMPTY. -------------
 # This is the exact shape from the close-out: 16.6 KB asked for, nothing back,
 # az exit 0, and forty minutes spent believing the install had hung.
-Set-Rig -ExitCode 0 -MakeStdout { param($p) ('X' * 20000) }   # big, and NO sentinel
+# The REAL truncation shape, measured on cfv-192: the channel keeps the LAST
+# 4096 bytes, so the TAIL SENTINEL SURVIVES and the head one is gone. The first
+# version of this rig emitted no sentinel at all, which is not what this channel
+# does, and it is why the tail-only design passed its own self-test while being
+# unable to detect the truncation it existed to detect.
+Set-Rig -ExitCode 0 -MakeStdout { param($p) ('X' * 4000) + "`nCFV_EOF:" + (Get-Sentinel $p) }
 $r = Invoke-CfvBox -Run $Run -Name 'over-limit' -Quiet -Body 'Write-Output "anything"'
 Assert-Case -Id 'SELF.D1' -Critical `
   -Name 'output over the size limit reports OutputTruncated, and is NEVER readable as a clean empty result' `
@@ -104,7 +109,7 @@ Assert-Case -Id 'SELF.D1b' -Critical `
 
 # --- D1ctl. THE OTHER DIRECTION. A large-but-complete reply must be Ok. -----
 # Without this, a library hard-wired to say OutputTruncated would pass D1.
-Set-Rig -ExitCode 0 -MakeStdout { param($p) ('Y' * 12000) + "`nCFV_EOF:" + (Get-Sentinel $p) }
+Set-Rig -ExitCode 0 -MakeStdout { param($p) "CFV_BOF:" + (Get-Sentinel $p) + "`n" + ('Y' * 12000) + "`nCFV_EOF:" + (Get-Sentinel $p) }
 $r = Invoke-CfvBox -Run $Run -Name 'big-complete' -Quiet -Body 'Write-Output "anything"'
 Assert-Case -Id 'SELF.D1ctl' -Critical `
   -Name 'CONTROL: a large reply that DID arrive whole reports Ok (the check discriminates on the sentinel, not on size)' `
@@ -118,7 +123,7 @@ Set-CfvAzInvoker {
     $p = Get-Content $ScriptFile -Raw
     $s = if ($p -match 'CFV_EOF:(\S+?)"') { $Matches[1] } else { '' }
     $now = (Get-Date).ToUniversalTime().ToString('s') + 'Z'
-    $msg = "DONE=True`nJOBFILE=True`nOUTBYTES=412`nSTDOUTBYTES=100`nSTDERRBYTES=312`nHEARTBEAT=$now state=idle job=- pid=0 elapsed=0 runid=x`nNOWUTC=$now`nTASKSTATE=Running`nCFV_EOF:$s"
+    $msg = "CFV_BOF:$s`nDONE=True`nJOBFILE=True`nOUTBYTES=412`nSTDOUTBYTES=100`nSTDERRBYTES=312`nHEARTBEAT=$now state=idle job=- pid=0 elapsed=0 runid=x`nNOWUTC=$now`nTASKSTATE=Running`nCFV_EOF:$s"
     @{ Stdout = (@{ value = @(@{ code='ComponentStatus/StdOut/succeeded'; message=$msg }) } | ConvertTo-Json -Depth 5); ExitCode = 0; Stderr = '' }
 }
 $st = Get-CfvJobStatus -Run $Run -Name 'failedjob'
@@ -134,13 +139,13 @@ Set-CfvAzInvoker {
     param($Rg, $Vm, $ScriptFile, $ErrFile)
     $p = Get-Content $ScriptFile -Raw
     $s = if ($p -match 'CFV_EOF:(\S+?)"') { $Matches[1] } else { '' }
-    if ($p -match 'OUTBYTES=') { $msg = "OUTBYTES=5000`nCFV_EOF:$s" }
+    if ($p -match 'OUTBYTES=') { $msg = "CFV_BOF:$s`nOUTBYTES=5000`nCFV_EOF:$s" }
     else {
         $script:chunkCall++
         $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('SHORT'))
         # Returns 5 bytes and then nothing, so the loop ends far short of 5000.
         $payload = if ($script:chunkCall -le 1) { $b64 } else { '' }
-        $msg = "CHUNK_OFFSET=0 CHUNK_READ=5`n---8<---`n$payload`nCFV_EOF:$s"
+        $msg = "CFV_BOF:$s`nCHUNK_OFFSET=0 CHUNK_READ=5`n---8<---`n$payload`nCFV_EOF:$s"
     }
     @{ Stdout = (@{ value = @(@{ code='ComponentStatus/StdOut/succeeded'; message=$msg }) } | ConvertTo-Json -Depth 5); ExitCode = 0; Stderr = '' }
 }
@@ -172,7 +177,7 @@ Set-CfvAzInvoker {
     }
     $p = Get-Content $ScriptFile -Raw
     $s = if ($p -match 'CFV_EOF:(\S+?)"') { $Matches[1] } else { '' }
-    @{ Stdout = (@{ value = @(@{ code='ComponentStatus/StdOut/succeeded'; message="recovered`nCFV_EOF:$s" }) } | ConvertTo-Json -Depth 5); ExitCode = 0; Stderr = '' }
+    @{ Stdout = (@{ value = @(@{ code='ComponentStatus/StdOut/succeeded'; message="CFV_BOF:$s`nrecovered`nCFV_EOF:$s" }) } | ConvertTo-Json -Depth 5); ExitCode = 0; Stderr = '' }
 }
 $r = Invoke-CfvBox -Run $Run -Name 'collide' -Quiet -Body 'Write-Output "x"' -ConflictRetries 5 -ConflictWaitSeconds 0
 Assert-Case -Id 'SELF.D4' `
@@ -215,7 +220,7 @@ function Set-HeartbeatRig([string]$state, [string]$job, [int]$ageSeconds) {
         $now = (Get-Date).ToUniversalTime()
         $hbT = $now.AddSeconds(-1 * $ageSeconds).ToString('s') + 'Z'
         $hb  = if ($state -eq 'ABSENT') { 'ABSENT' } else { "$hbT state=$state job=$job pid=4212 elapsed=$ageSeconds runid=x" }
-        $msg = "DONE=False`nJOBFILE=True`nOUTBYTES=0`nSTDOUTBYTES=0`nSTDERRBYTES=0`nHEARTBEAT=$hb`nNOWUTC=$($now.ToString('s'))Z`nTASKSTATE=Running`nCFV_EOF:$s"
+        $msg = "CFV_BOF:$s`nDONE=False`nJOBFILE=True`nOUTBYTES=0`nSTDOUTBYTES=0`nSTDERRBYTES=0`nHEARTBEAT=$hb`nNOWUTC=$($now.ToString('s'))Z`nTASKSTATE=Running`nCFV_EOF:$s"
         @{ Stdout = (@{ value = @(@{ code='ComponentStatus/StdOut/succeeded'; message=$msg }) } | ConvertTo-Json -Depth 5); ExitCode = 0; Stderr = '' }
     }.GetNewClosure()
 }
@@ -250,7 +255,7 @@ Set-CfvAzInvoker {
     $p = Get-Content $ScriptFile -Raw
     $s = if ($p -match 'CFV_EOF:(\S+?)"') { $Matches[1] } else { '' }
     $now = (Get-Date).ToUniversalTime().ToString('s') + 'Z'
-    $msg = "DONE=True`nJOBFILE=True`nOUTBYTES=900`nSTDOUTBYTES=900`nSTDERRBYTES=0`nHEARTBEAT=$now state=idle job=- pid=0 elapsed=0 runid=x`nNOWUTC=$now`nTASKSTATE=Running`nCFV_EOF:$s"
+    $msg = "CFV_BOF:$s`nDONE=True`nJOBFILE=True`nOUTBYTES=900`nSTDOUTBYTES=900`nSTDERRBYTES=0`nHEARTBEAT=$now state=idle job=- pid=0 elapsed=0 runid=x`nNOWUTC=$now`nTASKSTATE=Running`nCFV_EOF:$s"
     @{ Stdout = (@{ value = @(@{ code='ComponentStatus/StdOut/succeeded'; message=$msg }) } | ConvertTo-Json -Depth 5); ExitCode = 0; Stderr = '' }
 }
 $st = Get-CfvJobStatus -Run $Run -Name 'install'
@@ -266,12 +271,12 @@ Set-CfvAzInvoker {
     param($Rg, $Vm, $ScriptFile, $ErrFile)
     $p = Get-Content $ScriptFile -Raw
     $s = if ($p -match 'CFV_EOF:(\S+?)"') { $Matches[1] } else { '' }
-    if ($p -match 'OUTBYTES=') { $msg = "OUTBYTES=$($bodyBytes.Length)`nCFV_EOF:$s" }
+    if ($p -match 'OUTBYTES=') { $msg = "CFV_BOF:$s`nOUTBYTES=$($bodyBytes.Length)`nCFV_EOF:$s" }
     else {
         $off = if ($p -match '\$fs\.Position = (\d+)') { [int]$Matches[1] } else { 0 }
         $n = [Math]::Min(4000, $bodyBytes.Length - $off)
         $b64 = [Convert]::ToBase64String($bodyBytes, $off, $n)
-        $msg = "CHUNK_OFFSET=$off CHUNK_READ=$n`n---8<---`n$b64`nCFV_EOF:$s"
+        $msg = "CFV_BOF:$s`nCHUNK_OFFSET=$off CHUNK_READ=$n`n---8<---`n$b64`nCFV_EOF:$s"
     }
     @{ Stdout = (@{ value = @(@{ code='ComponentStatus/StdOut/succeeded'; message=$msg }) } | ConvertTo-Json -Depth 5); ExitCode = 0; Stderr = '' }
 }.GetNewClosure()
