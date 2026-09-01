@@ -60,3 +60,7 @@ validation-runs/
 # pricing and payout account, and the local paths of four other private projects.
 # Untracked in the 2026-08-29 pre-publication sweep. It stays on disk, out of git.
 CLAUDE_ClawFactory.md
+
+# Per-run pointer written by validation/cfv-harness-proof.ps1. Carries build-machine
+# paths and a run identity, not evidence; the evidence is the diag/<RunId>/ directory.
+validation/diag/*-runid.txt
