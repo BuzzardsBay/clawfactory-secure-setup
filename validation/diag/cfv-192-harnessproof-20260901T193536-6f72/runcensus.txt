@@ -1,0 +1,10 @@
+CONDITION=Ok
+AZEXIT=0
+BYTES=371
+ELAPSED=32
+STDERR=
+---- TEXT ----
+RUNS_PRESENT=1
+RUN cfv-192-harnessproof-20260901T193536-6f72 owner={"RunId":"cfv-192-harnessproof-20260901T193536-6f72","Vm":"cfv-192","BuildMachine":"BRET","StartedUtc":"2026-09-01T19:35:36Z","Driver":"C:\\Users\\bmcki\\ClawFactory-Secure-Setup\\validation\\cfv-driverlib.ps1"}
+LEGACY_CFV_LOOSE_FILES=6
+CFV_EOF:cfv-192-harnessproof-20260901T193536-6f72-runcensus-6a7fea

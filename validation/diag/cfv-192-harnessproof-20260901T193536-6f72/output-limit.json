@@ -1,0 +1,66 @@
+{
+    "Rows":  [
+                 {
+                     "RequestedBytes":  512,
+                     "Condition":  "Ok",
+                     "ReturnedBytes":  652,
+                     "SentinelBack":  true
+                 },
+                 {
+                     "RequestedBytes":  1024,
+                     "Condition":  "Ok",
+                     "ReturnedBytes":  1174,
+                     "SentinelBack":  true
+                 },
+                 {
+                     "RequestedBytes":  2048,
+                     "Condition":  "Ok",
+                     "ReturnedBytes":  2214,
+                     "SentinelBack":  true
+                 },
+                 {
+                     "RequestedBytes":  3072,
+                     "Condition":  "Ok",
+                     "ReturnedBytes":  3254,
+                     "SentinelBack":  true
+                 },
+                 {
+                     "RequestedBytes":  3584,
+                     "Condition":  "Ok",
+                     "ReturnedBytes":  3774,
+                     "SentinelBack":  true
+                 },
+                 {
+                     "RequestedBytes":  4096,
+                     "Condition":  "OutputTruncated",
+                     "ReturnedBytes":  4097,
+                     "SentinelBack":  false
+                 },
+                 {
+                     "RequestedBytes":  6144,
+                     "Condition":  "OutputTruncated",
+                     "ReturnedBytes":  4097,
+                     "SentinelBack":  false
+                 },
+                 {
+                     "RequestedBytes":  8192,
+                     "Condition":  "OutputTruncated",
+                     "ReturnedBytes":  4097,
+                     "SentinelBack":  false
+                 },
+                 {
+                     "RequestedBytes":  16384,
+                     "Condition":  "OutputTruncated",
+                     "ReturnedBytes":  4097,
+                     "SentinelBack":  false
+                 },
+                 {
+                     "RequestedBytes":  65536,
+                     "Condition":  "OutputTruncated",
+                     "ReturnedBytes":  4097,
+                     "SentinelBack":  false
+                 }
+             ],
+    "LargestReturned":  3584,
+    "SmallestTruncated":  4096
+}

@@ -1,0 +1,22 @@
+CONDITION=RunnerDead
+AZEXIT=-1
+BYTES=612
+ELAPSED=0
+STDERR=
+---- TEXT ----
+DONE=False
+JOBFILE=True
+OUTBYTES=0
+STDOUTBYTES=0
+STDERRBYTES=0
+HEARTBEAT=
+NOWUTC=2026-09-01T20:01:33Z
+TASKSTATE=Running
+CFV_EOF:cfv-192-harnessproof-20260901T193536-6f72-poll-p1-4fdd2c
+You cannot call a method on a null-valued expression.
+At C:\Packages\Plugins\Microsoft.CPlat.Core.RunCommandWindows\1.1.22\Downloads\script17.ps1:7 char:68
++ ... artbeat") { (Get-Content "$jd\_runner.heartbeat" -Raw).Trim() } else  ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : InvokeMethodOnNull
+ 

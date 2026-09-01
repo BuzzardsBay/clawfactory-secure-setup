@@ -1,0 +1,9 @@
+CONDITION=Ok
+AZEXIT=0
+BYTES=172
+ELAPSED=32
+STDERR=
+---- TEXT ----
+STAGED cfv-runner.ps1 expected=17395 actual=17395
+STAGED cfv-arm-persistence.ps1 expected=12479 actual=12479
+CFV_EOF:cfv-192-harnessproof-20260901T193536-6f72-stage-ec16ad

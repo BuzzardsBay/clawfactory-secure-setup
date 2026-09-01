@@ -1,0 +1,14 @@
+about to fail deliberately
+---- STDERR ----
+C:\cfv\runs\cfv-192-harnessproof-20260901T193536-6f72\jobs\bfail.job.ps1 : DELIBERATE_STDERR_MARKER
+    + CategoryInfo          : NotSpecified: (:) [Write-Error], WriteErrorException
+    + FullyQualifiedErrorId : Microsoft.PowerShell.Commands.WriteErrorException,bfail.job.ps1
+ 
+DELIBERATE_TERMINATING_FAILURE
+At C:\cfv\runs\cfv-192-harnessproof-20260901T193536-6f72\jobs\bfail.job.ps1:3 char:1
++ throw "DELIBERATE_TERMINATING_FAILURE"
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (DELIBERATE_TERMINATING_FAILURE:String) [], RuntimeException
+    + FullyQualifiedErrorId : DELIBERATE_TERMINATING_FAILURE
+RUNNER_EXITCODE=1
+RUNNER_ELAPSED_S=5

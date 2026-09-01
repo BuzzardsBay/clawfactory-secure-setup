@@ -1,0 +1,10 @@
+CONDITION=Ok
+AZEXIT=0
+BYTES=270
+ELAPSED=32
+STDERR=
+---- TEXT ----
+CFV_BOF:cfv-192-harnessproof-20260901T193536-6f72-drop-bfail-adf85c
+JOB_DROPPED_BYTES=119
+HEARTBEAT=2026-09-01T20:40:27Z state=idle job=- pid=0 elapsed=0 runid=cfv-192-harnessproof-20260901T193536-6f72
+CFV_EOF:cfv-192-harnessproof-20260901T193536-6f72-drop-bfail-adf85c

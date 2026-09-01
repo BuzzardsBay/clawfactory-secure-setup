@@ -1,0 +1,16 @@
+CONDITION=Ok
+AZEXIT=0
+BYTES=525
+ELAPSED=32
+STDERR=
+---- TEXT ----
+JOB_DROPPED_BYTES=482
+HEARTBEAT=
+CFV_EOF:cfv-192-harnessproof-20260901T193536-6f72-drop-p1-a7c52e
+You cannot call a method on a null-valued expression.
+At C:\Packages\Plugins\Microsoft.CPlat.Core.RunCommandWindows\1.1.22\Downloads\script15.ps1:6 char:48
++ ... EARTBEAT=$(if (Test-Path $hb) { (Get-Content $hb -Raw).Trim() } else  ...
++                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : InvokeMethodOnNull
+ 

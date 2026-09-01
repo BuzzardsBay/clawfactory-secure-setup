@@ -1,0 +1,17 @@
+{
+  "value": [
+    {
+      "code": "ComponentStatus/StdOut/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "LONG_DONE"
+    },
+    {
+      "code": "ComponentStatus/StdErr/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": ""
+    }
+  ]
+}
+

@@ -1,0 +1,9 @@
+CONDITION=DispatchFailed
+AZEXIT=1
+BYTES=0
+ELAPSED=1
+STDERR=ERROR: (OperationNotAllowed) The operation requires the VM to be running (or set to run).
+Code: OperationNotAllowed
+Message: The operation requires the VM to be running (or set to run).
+
+---- TEXT ----
