@@ -23,18 +23,35 @@
      state. Wait-CfvJob reads that state and reports five distinct conditions
      where the old poll reported two.
 
-  2. az vm run-command SILENTLY RETURNS EMPTY ABOVE ROUGHLY 16 KB WHILE az EXITS
-     ZERO. One poll showed nothing for forty minutes while the .done barrier had
-     existed the whole time; trusted, it would have concluded the install hung.
+  2. az vm run-command SILENTLY DISCARDS THE FRONT OF A LARGE REPLY WHILE az
+     EXITS ZERO. One poll showed nothing for forty minutes while the .done
+     barrier had existed the whole time; trusted, it would have concluded the
+     install hung.
 
-     Bounding what polls ask for is necessary and NOT sufficient, because a bound
-     is a guess about a limit nobody has measured. So every payload dispatched
-     through this library ends with a TAIL SENTINEL carrying a per-dispatch nonce.
-     A dispatch whose sentinel does not come back is a NAMED CONDITION -- output
-     truncated, or the payload died before its own last line -- and never an empty
-     result. Truncation becomes detectable rather than silent, which is the
-     property that was missing. Measure-CfvOutputLimit determines the real limit
-     on the fleet rather than assuming 16 KB.
+     MEASURED ON cfv-192, 2026-09-01, AND BOTH HALVES OF THE INHERITED BELIEF
+     WERE WRONG:
+
+       - The limit is 4096 BYTES, not "roughly 16 KB". Bracketed: 3584 bytes came
+         back whole, 4096 did not.
+       - It does not return EMPTY. It returns THE LAST 4096 BYTES and silently
+         drops everything before them. A payload emitting 900 numbered lines came
+         back as 78, beginning mid-word at "INE00822" and running to LINE00900.
+
+     This library's first version carried only a TAIL sentinel, reasoning that a
+     reply missing its last line had not arrived whole. The tail is exactly what
+     survives, so that sentinel reported Ok on a reply that had lost 91% of its
+     content -- a FALSE PASS manufactured by the instrument built to prevent one.
+
+     So every payload now carries a HEAD sentinel and a TAIL sentinel, both with
+     the same per-dispatch nonce, and they name different faults:
+
+       head gone, tail present -> OutputTruncated. The channel dropped the front.
+       head present, tail gone -> PayloadDied. It never reached its own last line.
+       both gone               -> PayloadDied. Nothing recognisable arrived.
+
+     A bound inherited from a close-out is a guess; Measure-CfvOutputLimit
+     measures it, and Receive-CfvJobOutput's chunk size is derived from the
+     measurement rather than chosen.
 
   3. C:\cfv WAS AN UNSCOPED CROSS-SESSION NAMESPACE. Markers from different runs,
      boxes and sessions accumulated in one directory with no owner. Every run now
@@ -62,7 +79,13 @@
       OutputTruncated     az exited zero, sentinel absent, output at the limit
       PayloadDied         az exited zero, sentinel absent, output short
       BoxUnreachable      the VM is not in a state that can accept a dispatch
-      RunnerDead          heartbeat stale or absent while the box answers
+      RunnerDead          a heartbeat that existed has gone stale
+      RunnerAbsent        no runner has ever beaten on this queue and its task is
+                          not running. On the WSL queue this means there is no
+                          interactive session -- an unmet PRECONDITION, never a
+                          product verdict. Kept distinct from RunnerDead because
+                          collapsing them reports "this needs a logon" as "the
+                          runner crashed"
       RunnerIdle          runner alive, job file present, job never picked up
       JobRunning          runner alive and executing the job
       JobDone             the .done barrier exists
@@ -143,6 +166,7 @@ function New-CfvRun {
         Root          = $Root
         RunDir        = "$Root\$id"
         JobDir        = "$Root\$id\jobs"
+        WslJobDir     = "$Root\$id\wsljobs"
         OutDir        = $OutDir
         Scratch       = $scratch
         StartedUtc    = (Get-Date).ToUniversalTime().ToString('s') + 'Z'
@@ -167,6 +191,7 @@ function Write-CfvOwnerStamp {
     $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
     Invoke-CfvBox -Run $Run -Name 'ownerstamp' -Body @"
 New-Item -ItemType Directory -Path '$($Run.JobDir)' -Force | Out-Null
+New-Item -ItemType Directory -Path '$($Run.WslJobDir)' -Force | Out-Null
 New-Item -ItemType Directory -Path '$($Run.RunDir)\evidence' -Force | Out-Null
 [IO.File]::WriteAllBytes('$($Run.RunDir)\_owner.json', [Convert]::FromBase64String('$b64'))
 Write-Output "OWNER_STAMPED=`$((Get-Item '$($Run.RunDir)\_owner.json').Length)"
@@ -222,8 +247,30 @@ function Invoke-CfvBox {
         [int]$ConflictWaitSeconds = 30,
         [switch]$Quiet
     )
+    # HEAD SENTINEL AND TAIL SENTINEL. Both, and the head one is the load-bearing
+    # half.
+    #
+    # This library originally carried only a tail sentinel, on the reasoning that
+    # a reply missing its last line had not arrived whole. MEASURED ON cfv-192,
+    # that reasoning is exactly backwards for this channel: az vm run-command
+    # keeps the LAST 4096 BYTES and silently discards everything before them. A
+    # payload emitting 900 numbered lines came back as 78 of them, beginning
+    # mid-word at "INE00822" and running to LINE00900 -- so the tail sentinel
+    # survived every truncation and the detector reported Ok on a reply that had
+    # lost 91% of its content.
+    #
+    # That is a FALSE PASS produced by the instrument built to prevent one, which
+    # is the worst outcome available to this harness. The head sentinel closes it:
+    # truncation destroys the FRONT, so a missing CFV_BOF is positive evidence of
+    # it. The tail sentinel is kept because it still catches the other failure --
+    # a payload that died before reaching its own last line.
+    #
+    # Note also that the real limit is 4096 bytes, not the "roughly 16 KB" the
+    # v1.4.5 close-out recorded. A bound inherited from a close-out is a guess;
+    # Measure-CfvOutputLimit measures it.
     $nonce   = "$($Run.RunId)-$Name-" + (-join ((1..6) | ForEach-Object { '0123456789abcdef'[(Get-Random -Maximum 16)] }))
-    $payload = if ($NoSentinel) { $Body } else { $Body + "`r`nWrite-Output `"CFV_EOF:$nonce`"`r`n" }
+    $payload = if ($NoSentinel) { $Body }
+               else { "Write-Output `"CFV_BOF:$nonce`"`r`n" + $Body + "`r`nWrite-Output `"CFV_EOF:$nonce`"`r`n" }
     $f       = Join-Path $Run.Scratch "$Name.ps1"
     [IO.File]::WriteAllText($f, $payload, (New-Object Text.UTF8Encoding($false)))
 
@@ -274,31 +321,72 @@ function Invoke-CfvBox {
             return New-CfvResult -Condition 'Ok' -Name $Name -Nonce $nonce -AzExit $rc -Text $text -Stderr $stderrText -Elapsed $elapsed
         }
 
-        if ($text -match [regex]::Escape("CFV_EOF:$nonce")) {
+        $bof = $text -match [regex]::Escape("CFV_BOF:$nonce")
+        $eof = $text -match [regex]::Escape("CFV_EOF:$nonce")
+
+        if ($bof -and $eof) {
             if (-not $Quiet) { foreach ($line in ($text -split "`n")) { Write-Host $line } }
             return New-CfvResult -Condition 'Ok' -Name $Name -Nonce $nonce -AzExit $rc -Text $text -Stderr $stderrText -Elapsed $elapsed
         }
 
-        # Sentinel absent with az at exit 0. Two causes, distinguished by size and
-        # NAMED separately, because "the output was too big" and "the payload died"
-        # need different responses and guessing between them wasted a run.
-        # The 8192-byte boundary is a reporting hint only; the CONDITION in both
-        # cases is "this output did not arrive whole", which is what forbids a
-        # caller from reading it as a clean empty result.
-        $cond = if ($text.Length -ge 8192) { 'OutputTruncated' } else { 'PayloadDied' }
+        # The three ways a reply arrives incomplete, NAMED SEPARATELY because they
+        # need different responses and guessing between them has cost this project
+        # whole runs.
+        #
+        #   head gone, tail present  -> the channel truncated. Retrieve in chunks.
+        #   head present, tail gone  -> the payload died before its last line.
+        #                               Read the runner log / stderr.
+        #   both gone                -> nothing recognisable came back at all.
+        $cond   = if     ($eof -and -not $bof) { 'OutputTruncated' }
+                  elseif ($bof -and -not $eof) { 'PayloadDied' }
+                  else                          { 'PayloadDied' }
+        $why    = if     ($eof -and -not $bof) { "the channel discarded the FRONT of this reply -- $($text.Length) bytes came back and the head sentinel is gone. az vm run-command keeps only the last 4096 bytes. Retrieve in bounded chunks instead." }
+                  elseif ($bof -and -not $eof) { "the payload did not reach its own last line -- it died early. Read stderr and the runner log; a probe that dies early is invisible in a transcript by construction." }
+                  else                          { "neither sentinel came back: nothing recognisable arrived ($($text.Length) bytes)." }
         if (-not $Quiet) {
-            Write-Host "  SENTINEL ABSENT after az exit 0. text=$($text.Length) bytes -> $cond" -ForegroundColor Red
-            Write-Host "  This is NOT an empty result. Do not read it as one." -ForegroundColor Red
+            Write-Host "  INCOMPLETE REPLY after az exit 0. bof=$bof eof=$eof bytes=$($text.Length) -> $cond" -ForegroundColor Red
+            Write-Host "  $why" -ForegroundColor Red
+            Write-Host "  This is NOT an empty result and NOT a clean one. Do not read it as either." -ForegroundColor Red
         }
-        return New-CfvResult -Condition $cond -Name $Name -Nonce $nonce -AzExit $rc -Text $text -Stderr $stderrText -Elapsed $elapsed
+        return New-CfvResult -Condition $cond -Name $Name -Nonce $nonce -AzExit $rc -Text $text -Stderr ($stderrText + " | " + $why) -Elapsed $elapsed
     }
+}
+
+function Test-CfvWslTextMatch {
+<#
+  Match a string against wsl.exe output. Do NOT use a plain -match for this.
+
+  wsl.exe writes ITS OWN messages in UTF-16LE while a distro's stdout is UTF-8.
+  Read through the console's 8-bit encoding, the UTF-16 half arrives with a NUL
+  after every character, which surfaces as \0 or as a space depending on the
+  transport. So `$out -match 'WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED'` returns FALSE
+  against output that literally reads
+
+      W S L _ E _ L O C A L _ S Y S T E M _ N O T _ S U P P O R T E D
+
+  Measured on cfv-192 at 19:41 on 2026-09-01: the control fired on the box and
+  the driver reported that it had not. The measurement was right and the reader
+  was wrong.
+
+  This one failed SAFE -- it under-reported a control. The same defect on an
+  assertion looking for a SUCCESS string fails UNSAFE, which is why it is fixed
+  as a class here rather than at the one call site that showed it.
+#>
+    param([string]$Haystack, [string]$Needle)
+    if ([string]::IsNullOrEmpty($Haystack)) { return $false }
+    if ($Haystack -match [regex]::Escape($Needle)) { return $true }
+    $h = $Haystack -replace "`0", ''
+    if ($h -match [regex]::Escape($Needle)) { return $true }
+    # One optional space or NUL between every character.
+    $pat = ($Needle.ToCharArray() | ForEach-Object { [regex]::Escape([string]$_) }) -join '[\s\x00]?'
+    return ($h -match $pat)
 }
 
 function New-CfvResult {
     param(
         [Parameter(Mandatory)][ValidateSet('Ok','DispatchFailed','DispatchConflict','OutputTruncated',
                                            'PayloadDied','BoxUnreachable','RunnerDead','RunnerIdle',
-                                           'JobRunning','JobDone','Timeout')]
+                                           'JobRunning','JobDone','Timeout','RunnerAbsent')]
         [string]$Condition,
         [string]$Name = '', [string]$Nonce = '', [int]$AzExit = -1,
         [string]$Text = '', [string]$Stderr = '', [int]$Elapsed = 0, $Extra = $null
@@ -326,15 +414,20 @@ function Start-CfvJob {
     param(
         [Parameter(Mandatory)]$Run,
         [Parameter(Mandatory)][string]$Name,
-        [Parameter(Mandatory)][string]$JobBody
+        [Parameter(Mandatory)][string]$JobBody,
+        # Route to the wsljobs queue, which only the Interactive clawadmin runner
+        # services. A WSL job on a box with no session is then VISIBLY unserviced
+        # rather than queued behind a SYSTEM runner that could never execute it.
+        [switch]$Wsl
     )
+    $qd = if ($Wsl) { $Run.WslJobDir } else { $Run.JobDir }
     $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($JobBody))
     Invoke-CfvBox -Run $Run -Name "drop-$Name" -Body @"
-New-Item -ItemType Directory -Path '$($Run.JobDir)' -Force | Out-Null
-Remove-Item '$($Run.JobDir)\$Name.done','$($Run.JobDir)\$Name.out','$($Run.JobDir)\$Name.stdout','$($Run.JobDir)\$Name.stderr' -Force -ErrorAction SilentlyContinue
-[IO.File]::WriteAllBytes('$($Run.JobDir)\$Name.job.ps1', [Convert]::FromBase64String('$b64'))
-Write-Output "JOB_DROPPED_BYTES=`$((Get-Item '$($Run.JobDir)\$Name.job.ps1').Length)"
-`$hb = '$($Run.JobDir)\_runner.heartbeat'
+New-Item -ItemType Directory -Path '$qd' -Force | Out-Null
+Remove-Item '$qd\$Name.done','$qd\$Name.out','$qd\$Name.stdout','$qd\$Name.stderr' -Force -ErrorAction SilentlyContinue
+[IO.File]::WriteAllBytes('$qd\$Name.job.ps1', [Convert]::FromBase64String('$b64'))
+Write-Output "JOB_DROPPED_BYTES=`$((Get-Item '$qd\$Name.job.ps1').Length)"
+`$hb = '$qd\_runner.heartbeat'
 Write-Output "HEARTBEAT=`$(if (Test-Path `$hb) { (Get-Content `$hb -Raw).Trim() } else { 'ABSENT' })"
 "@
 }
@@ -350,17 +443,20 @@ function Get-CfvJobStatus {
   The reply is a handful of key=value lines and can never approach the limit, and
   it still carries the sentinel so that even THIS cannot come back silently short.
 #>
-    param([Parameter(Mandatory)]$Run, [Parameter(Mandatory)][string]$Name, [int]$StaleSeconds = 90)
+    param([Parameter(Mandatory)]$Run, [Parameter(Mandatory)][string]$Name, [int]$StaleSeconds = 90, [switch]$Wsl)
+    $qd   = if ($Wsl) { $Run.WslJobDir }        else { $Run.JobDir }
+    $task = if ($Wsl) { 'CFV-Runner-User' }     else { 'CFV-Runner-System' }
     $r = Invoke-CfvBox -Run $Run -Name "poll-$Name" -Quiet -Body @"
-`$jd = '$($Run.JobDir)'
+`$jd = '$qd'
 Write-Output "DONE=`$(Test-Path "`$jd\$Name.done")"
 Write-Output "JOBFILE=`$(Test-Path "`$jd\$Name.job.ps1")"
 Write-Output "OUTBYTES=`$(if (Test-Path "`$jd\$Name.out") { (Get-Item "`$jd\$Name.out").Length } else { 0 })"
 Write-Output "STDOUTBYTES=`$(if (Test-Path "`$jd\$Name.stdout") { (Get-Item "`$jd\$Name.stdout").Length } else { 0 })"
 Write-Output "STDERRBYTES=`$(if (Test-Path "`$jd\$Name.stderr") { (Get-Item "`$jd\$Name.stderr").Length } else { 0 })"
-Write-Output "HEARTBEAT=`$(if (Test-Path "`$jd\_runner.heartbeat") { (Get-Content "`$jd\_runner.heartbeat" -Raw).Trim() } else { 'ABSENT' })"
+Write-Output "HBBYTES=`$(if (Test-Path "`$jd\_runner.heartbeat") { (Get-Item "`$jd\_runner.heartbeat").Length } else { -1 })"
+Write-Output "HEARTBEAT=`$(if (-not (Test-Path "`$jd\_runner.heartbeat")) { 'ABSENT' } elseif ((Get-Item "`$jd\_runner.heartbeat").Length -eq 0) { 'EMPTY' } else { ((Get-Content "`$jd\_runner.heartbeat" -Raw) + '').Trim() })"
 Write-Output "NOWUTC=`$((Get-Date).ToUniversalTime().ToString('s'))Z"
-Write-Output "TASKSTATE=`$(try { (Get-ScheduledTask -TaskName 'CFV-Runner' -ErrorAction Stop).State } catch { 'NO-TASK' })"
+Write-Output "TASKSTATE=`$(try { (Get-ScheduledTask -TaskName '$task' -ErrorAction Stop).State } catch { 'NO-TASK' })"
 "@
     if ($r.Condition -ne 'Ok') { return $r }
 
@@ -382,6 +478,24 @@ Write-Output "TASKSTATE=`$(try { (Get-ScheduledTask -TaskName 'CFV-Runner' -Erro
     }
     $kv['HEARTBEAT_AGE_S'] = "$age"
 
+    # RunnerAbsent and RunnerDead are DIFFERENT conditions and collapsing them is
+    # how "this needs a logon and there isn't one" gets reported as "the runner
+    # crashed". A heartbeat that has NEVER existed on a queue whose task is not
+    # running is an unmet precondition; a heartbeat that existed and went stale is
+    # a dead runner. Only the second is a fault.
+    # An EMPTY heartbeat under a RUNNING task is neither absent nor stale: the
+    # runner is alive and its stamping is broken. Measured on cfv-192, where a
+    # -f precedence bug in the runner produced a zero-byte file and the driver
+    # reported RunnerDead against a perfectly live runner. Named separately so
+    # the next occurrence points at the stamper rather than at the box.
+    if ($hb -eq 'EMPTY' -or ($hb -ne 'ABSENT' -and [string]::IsNullOrWhiteSpace($hb))) {
+        return New-CfvResult -Condition 'RunnerDead' -Name $Name -Text $r.Text -Extra $kv `
+                 -Stderr "the heartbeat file exists but is EMPTY ($($kv['HBBYTES']) bytes) while the task state is '$($kv['TASKSTATE'])'. This is a BROKEN STAMPER, not necessarily a dead runner -- read the runner log before concluding the box is gone."
+    }
+    if ($hb -eq 'ABSENT' -and $kv['TASKSTATE'] -ne 'Running') {
+        return New-CfvResult -Condition 'RunnerAbsent' -Name $Name -Text $r.Text -Extra $kv `
+                 -Stderr "no runner has ever beaten on this queue and its task state is '$($kv['TASKSTATE'])'. For the WSL queue this means there is no interactive session, which is an unmet PRECONDITION and never a product verdict."
+    }
     if ($hb -eq 'ABSENT' -or $null -eq $age -or $age -gt $StaleSeconds) {
         return New-CfvResult -Condition 'RunnerDead' -Name $Name -Text $r.Text -Extra $kv
     }
@@ -413,13 +527,14 @@ function Wait-CfvJob {
         [int]$Minutes = 60,
         [int]$IntervalSeconds = 60,
         [int]$StaleSeconds = 90,
-        [int]$DeadTolerance = 2
+        [int]$DeadTolerance = 2,
+        [switch]$Wsl
     )
     $deadline = (Get-Date).AddMinutes($Minutes)
     $deadStreak = 0
     $last = $null
     while ((Get-Date) -lt $deadline) {
-        $st = Get-CfvJobStatus -Run $Run -Name $Name -StaleSeconds $StaleSeconds
+        $st = Get-CfvJobStatus -Run $Run -Name $Name -StaleSeconds $StaleSeconds -Wsl:$Wsl
         $last = $st
         $hb = if ($st.Extra) { $st.Extra['HEARTBEAT'] } else { '' }
         Write-Host ("  [{0}] {1,-16} hb={2}" -f (Get-Date -Format 'HH:mm:ss'), $st.Condition, $hb)
@@ -438,6 +553,10 @@ function Wait-CfvJob {
                 }
             }
             default { $deadStreak = 0 }
+        }
+        if ($st.Condition -eq 'RunnerAbsent') {
+            Write-Host "  RUNNER ABSENT on this queue: $($st.Stderr)" -ForegroundColor Yellow
+            return $st
         }
         if ($st.Condition -in @('BoxUnreachable','DispatchConflict','DispatchFailed')) {
             Write-Host "  channel condition '$($st.Condition)' -- this says nothing about the product." -ForegroundColor Yellow
@@ -459,11 +578,18 @@ function Receive-CfvJobOutput {
     param(
         [Parameter(Mandatory)]$Run,
         [Parameter(Mandatory)][string]$Name,
-        [int]$ChunkBytes = 6000,
-        [int]$MaxChunks = 60
+        # 2048 RAW bytes, because base64 expands 4/3 and the whole reply must fit
+        # under the channel's MEASURED 4096-byte ceiling alongside both sentinels
+        # and the CHUNK_OFFSET line. The previous default of 6000 exceeded the
+        # ceiling on its own, so every chunk of a large .out was head-truncated;
+        # only the reassembled-byte-count assertion below caught it.
+        [int]$ChunkBytes = 2048,
+        [int]$MaxChunks = 400,
+        [switch]$Wsl
     )
+    $qd = if ($Wsl) { $Run.WslJobDir } else { $Run.JobDir }
     $sizeR = Invoke-CfvBox -Run $Run -Name "size-$Name" -Quiet -Body @"
-Write-Output "OUTBYTES=`$(if (Test-Path '$($Run.JobDir)\$Name.out') { (Get-Item '$($Run.JobDir)\$Name.out').Length } else { -1 })"
+Write-Output "OUTBYTES=`$(if (Test-Path '$qd\$Name.out') { (Get-Item '$qd\$Name.out').Length } else { -1 })"
 "@
     if ($sizeR.Condition -ne 'Ok') { return $sizeR }
     if ($sizeR.Text -notmatch 'OUTBYTES=(-?\d+)') {
@@ -480,7 +606,7 @@ Write-Output "OUTBYTES=`$(if (Test-Path '$($Run.JobDir)\$Name.out') { (Get-Item 
     while ($offset -lt $total -and $chunks -lt $MaxChunks) {
         $chunks++
         $r = Invoke-CfvBox -Run $Run -Name "chunk$chunks-$Name" -Quiet -Body @"
-`$fs = [IO.File]::OpenRead('$($Run.JobDir)\$Name.out')
+`$fs = [IO.File]::OpenRead('$qd\$Name.out')
 try {
     `$fs.Position = $offset
     `$buf = New-Object byte[] $ChunkBytes
@@ -686,7 +812,7 @@ function Measure-CfvOutputLimit {
   Run it once per fleet change. It is the only caller permitted to dispatch
   without a sentinel, and it does so only for the control half.
 #>
-    param([Parameter(Mandatory)]$Run, [int[]]$Sizes = @(1024, 4096, 8192, 12288, 16384, 24576, 32768, 65536))
+    param([Parameter(Mandatory)]$Run, [int[]]$Sizes = @(512, 1024, 2048, 3072, 3584, 4096, 6144, 8192, 16384, 65536))
     $rows = @()
     foreach ($n in $Sizes) {
         $r = Invoke-CfvBox -Run $Run -Name "limit$n" -Quiet -Body @"

@@ -53,47 +53,100 @@
      preserved verbatim: .done is still the driver's read barrier and a partial
      .out can still never be read as a complete one.
 
-  5. IT SURVIVES A REBOOT BECAUSE IT DOES NOT DEPEND ON A LOGON.
+  5. THE WINDOWS-SIDE INSTANCE SURVIVES A REBOOT BECAUSE IT NEEDS NO LOGON.
 
      interim-v120-runner.ps1 is started by hand from an elevated PowerShell inside
      an interactive session, so a reboot ends it and a human has to start it again.
-     This one is registered by cfv-arm-persistence.ps1 as a scheduled task with an
-     AtStartup trigger and an S4U principal, which needs no stored credential and
-     no interactive session. See that file for the security discussion.
+     cfv-arm-persistence.ps1 registers this one as a SYSTEM AtStartup scheduled
+     task instead, which needs no stored credential and no session.
 
   WHAT THIS RUNNER CANNOT DO, STATED HERE RATHER THAN DISCOVERED
   --------------------------------------------------------------
-  az vm run-command executes as NT AUTHORITY\SYSTEM and wsl.exe refuses LocalSystem
-  by name, which is why the job-file mechanism exists at all. This runner runs as
-  the admin account and not as SYSTEM, so it clears that specific refusal. Whether
-  WSL2 works under an S4U token in session 0 is a separate question that this file
-  does not assume: the runner PROBES it once at startup, writes the answer to
-  _wslcontext.json, and every job may read it. A job that needs WSL and finds
-  WSL_OK=false records a named precondition failure rather than a product verdict.
+  wsl.exe refuses NT AUTHORITY\SYSTEM BY NAME -- measured on cfv-192:
+  WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED, exit -1. So the SYSTEM instance can take every
+  Windows-side measurement and NO WSL measurement.
+
+  An S4U principal would have given a non-SYSTEM boot context with no credential,
+  and it was tried first. It is DENIED on this build, from four paths, with two
+  controls succeeding in the same run -- see cfv-arm-persistence.ps1's header for
+  the measurement. So the WSL instance runs under an Interactive clawadmin
+  principal and exists only while a session does.
+
+  The consequence is stated rather than hidden: Windows-side work is unattended
+  across reboots; WSL work is not, and cannot be without a credential. A WSL job
+  dropped with no session leaves the wsljobs heartbeat ABSENT, which the driver
+  reports as RunnerAbsent -- a NAMED PRECONDITION, and a missing precondition is
+  never a product verdict.
+
+  This runner still probes its own WSL capability once at startup, with a control,
+  and records the answer in _wslcontext.json. "Not SYSTEM" and "WSL works here"
+  are different claims and the second one is measured, not inferred.
 #>
 param(
     [Parameter(Mandatory)][string]$RunId,
-    [string]$Root = 'C:\cfv\runs'
+    [string]$Root = 'C:\cfv\runs',
+    # Which job directory this instance services.
+    #
+    # The SYSTEM instance takes jobs\ -- every Windows-side measurement. It comes
+    # back at every boot with no logon and no credential.
+    #
+    # The clawadmin Interactive instance takes wsljobs\ -- anything touching
+    # wsl.exe, which refuses NT AUTHORITY\SYSTEM by name. An Interactive
+    # principal only runs while a session exists, so this instance cannot come
+    # back on its own after a reboot.
+    #
+    # TWO DIRECTORIES rather than one queue with tagged jobs, so that a WSL job
+    # dropped on a box with no session is VISIBLY unserviced -- the wsljobs
+    # heartbeat is simply absent -- instead of sitting silently behind a runner
+    # that could never have executed it.
+    [string]$JobSubdir = 'jobs'
 )
 
 $ErrorActionPreference = 'Continue'
 
 $RunDir = Join-Path $Root $RunId
-$JobDir = Join-Path $RunDir 'jobs'
+$JobDir = Join-Path $RunDir $JobSubdir
 foreach ($d in @($RunDir, $JobDir, (Join-Path $RunDir 'evidence'))) {
     New-Item -ItemType Directory -Path $d -Force | Out-Null
 }
-
 $HeartbeatPath = Join-Path $JobDir '_runner.heartbeat'
 $RunnerLog     = Join-Path $JobDir '_runner.log'
 
 function Stamp-Heartbeat {
-    <# Written with WriteAllText so the file is replaced atomically enough that a
-       reader never sees a zero-byte heartbeat and calls the runner dead. #>
+    <#
+      Written with WriteAllText so a reader never sees a partially written line.
+
+      BUILT BY CONCATENATION, NOT BY -f, AND THE CATCH IS NOT SILENT. Both of
+      those are scar tissue from this function's first run on cfv-192.
+
+      It was written as
+
+          '{0} state={1} ...' -f `
+              (Get-Date).ToUniversalTime().ToString('s') + 'Z', $State, ...
+
+      and -f binds TIGHTER than +, so the format string received exactly one
+      argument, threw "Index (zero based) must be ... less than the size of the
+      argument list", and an empty `catch { }` swallowed it. The runner then ran
+      perfectly while never stamping a heartbeat, and the driver correctly
+      reported RunnerDead against a live runner -- a false negative manufactured
+      by the liveness signal itself.
+
+      A silent catch inside the one function whose purpose is to prevent silence
+      is the defect this whole job is about, committed in the fix for it. So the
+      failure now goes to the runner log AND to the heartbeat file, because a
+      heartbeat that cannot be written must not look like a runner that is gone.
+    #>
     param([string]$State, [string]$Job = '', [int]$JobPid = 0, [int]$Elapsed = 0)
-    $line = '{0} state={1} job={2} pid={3} elapsed={4} runid={5}' -f `
-            (Get-Date).ToUniversalTime().ToString('s') + 'Z', $State, $(if ($Job) { $Job } else { '-' }), $JobPid, $Elapsed, $RunId
-    try { [IO.File]::WriteAllText($HeartbeatPath, $line) } catch { }
+    $stamp = (Get-Date).ToUniversalTime().ToString('s') + 'Z'
+    $j = if ($Job) { $Job } else { '-' }
+    $line = $stamp + ' state=' + $State + ' job=' + $j + ' pid=' + $JobPid + ' elapsed=' + $Elapsed + ' runid=' + $RunId
+    try {
+        [IO.File]::WriteAllText($HeartbeatPath, $line)
+    } catch {
+        $msg = 'HEARTBEAT_WRITE_FAILED: ' + $_.Exception.Message
+        try { ($stamp + ' ' + $msg) | Out-File $RunnerLog -Encoding utf8 -Append } catch { }
+        try { [IO.File]::WriteAllText($HeartbeatPath, ($stamp + ' state=STAMP_FAILED runid=' + $RunId)) } catch { }
+    }
 }
 
 function Log([string]$m) {
@@ -114,6 +167,21 @@ function Log([string]$m) {
 # for everything -- or a wrapper that swallows exit codes -- would otherwise read
 # as a healthy WSL.
 # ---------------------------------------------------------------------------
+function Test-WslTextMatch {
+    <# See cfv-driverlib.ps1's Test-CfvWslTextMatch for the full reason. Short
+       version: wsl.exe writes its own messages in UTF-16LE, so read through an
+       8-bit console encoding they arrive with a NUL after every character and a
+       plain -match fails against the exact string it is looking for. Duplicated
+       here rather than shared because this file runs alone on the box. #>
+    param([string]$Haystack, [string]$Needle)
+    if ([string]::IsNullOrEmpty($Haystack)) { return $false }
+    if ($Haystack -match [regex]::Escape($Needle)) { return $true }
+    $h = $Haystack -replace "`0", ''
+    if ($h -match [regex]::Escape($Needle)) { return $true }
+    $pat = ($Needle.ToCharArray() | ForEach-Object { [regex]::Escape([string]$_) }) -join '[\s\x00]?'
+    return ($h -match $pat)
+}
+
 function Probe-WslContext {
     $r = [ordered]@{
         RunId          = $RunId
@@ -142,7 +210,7 @@ function Probe-WslContext {
         $out = & $wsl -d Ubuntu -u root -- /bin/sh -c 'echo CFV_WSL_ALIVE' 2>&1 | Out-String
         $r.SubjectExit = $LASTEXITCODE
         $r.SubjectOut  = $out.Trim()
-        $r.SubjectOk   = ($r.SubjectExit -eq 0 -and $out -match 'CFV_WSL_ALIVE')
+        $r.SubjectOk   = ($r.SubjectExit -eq 0 -and (Test-WslTextMatch $out 'CFV_WSL_ALIVE'))
     } catch { $r.SubjectOut = "threw: $($_.Exception.Message)" }
 
     # CONTROL: must FAIL. If this exits 0, exit codes are not propagating through
@@ -209,6 +277,14 @@ while ($true) {
                         -RedirectStandardOutput $soPath -RedirectStandardError $sePath `
                         -WindowStyle Hidden -PassThru
                 $procPid = $p.Id
+                # TOUCH .Handle BEFORE WAITING. Without this, a process started
+                # with -PassThru and redirected streams returns a NULL ExitCode
+                # after it exits: .NET releases the process handle and the code
+                # is no longer readable. Measured on cfv-192 -- p1 completed and
+                # wrote RUNNER_EXITCODE= with nothing after it, which makes a job
+                # that failed and a job that passed identical to the driver.
+                # Reading .Handle forces the handle to be cached.
+                $null = $p.Handle
                 Stamp-Heartbeat -State 'running' -Job $name -JobPid $procPid -Elapsed 0
 
                 while (-not $p.HasExited) {
@@ -216,7 +292,10 @@ while ($true) {
                     Stamp-Heartbeat -State 'running' -Job $name -JobPid $procPid -Elapsed ([int]$sw.Elapsed.TotalSeconds)
                 }
                 $p.WaitForExit()
-                $rc = $p.ExitCode
+                # An UNREADABLE exit code is not the same as exit 0, and must
+                # never be emitted as an empty string that a reader can mistake
+                # for either. Name it.
+                if ($null -eq $p.ExitCode) { $rc = 'UNREADABLE' } else { $rc = $p.ExitCode }
             } catch {
                 try { "RUNNER_CAUGHT: $($_.Exception.Message)" | Out-File $sePath -Encoding utf8 -Append } catch { }
                 $rc = 9009

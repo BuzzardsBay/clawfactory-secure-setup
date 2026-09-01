@@ -57,7 +57,12 @@ param(
                  'limit','breakit','fetch','status','deallocate','start','teardown')]
     [string]$Step,
     [string]$AdminUser = 'clawadmin',
-    [string]$RunIdFile = 'C:\Users\bmcki\ClawFactory-Secure-Setup\validation\diag\cfv-192-runid.txt'
+    [string]$RunIdFile = 'C:\Users\bmcki\ClawFactory-Secure-Setup\validation\diag\cfv-192-runid.txt',
+    # Minting a new RunId is an EXPLICIT act, not a side effect of re-running the
+    # stage step. Re-staging a corrected script mid-run must keep the run's
+    # identity, or the evidence splits across two directories and the owner stamp
+    # stops describing the run that produced it.
+    [switch]$NewRun
 )
 
 $ErrorActionPreference = 'Continue'
@@ -70,7 +75,7 @@ New-Item -ItemType Directory -Path (Split-Path -Parent $RunIdFile) -Force | Out-
 # state on the box sits under one owned directory. That is the whole point of
 # scoping; a step that minted its own would recreate the flat C:\cfv problem
 # inside the fix for it.
-if ($Step -eq 'stage' -or -not (Test-Path $RunIdFile)) {
+if ($NewRun -or -not (Test-Path $RunIdFile)) {
     $Run = New-CfvRun -Vm $Vm -ResourceGroup $Rg -Label 'harnessproof'
     [IO.File]::WriteAllText($RunIdFile, ($Run | ConvertTo-Json -Depth 4), (New-Object Text.UTF8Encoding($false)))
 } else {
@@ -152,10 +157,20 @@ Write-Output "CTL_WSL_LIST_EXIT=$LASTEXITCODE"
 Write-Output $out2
 '@
     Save-Result 'ctl-wsl-system' $r
-    if ($r.Text -match 'WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED|LocalSystem|not supported') {
+    # Test-CfvWslTextMatch, not -match. wsl.exe's own messages are UTF-16LE and a
+    # plain match fails against the exact error name it is looking for; measured
+    # on this fleet, see that function's comment.
+    $refused = (Test-CfvWslTextMatch $r.Text 'WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED') -or
+               (Test-CfvWslTextMatch $r.Text 'Running WSL as local system is not supported')
+    # The other half of the calibration, in the same run: a string that MUST NOT
+    # be found. Without it a matcher loose enough to find anything would read as
+    # a working control.
+    $absent = -not (Test-CfvWslTextMatch $r.Text 'WSL_E_THIS_ERROR_DOES_NOT_EXIST')
+    Write-Host "  matcher calibration: refusal-found=$refused absent-string-not-found=$absent" -ForegroundColor DarkGray
+    if ($refused -and $absent) {
         Write-Host "  CONTROL FIRED: wsl.exe refuses SYSTEM by name. An S4U success below is therefore meaningful." -ForegroundColor Green
     } else {
-        Write-Host "  CONTROL DID NOT FIRE. wsl.exe under SYSTEM did not refuse. Read the transcript before believing any S4U result." -ForegroundColor Red
+        Write-Host "  CONTROL DID NOT FIRE. Read the transcript before believing any S4U result." -ForegroundColor Red
     }
 }
 
