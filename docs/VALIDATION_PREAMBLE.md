@@ -135,14 +135,16 @@ session what to do. A card that says what to do but not the exact command is not
 Each card carries: what to do, the exact commands with real values already substituted,
 what success looks like, and what to do if it does not appear.
 
-Card 1, at provisioning, before install:
+Card 1 is NO LONGER REQUIRED AT PROVISIONING. See THE ADMIN PASSWORD IS THE SESSION'S,
+NOT THE OPERATOR'S below, decided 2026-09-01. The session provisions the box itself.
+
+Where a card IS still printed at provisioning -- because the run needs a decision, not
+because it needs a password -- it carries:
 - the VM name
-- the public IP detected and the exact /32 the RDP rule was scoped to, AND which machine
-  that address belongs to, so the operator can confirm they will be connecting from that
-  machine rather than another one or a VPN
-- the exact az command to set the admin password, with an obvious placeholder for the
-  value, stating plainly that the operator chooses it, saves it in their password manager,
-  and does not paste it back into the session or into chat
+- the public IP detected and, IF an RDP rule was created at all, the exact /32 it was
+  scoped to AND which machine that address belongs to, so the operator can confirm they
+  will be connecting from that machine rather than another one or a VPN. A run that needs
+  no human on the box creates NO RDP rule, and the card says so
 - then WAIT for confirmation before proceeding
 
 Card 2, before every reboot:
@@ -153,8 +155,35 @@ Card 2, before every reboot:
 - whether auto-logon already produced a session, in which case the login is unnecessary
   and the card SAYS SO rather than sending someone to the console for nothing
 
-Do not generate an admin password, do not print one, do not ask for one, and do not call
-az vm user update after provisioning. The operator sets it once, at provisioning.
+THE ADMIN PASSWORD IS THE SESSION'S, NOT THE OPERATOR'S. Decided by the operator on
+2026-09-01, superseding the clause that made it his.
+
+The session GENERATES the validation VM's admin password inside the provisioning command,
+so the value is never seen, never printed, never stored, and never enters a transcript:
+
+    $pw = -join ((1..24) | % { [char](Get-Random -Input (48..57 + 65..90 + 97..122)) })
+
+- NEVER print it, echo it, write it to a file, put it in a variable that outlives the
+  command, or repeat it back. Report its length at most.
+- NEVER ask the operator for a password and never hand him one.
+- This applies to VALIDATION VMs in clawfactory-validation ONLY -- boxes created to be
+  measured and deleted, with no inbound path and nothing on them. It is not a licence to
+  generate credentials anywhere else.
+
+STILL FORBIDDEN, and for a different reason: do not call az vm user update after
+provisioning. An unchecked one hung the VMAccess extension and cost an hour on cfv-162,
+and it is the route by which the forbidden drivers reset a live account.
+
+WHY THIS CHANGED. The old clause bought nothing on these boxes. A validation VM is created
+--nsg-rule NONE with no inbound path, holds nothing, and is deleted within hours; a leaked
+password for it is worthless, while the clause cost one human interruption per box per
+cycle. The operator's own reasoning: "I don't see a reason for me to enter the passwords
+and get into the VMs if you can do it yourself."
+
+A PASSWORD NOBODY KNOWS IS THE CORRECT DESIGN FOR A BOX NOBODY LOGS INTO. Where a run does
+need an interactive session -- the WSL runner, or a screenshot of a panel -- the session
+owning the password is also what makes persistent auto-logon available without asking
+anyone for anything. See docs/session_reports/2026-09-01_unattended_harness_closeout.md.
 
 A probe whose subject expires on a timer cannot be staged in advance and handed to a
 person. Stage it IMMEDIATELY before they act. A hand check with a ten-minute fuse expired
@@ -173,8 +202,11 @@ copyable box and cannot be copied cleanly.
 
 - One command per fenced block. One fenced block per step. If two commands must run in
   sequence, that is TWO numbered steps with TWO fences, not one fence with two lines.
-- Every command is copy-paste ready with every value already substituted. The ONLY
-  placeholder ever permitted is PUT-PASSWORD-HERE.
+- Every command is copy-paste ready with every value already substituted. NO PLACEHOLDERS
+  AT ALL. PUT-PASSWORD-HERE was the single permitted one and it is now retired, because
+  the session generates the VM password itself -- see THE ADMIN PASSWORD IS THE SESSION'S
+  above. A card that asks the operator to substitute anything is a card that has not
+  finished its own work.
 - No prose, no comments and no # lines inside a fence. Explanation goes in the sentence
   ABOVE the fence.
 - No language tag on the fence unless the content really is PowerShell or bash and the
@@ -185,27 +217,26 @@ copyable box and cannot be copied cleanly.
 
 The shape, where the fenced blocks are real fences and everything else is ordinary prose:
 
+The example below is a card for a check only a person can make -- something read by eye.
+Provisioning is NOT such a card any more: the session creates the box itself.
+
 DO THIS
 
-1. Create the box. Replace PUT-PASSWORD-HERE with the password from your paper.
+1. Open the Approvals panel in Studio.
 
 ```
-az vm create -g clawfactory-validation -n cfv-190 ...
+C:\Program Files\ClawFactory\Studio\ClawFactory Studio.exe
 ```
 
-You should see: a table ending with "powerState": "VM running".
+You should see: the Approvals tab listing one pending item, with a Deny button.
 
-2. Connect to it.
+2. Read the footnote under the software-sources card back to me, word for word.
 
-```
-mstsc /v:20.10.30.40
-```
+You should see: a single sentence beginning "Sources you add here".
 
-You should see: a Windows login prompt. Sign in as clawadmin.
+Then reply with what it says.
 
-Then reply: box up
-
-If step 1 fails with a quota error, send me the message and stop.
+If Studio does not open, send me the message and stop.
 
 MEASUREMENT DISCIPLINE
 

@@ -16,21 +16,30 @@ in full.
 
 ## 1. The number, which is the deliverable (TASK 6.4)
 
-**The next validation cycle needs 1 operator interruption per box, plus 1 batched interruption
-for the whole cycle.**
+> **REVISED 2026-09-01, after the operator's decision in §6.1.** The number below was
+> originally **5 per four-box cycle**, carrying one provisioning touch per box. The operator
+> took the recommendation and removed that touch. The revised number stands.
 
-For a four-box cycle shaped like v1.4.4 that is **5 interruptions, against the 13–15 that cycle
-actually cost.**
+**The next validation cycle needs ONE operator interruption for the whole cycle, regardless of
+how many boxes it uses** — a single batched end-of-run card — plus the release, if the cycle
+ends in one.
+
+For a four-box cycle shaped like v1.4.4 that is **1–2 interruptions, against the 13–15 that
+cycle actually cost.**
 
 | | Irreducible? | Why |
 |---|---|---|
-| **Set the admin password at `az vm create`**, once per box | **Reducible, and it is your call** — see §6 | A credential you own. But see the recommendation: for a box nobody logs into, a password nobody knows is strictly better |
-| **One end-of-run batch** carrying M-1…M-6, M-9 | **No, but it cannot be removed** — those are things a person must look at | Rendered dialogs and panels read by eye |
-| **Enter the real SMTP credential** (M-3) | **Irreducible** | A live secret with reach beyond the box |
-| **Create the GitHub Release** (M-11) | **Irreducible** | A public action |
+| ~~Set the admin password at `az vm create`~~ | **REMOVED** — §6.1 | The session generates it inside the command; the value is never seen, printed or stored |
+| **One end-of-run batch** carrying M-1…M-6, M-9 | **Cannot be removed today**, but see §6.4 | Rendered dialogs and panels read by eye. I cannot RDP to a validation VM without driving `mstsc` on the operator's own desktop, which a standing rule forbids |
+| **Enter the real SMTP credential** (M-3) | **Irreducible** | A live secret with reach beyond the box. Folds into the batch |
+| **Create the GitHub Release** (M-11) | **Irreducible** | A public action. Belongs to the release job, not the validation run |
 
-**Everything removed was the same thing: starting or restarting the on-VM runner.** No
-measurement got cheaper. The transport stopped needing a person.
+**Two different kinds of removal, and the distinction matters.** The runner start and every
+restart were *transport* — no measurement got cheaper, it simply stopped needing a person. The
+provisioning password was removed by a **decision**, not an engineering change; it was never a
+measurement at all.
+
+**What remains is only ever what a person must see or authorise.**
 
 ---
 
@@ -320,24 +329,61 @@ it is precisely the outcome a green run could never have delivered.
 
 ## 6. Challenging the scope — three things (TASK 2, and the card's own question)
 
-**1. The admin password: my original recommendation was to leave it with you. I now think that is
-wrong, and it is your call.**
+### 6.1 The admin password — DECIDED. It is the session's, not the operator's
 
-The concrete harm of me generating one is narrow: it would land in this session's transcript on
-disk and on a command line. For `cfv-192` — created `--nsg-rule NONE`, no inbound path, holding
-nothing, deleted in hours — that is close to worthless.
+**I recommended against my own TASK 2 conclusion, and the operator took the recommendation on
+2026-09-01:**
 
-**The version that removes the step without putting a secret anywhere:** generate it inside the
-command, never materialised in this session —
+> *"I don't see a reason for me to enter the passwords and get into the VMs if you can do it
+> yourself."*
+
+**The decision.** The session generates the validation VM's admin password inside the
+provisioning command, so the value is never seen, never printed, never stored, and never enters a
+transcript:
 
 ```
 $pw = -join ((1..24) | % { [char](Get-Random -Input (48..57 + 65..90 + 97..122)) })
 ```
 
-I never see it, it never enters the transcript, it dies with the shell. **And nobody needs it** —
-these boxes are built so no human logs in. **A password nobody knows is the correct design for a
-box nobody logs into.** This is a change to a governing clause, so it is yours to make; it is not
-taken here.
+**Why the old clause bought nothing on these boxes.** A validation VM is created `--nsg-rule NONE`
+with no inbound path, holds nothing, and is deleted within hours. A leaked password for it is
+worthless — while the clause cost one human interruption per box per cycle. **A password nobody
+knows is the correct design for a box nobody logs into.**
+
+**What did NOT change, and for a separate reason.** `az vm user update` after provisioning stays
+forbidden: an unchecked one hung the VMAccess extension and cost an hour on `cfv-162`, and it is
+the route by which the forbidden drivers reset a live account. The two prohibitions were always
+about different failures and only one of them has been lifted.
+
+**Scope.** Validation VMs in `clawfactory-validation` only — boxes created to be measured and
+deleted. This is not a licence to generate credentials anywhere else, and the preamble says so.
+
+**Governing text updated in the same commit:** `docs/VALIDATION_PREAMBLE.md` — the
+`Do not generate an admin password` clause is replaced by
+`THE ADMIN PASSWORD IS THE SESSION'S, NOT THE OPERATOR'S`; Card 1 is no longer required at
+provisioning; the `PUT-PASSWORD-HERE` placeholder is **retired**, and with it the only
+placeholder the card format ever permitted; the worked card example is replaced with one for a
+check only a person can make, because provisioning is no longer such a card.
+
+### 6.4 What the decision unlocks, which is bigger than the touch it removed
+
+Flagged as a consequence, not done here. **The session owning the password also makes persistent
+auto-logon available without asking anyone for anything** — write `AutoAdminLogon` and
+`DefaultPassword` with **no** `AutoLogonCount`, which is what makes it survive rather than fire
+once. That would give a standing interactive session, and therefore:
+
+1. **The WSL runner becomes unattended too.** §3.3's honest split — *"WSL work is not, and cannot
+   be, without a credential"* — was true only while the credential was the operator's. It no
+   longer is. This is the single largest remaining gap and the decision closes the route to it.
+2. **Screenshots become possible.** A user-context runner can capture the Studio panels, which
+   would turn M-1 from *"sit at the keyboard for 30–45 minutes"* into *"approve these ten
+   images"*. That does not remove the human — someone must still look — but it removes the
+   keyboard time and the scheduling problem.
+
+**The cost, stated plainly:** a cleartext password in `HKLM\...\Winlogon\DefaultPassword` on a
+throwaway box with no inbound path, deleted within hours. It cannot reach a customer machine —
+`validation/` is bundled by nothing (§3.4). That is a real exposure and a small one, and it should
+be taken deliberately in the job that builds it rather than assumed here.
 
 **2. The manual/automated split removes zero interruptions.** It converts ~7 scattered ones into 1
 batch, which is worth doing and is done (`MANUAL_CHECKS_REGISTER.md`), but it should not be
@@ -403,7 +449,10 @@ time**, unlike the two prior cycles; recorded as the distinction the preamble re
 2. **`M-7`, the logon-flash observation** — deferred three cycles. It is now *harder*, because the
    runs no longer produce an interactive logon by accident; it must be deliberately scheduled.
 3. **`PR.C8`, reboot-and-resume on a first-run machine** — untouched by this job.
-4. **The password decision** — §6, yours.
+4. ~~The password decision~~ — **TAKEN 2026-09-01**, §6.1. The governing text is updated in the
+   same commit. **What it opens is now the item:** persistent auto-logon, which makes the WSL
+   runner unattended and Studio-panel screenshots possible (§6.4). That is the largest remaining
+   reduction available and it is a separate job.
 5. **The `fetch` step of `cfv-harness-proof.ps1` asks for more than 4096 bytes** and correctly
    reports `OutputTruncated`. It should be split into bounded pieces. Recorded rather than fixed,
    because it failed loudly and that is the designed behaviour.
@@ -420,6 +469,14 @@ $ git status --short          # at session start
 (clean)
 ```
 
-Explicit per-file staging throughout. No `git add -A`. No `git worktree add`. **No tags.** Six
+Explicit per-file staging throughout. No `git add -A`. No `git worktree add`. **No tags.** Ten
 commits, one per logical change. Both the working tree and the index are LF, verified by a byte
 count with both canary halves rather than by `git status`.
+
+**`git status` lied, in the direction nobody guards against.** After normalising the evidence
+files it reported 13 as modified while `git diff` and `git diff --cached` were both **zero
+bytes**. Byte-for-byte comparison of the committed blob against the worktree file said
+**IDENTICAL** (208 bytes each), with a control proving `cmp` discriminates. It was a stale stat
+cache, cleared by `git update-index --really-refresh`. The recorded lesson in this project is that
+`git status` is blind to CRLF divergence; this is the same instrument failing the other way, and
+the fix is the same — **compare bytes, not status.**
