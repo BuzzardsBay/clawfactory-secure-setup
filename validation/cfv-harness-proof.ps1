@@ -313,25 +313,47 @@ Write-Output "TASK=`$(try { (Get-ScheduledTask -TaskName 'CFV-Runner' -EA Stop).
 }
 
 'teardown' {
-    # NIC FIRST -- it references the pip and the nsg. Every exit code checked.
-    & cmd.exe /c "az vm delete -g $Rg -n $Vm --yes -o none" | Out-Null;            Write-Host "vm delete exit=$LASTEXITCODE"
-    & cmd.exe /c "az network nic delete -g $Rg -n ${Vm}VMNic -o none" | Out-Null;   Write-Host "nic delete exit=$LASTEXITCODE"
-    & cmd.exe /c "az network public-ip delete -g $Rg -n $Vm-pip -o none" | Out-Null; Write-Host "pip delete exit=$LASTEXITCODE"
-    & cmd.exe /c "az network nsg delete -g $Rg -n $Vm-nsg -o none" | Out-Null;      Write-Host "nsg delete exit=$LASTEXITCODE"
-    # Paren-free --query: az on Windows is az.cmd and cmd.exe re-parses brackets.
-    # A failed enumeration here deletes nothing and the loop is silent about it,
-    # which is why the unfiltered residual below is the claim that matters.
-    $disks = & cmd.exe /c "az disk list -g $Rg --query [].name -o tsv"
-    Write-Host "disk list exit=$LASTEXITCODE"
-    foreach ($d in ($disks -split "`r?`n" | Where-Object { $_ -and $_ -like "$Vm*" })) {
-        & cmd.exe /c "az disk delete -g $Rg -n $($d.Trim()) --yes -o none" | Out-Null
-        Write-Host "disk $($d.Trim()) delete exit=$LASTEXITCODE"
+    # The names az vm create chooses have differed between cycles -- cfv-186-nic
+    # and cfv-shared-nsg in one, <vm>VMNic and <vm>NSG in another -- so this
+    # ENUMERATES rather than guessing. A delete aimed at a name that does not
+    # exist reports success against nothing, which is the failure the unfiltered
+    # residual below exists to catch and which should not be relied on.
+    #
+    # Paren-free --query throughout: az on Windows is az.cmd and cmd.exe
+    # re-parses a bracketed filter expression. A failed enumeration deletes
+    # nothing and the loop is silent about it.
+    function Get-Names([string]$cmd) {
+        $out = & cmd.exe /c $cmd
+        $rc = $LASTEXITCODE
+        if ($rc -ne 0) { Write-Host "  ENUMERATION FAILED (exit $rc): $cmd -- nothing below is a complete list" -ForegroundColor Red; return @() }
+        return @($out -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     }
+    $keep = @('bake-vmVNET','clawfactory-win11-baseline','clawfactory-win11-baseline-v2','clawfactoryvalc467')
+
+    & cmd.exe /c "az vm delete -g $Rg -n $Vm --yes -o none" | Out-Null; Write-Host "vm delete exit=$LASTEXITCODE"
+
+    # NIC FIRST -- it references the public IP and the NSG.
+    foreach ($n in (Get-Names "az network nic list -g $Rg --query [].name -o tsv" | Where-Object { $_ -like "$Vm*" })) {
+        & cmd.exe /c "az network nic delete -g $Rg -n $n -o none" | Out-Null; Write-Host "nic $n delete exit=$LASTEXITCODE"
+    }
+    foreach ($n in (Get-Names "az network public-ip list -g $Rg --query [].name -o tsv" | Where-Object { $_ -like "$Vm*" })) {
+        & cmd.exe /c "az network public-ip delete -g $Rg -n $n -o none" | Out-Null; Write-Host "pip $n delete exit=$LASTEXITCODE"
+    }
+    foreach ($n in (Get-Names "az network nsg list -g $Rg --query [].name -o tsv" | Where-Object { $_ -like "$Vm*" -or $_ -like 'cfv-*' })) {
+        & cmd.exe /c "az network nsg delete -g $Rg -n $n -o none" | Out-Null; Write-Host "nsg $n delete exit=$LASTEXITCODE"
+    }
+    foreach ($n in (Get-Names "az network vnet list -g $Rg --query [].name -o tsv" | Where-Object { $keep -notcontains $_ })) {
+        & cmd.exe /c "az network vnet delete -g $Rg -n $n -o none" | Out-Null; Write-Host "vnet $n delete exit=$LASTEXITCODE"
+    }
+    foreach ($n in (Get-Names "az disk list -g $Rg --query [].name -o tsv" | Where-Object { $_ -like "$Vm*" })) {
+        & cmd.exe /c "az disk delete -g $Rg -n $n --yes -o none" | Out-Null; Write-Host "disk $n delete exit=$LASTEXITCODE"
+    }
+
     Write-Host '--- UNFILTERED residual, which is the claim that matters ---'
-    & cmd.exe /c "az resource list -g $Rg --query [].[name,type] -o tsv"
+    & cmd.exe /c "az resource list -g $Rg --query [].[name,type] -o tsv"; Write-Host "resource list exit=$LASTEXITCODE"
     Write-Host '--- re-check, because "it said deleted" is not the same claim as "it is gone" ---'
     Start-Sleep -Seconds 25
-    & cmd.exe /c "az resource list -g $Rg --query [].[name,type] -o tsv"
+    & cmd.exe /c "az resource list -g $Rg --query [].[name,type] -o tsv"; Write-Host "resource list exit=$LASTEXITCODE"
 }
 
 }
