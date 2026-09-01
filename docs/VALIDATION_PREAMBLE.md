@@ -114,10 +114,10 @@ ENVIRONMENT, NOT NEGOTIABLE
   least one box per cycle from a stock image. Where the two clauses appear to conflict,
   that one wins.
 - ONE az vm run-command invoke at a time. They queue and interfere.
-- az vm run-command runs as SYSTEM and WSL refuses to run there. Every WSL test needs the
-  interactive auto-logon session. Auto-logon is a ONE-SHOT: after any reboot a human must
-  log in over RDP and start the on-VM runner by hand. Not scriptable around. Plan it into
-  any run that reboots.
+- az vm run-command runs as SYSTEM and WSL refuses to run there. Every WSL test needs a
+  session that is NOT SYSTEM. That is a statement about the ACCOUNT, not about interactive
+  logon, and the two were conflated here for four months. See THE AUTO-LOGON CLAUSE WAS
+  WRONG ABOUT ITS OWN FLEET below, which supersedes the sentence this one replaces.
 - /var/tmp, never /tmp. /tmp is tmpfs and is wiped by restart.
 - /mnt/c exists as an empty stub, so a directory test is NOT a valid check for Windows
   visibility.
@@ -466,6 +466,124 @@ section 6.3 and 6.5.
 
 ---
 
+
+---
+
+# Clauses earned in the 2026-09-01 harness-hardening job (card #259)
+
+These five are **not** part of the PROMPT 15 text copied above. They were earned by the four
+harness defects that the v1.4.3, v1.4.4 and v1.4.5 cycles found or nearly missed, each of
+which produced or would have produced a false reading, and none of which was fixed at the
+time. They are added here so a future job pastes them with the rest.
+
+The ratio those three cycles produced is the reason this section exists: **twelve instrument
+defects against zero product defects** in the last cycle alone. Every clause below guards the
+instrument, not the product.
+
+## 1. A liveness signal must be emitted by something other than the thing it reports on
+
+```
+A liveness signal must be emitted by something other than the thing it reports on. A
+heartbeat stamped by the same loop that executes the work stops beating for exactly as
+long as the work takes, so "alive and busy" and "dead" become one reading -- which is the
+ambiguity a heartbeat exists to remove. Stamp it from a waiter, not from the worker, and
+make it NAME what it is waiting on. Three states -- idle, running <job>, dead -- are three
+different responses, and a signal that can only distinguish two of them will send the wrong
+one a third of the time.
+```
+
+**Why this one exists.** `interim-v120-runner.ps1` stamps its heartbeat at the top of the
+poll loop and executes each job synchronously inside that loop. Its own header says the
+heartbeat exists "so the driver can tell *runner alive, job slow* apart from *runner dead*
+-- those need different responses and guessing between them wasted a run". It cannot: during
+a sixteen-minute install the heartbeat does not move. `interim-v146-runner.ps1` then recorded
+the freeze in its header as expected behaviour, which turned a defect into a contract and is
+the more serious half. Closed in `validation/cfv-runner.ps1`.
+
+## 2. A channel that can silently return less than it was asked for must prove it returned all of it
+
+```
+A channel that can silently return less than it was asked for must be made to PROVE it
+returned all of it. Bounding the request is necessary and not sufficient: a bound is a guess
+about a limit nobody has measured, and the failure it guards against is invisible by
+construction. End every payload with a tail sentinel carrying a per-dispatch nonce. A reply
+without its sentinel is a NAMED CONDITION -- truncated, or the payload died before its own
+last line -- and is never an empty result. Measure where the limit actually is rather than
+inheriting a figure from a close-out.
+```
+
+**Why this one exists.** `az vm run-command` returns **empty above roughly 16 KB while `az`
+exits zero**. A poller that asked for a 16.6 KB `.out` showed nothing for forty minutes while
+the `.done` barrier had existed the whole time; trusted at face value the conclusion would
+have been that the install hung. Closed by `Invoke-CfvBox`'s sentinel and
+`Receive-CfvJobOutput`'s chunked retrieval, which asserts the reassembled byte count against
+the count the box itself reported. `Measure-CfvOutputLimit` determines the real limit.
+
+## 3. A shared path with no owner is an accumulation, not a workspace
+
+```
+A shared path with no owner is an accumulation, not a workspace. Scope every run to a
+directory named for that run, and stamp it with who created it, from where, and when.
+Otherwise markers, job files and evidence from different runs, boxes and sessions pile up in
+one place, and the question "has this box already been measured, and by what" -- which
+decides whether a reading means anything at all -- has no answer on the box.
+```
+
+**Why this one exists.** `C:\cfv` was flat and unscoped across every run this project has
+taken. The preamble already requires knowing that *a second run over a box that has already
+been run is not the same measurement as the first*; the old layout gave a driver no way to
+find that out. Closed by `C:\cfv\runs\<RunId>\` and `_owner.json`. The `C:\cfv` root is kept
+because eighty files in the tree reference it and a tree-wide rename is a far larger change
+than the defect warrants.
+
+## 4. The sentence that reports an outcome is emitted by the check, not by the code path
+
+```
+The sentence that reports an outcome is emitted by the CHECK, not by reaching the line after
+the call. Under $ErrorActionPreference = 'Continue' -- which every driver here sets -- a
+failing call writes an error and execution continues, so an unconditional success line
+prints over a failure and the transcript is worse than silent: it is confidently wrong.
+
+And a precondition is not an outcome check. `if (Test-Path $source) { upload; report }`
+establishes that the SOURCE existed. It says nothing about whether the upload succeeded, and
+reading it as a guard is how an audit of this exact defect reported the two live instances
+clean.
+```
+
+**Why this one exists.** A SAS expiry built from local time and labelled `Z` made ten uploads
+return `AuthenticationFailed`, and the script printed `uploaded <file>` for all ten. That is
+`switch-provider.ps1:349`'s defect, reproduced by the session that was writing it up.
+`validation/cfv-successline-census.ps1` enumerates the shape tree-wide; the second paragraph
+was earned when that instrument's first calibration passed and it then reported the two known
+live instances clean.
+
+## 5. THE AUTO-LOGON CLAUSE WAS WRONG ABOUT ITS OWN FLEET
+
+```
+"Every WSL test needs the interactive auto-logon session" conflated two different claims.
+wsl.exe refuses NT AUTHORITY\SYSTEM BY NAME. That is a constraint on the ACCOUNT. It is not
+a constraint on interactive logon, and the last three cycles armed no auto-logon at all --
+they used an operator-initiated RDP session and paid one login per boot for it.
+
+The prohibition that actually binds is the CREDENTIAL one: arming auto-logon requires writing
+a cleartext password to HKLM Winlogon DefaultPassword, and every implementation in this tree
+gets that password by resetting the account with `az vm user update`, which PROMPT 15 forbids
+outright. So the question was never "how do we make a one-shot survive" -- it was "how do we
+get a non-SYSTEM context without a credential".
+
+A scheduled task with an S4U principal is a non-SYSTEM context that needs no password, can be
+registered by SYSTEM through run-command, and fires at every boot. Whether WSL works under
+that token is a SEPARATE claim and must be measured with a control, never assumed from "not
+SYSTEM".
+```
+
+**Why this one exists.** The clause it corrects said *"after any reboot a human must log in
+over RDP and start the on-VM runner by hand. Not scriptable around."* The second sentence was
+an inference from the credential rule, stated as a fact about Windows, and it governed three
+cycles. `docs/session_reports/2026-08-27_v143_validation_closeout.md:320` records the fleet's
+real state: `AutoAdminLogon=` empty, *"the driver arms no auto-logon"*. On `cfv-191` the cost
+of the inference was **54 minutes of dead wall clock**: Windows came back at `18:55:19` and
+nothing ran until the operator logged in at `19:49:24`.
 # Open measurements owed by the next validation cycle
 
 **This section is deliberately OUTSIDE the paste block above.** It is not boilerplate and
