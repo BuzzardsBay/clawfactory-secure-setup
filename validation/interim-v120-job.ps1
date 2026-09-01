@@ -74,6 +74,13 @@ function Push-File([string]$LocalPath) {
     if ("$remote" -ne "$localLen") { throw "Upload of $name landed $remote bytes, expected $localLen." }
     $sas = az storage blob generate-sas --account-name $StorageAcct --account-key $key `
              --container-name $Container --name $name --permissions r --expiry $exp -o tsv
+    # An unchecked generate-sas is the head of a failure the ledger already
+    # records once: a wrong flag exits 2 with an EMPTY token, the URL is built
+    # anyway, and Azure answers with a misleading PublicAccessNotPermitted that
+    # reads as a container problem. Check it here, where the cause is visible.
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sas)) {
+        throw "generate-sas for $name exited $LASTEXITCODE and returned $($sas.Length) characters. An empty SAS builds a URL that fails with a misleading error at the far end."
+    }
     Say "  staged $name ($localLen bytes, confirmed at the service)" DarkGray
     return @{ Name = $name; Url = "https://$StorageAcct.blob.core.windows.net/$Container/$name`?$sas"; Len = $localLen }
 }

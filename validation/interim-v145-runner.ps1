@@ -166,9 +166,18 @@ foreach (`$pair in @(@('C:\ProgramData\ClawFactory\install.log','v145-installlog
                      @('C:\cfv\pendingreboot-A-out-probe.txt','v145-pendingreboot-A-out.txt'),
                      @('C:\cfv\pendingreboot-A-results.json','v145-pendingreboot-A-results.json'))) {
     if (Test-Path `$pair[0]) {
+        # The outcome line is emitted by the CHECK, not by reaching this point.
+        # It previously sat unconditionally after the call: ten uploads returned
+        # AuthenticationFailed and ten "uploaded" lines printed anyway. The
+        # Test-Path above guards the SOURCE existing, which is a different claim.
         `$u = "https://$Sa.blob.core.windows.net/validation/`$(`$pair[1])`?`$sas"
-        Invoke-WebRequest -Uri `$u -Method Put -InFile `$pair[0] -Headers @{ 'x-ms-blob-type'='BlockBlob' } -UseBasicParsing | Out-Null
-        Write-Output "uploaded `$(`$pair[1])"
+        try {
+            `$resp = Invoke-WebRequest -Uri `$u -Method Put -InFile `$pair[0] -Headers @{ 'x-ms-blob-type'='BlockBlob' } -UseBasicParsing -ErrorAction Stop
+            if (`$resp.StatusCode -eq 201) { Write-Output "uploaded `$(`$pair[1]) status=201 bytes=`$((Get-Item `$pair[0]).Length)" }
+            else                           { Write-Output "UPLOAD NOT CONFIRMED `$(`$pair[1]) status=`$(`$resp.StatusCode)" }
+        } catch {
+            Write-Output "UPLOAD FAILED `$(`$pair[1]) : `$(`$_.Exception.Message)"
+        }
     }
 }
 if (Test-Path 'C:\ProgramData\ClawFactory\install.log') {
@@ -190,9 +199,18 @@ foreach (`$pair in @(@('C:\ProgramData\ClawFactory\install.log','v145-installlog
                      @('C:\cfv\pendingreboot-A2-out-probe.txt','v145-pendingreboot-A2-out.txt'),
                      @('C:\cfv\pendingreboot-B2-out-probe.txt','v145-pendingreboot-B2-out.txt'))) {
     if (Test-Path `$pair[0]) {
+        # The outcome line is emitted by the CHECK, not by reaching this point.
+        # It previously sat unconditionally after the call: ten uploads returned
+        # AuthenticationFailed and ten "uploaded" lines printed anyway. The
+        # Test-Path above guards the SOURCE existing, which is a different claim.
         `$u = "https://$Sa.blob.core.windows.net/validation/`$(`$pair[1])`?`$sas"
-        Invoke-WebRequest -Uri `$u -Method Put -InFile `$pair[0] -Headers @{ 'x-ms-blob-type'='BlockBlob' } -UseBasicParsing | Out-Null
-        Write-Output "uploaded `$(`$pair[1])"
+        try {
+            `$resp = Invoke-WebRequest -Uri `$u -Method Put -InFile `$pair[0] -Headers @{ 'x-ms-blob-type'='BlockBlob' } -UseBasicParsing -ErrorAction Stop
+            if (`$resp.StatusCode -eq 201) { Write-Output "uploaded `$(`$pair[1]) status=201 bytes=`$((Get-Item `$pair[0]).Length)" }
+            else                           { Write-Output "UPLOAD NOT CONFIRMED `$(`$pair[1]) status=`$(`$resp.StatusCode)" }
+        } catch {
+            Write-Output "UPLOAD FAILED `$(`$pair[1]) : `$(`$_.Exception.Message)"
+        }
     }
 }
 "@

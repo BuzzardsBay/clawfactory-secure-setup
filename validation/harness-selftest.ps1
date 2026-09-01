@@ -457,7 +457,11 @@ foreach ($f in $script:Findings) {
 $bad = @($script:Findings | Where-Object { -not $_.Ok })
 $summary = Join-Path $WorkDir 'harness-selftest-results.json'
 $script:Findings | ConvertTo-Json -Depth 5 | Out-File $summary -Encoding utf8
-Write-Host "`nDetail written to $summary"
+# Reported by the read-back rather than by reaching this line. Trivial here, but
+# this file is the one instrument other instruments are calibrated against, so it
+# does not get to carry the shape it exists to catch.
+if (Test-Path $summary) { Write-Host "`nDetail written to $summary ($((Get-Item $summary).Length) bytes)" }
+else                    { Write-Host "`nDETAIL NOT WRITTEN: $summary is absent after the write." -ForegroundColor Red }
 Write-Host "Per-fault transcripts and results files are beside it in $WorkDir"
 
 if ($bad.Count -gt 0) {

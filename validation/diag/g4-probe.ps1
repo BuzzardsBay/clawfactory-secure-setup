@@ -445,6 +445,13 @@ if(-not [G4W.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
         if ("$remote" -ne "$($f.Length)") { throw "upload of $($f.Name) landed $remote bytes, expected $($f.Length)." }
         $sas = az storage blob generate-sas --account-name $StorageAcct --account-key $key `
                  --container-name $Container --name $f.Name --permissions r --expiry $exp -o tsv
+        # See interim-v120-job.ps1's Push-File: an unchecked generate-sas can
+        # return an empty token at a non-zero exit, and the URL built from it
+        # fails at the far end with an error that names the container rather
+        # than the token.
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sas)) {
+            throw "generate-sas for $($f.Name) exited $LASTEXITCODE and returned $($sas.Length) characters."
+        }
         $dl += "Invoke-WebRequest -Uri 'https://$StorageAcct.blob.core.windows.net/$Container/$($f.Name)`?$sas' -OutFile C:\cfv\$($f.Name) -UseBasicParsing; "
         Say "  uploaded $($f.Name) ($($f.Length) bytes, size confirmed at the service)" DarkGray
     }
@@ -557,7 +564,17 @@ if(-not [G4W.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
         if (-not $done) { Say "  $($ph.n) did not finish in 40 min; continuing and recording the gap." Yellow }
         $out = Invoke-Rc "if (Test-Path C:\cfv\jobs\$($ph.n).out) { Get-Content C:\cfv\jobs\$($ph.n).out -Raw } else { 'NO OUTPUT FILE' }" "out $($ph.n)"
         $out | Out-File (Join-Path $dir "$($ph.n).out.txt") -Encoding utf8
-        Say "  transcript saved: $dir\$($ph.n).out.txt ($($out.Length) chars)" DarkGray
+        # "transcript saved" is emitted by the check, not by reaching this line.
+        # This retrieval is an UNBOUNDED Get-Content through run-command, which
+        # returns EMPTY above roughly 16 KB while az still exits zero, so a
+        # zero-length or missing transcript is a real and observed outcome here
+        # and must not print as a save. See cfv-driverlib.ps1's Receive-CfvJobOutput
+        # for the bounded, byte-count-asserted retrieval that replaces this shape.
+        if ([string]::IsNullOrWhiteSpace($out) -or $out -match 'NO OUTPUT FILE') {
+            Say "  TRANSCRIPT NOT RETRIEVED for $($ph.n): the run-command returned $(($out | Measure-Object -Character).Characters) chars. Empty output above the run-command size limit is indistinguishable from no output; do not read this as a clean phase." Red
+        } else {
+            Say "  transcript saved: $dir\$($ph.n).out.txt ($($out.Length) chars)" DarkGray
+        }
     }
     Say "All pre-reboot phases complete." Green
 }
@@ -618,7 +635,12 @@ if(-not [G4W.Cred]::Write('$SeedKeyTarget',`$k)){ throw 'CredWrite failed' }
     if (-not $done) { Say "  post-reboot pass did not finish in 20 min." Yellow }
     $out = Invoke-Rc "if (Test-Path C:\cfv\jobs\09-q2post.out) { Get-Content C:\cfv\jobs\09-q2post.out -Raw } else { 'NO OUTPUT FILE' }" 'out-q2post'
     $out | Out-File (Join-Path $dir '09-q2post.out.txt') -Encoding utf8
-    Say "  transcript saved: $dir\09-q2post.out.txt" DarkGray
+    # Same shape as the pre-reboot retrieval above, and the same reason.
+    if ([string]::IsNullOrWhiteSpace($out) -or $out -match 'NO OUTPUT FILE') {
+        Say "  TRANSCRIPT NOT RETRIEVED for 09-q2post: the run-command returned nothing. Above the run-command size limit that is indistinguishable from no output; do not read it as a clean phase." Red
+    } else {
+        Say "  transcript saved: $dir\09-q2post.out.txt ($($out.Length) chars)" DarkGray
+    }
 }
 
 'collect' {
