@@ -94,7 +94,13 @@ param(
     [Parameter(Mandatory)][string]$RunId,
     [Parameter(Mandatory)][string]$AdminUser,
     [string]$Root      = 'C:\cfv\runs',
-    [string]$RunnerPs1 = 'C:\cfv\cfv-runner.ps1'
+    [string]$RunnerPs1 = 'C:\cfv\cfv-runner.ps1',
+    # Set by the persistent-auto-logon job (cfv-arm-autologon.ps1 has already run).
+    # Without it this script asserts the ORIGINAL card #259 state -- no credential on
+    # the box -- and would FAIL a box that is correctly armed. With it the same
+    # assertion is inverted: auto-logon MUST be armed, or the WSL queue cannot be
+    # unattended and the read-back has to say so rather than report a PASS.
+    [switch]$AutoLogonExpected
 )
 
 $ErrorActionPreference = 'Continue'
@@ -206,15 +212,23 @@ Out-Kv 'ARM_WINLOGON_DEFAULTPASSWORD_PRESENT' $dpp
 # The SYSTEM task is the load-bearing one; the run proceeds without the user task
 # and simply cannot take WSL rows. So they are scored separately rather than
 # collapsed into one verdict that would hide which half is missing.
+$autoLogonArmed = ($aal -eq '1') -and $dpp
+$credState = if ($AutoLogonExpected) { $autoLogonArmed } else { -not $dpp }
+Out-Kv 'ARM_AUTOLOGON_EXPECTED' ([bool]$AutoLogonExpected)
+Out-Kv 'ARM_AUTOLOGON_ARMED'    $autoLogonArmed
 $sysOk = $sysR.Ok -and ($sysR.Logon -eq 'ServiceAccount') -and
          ($sysR.Trigs -contains 'MSFT_TaskBootTrigger') -and ($sysR.Args -match [regex]::Escape($RunId)) -and
-         $ctlAbsent -and (-not $dpp)
+         $ctlAbsent -and $credState
 $usrOk = $usrR.Ok -and ($usrR.Logon -eq 'Interactive') -and ($usrR.Trigs -contains 'MSFT_TaskLogonTrigger')
 
 Out-Kv 'ARM_SYSTEM_RESULT' $(if ($sysOk) { 'PASS' } else { 'FAIL' })
 Out-Kv 'ARM_USER_RESULT'   $(if ($usrOk) { 'PASS' } else { 'FAIL' })
-Out-Kv 'ARM_WSL_CAPABLE_UNATTENDED' 'False'
-Out-Kv 'ARM_WSL_REASON' 'S4U is denied to SYSTEM on this build (measured, four paths); an Interactive principal cannot run without a session. WSL jobs need a logon and record RunnerAbsent otherwise.'
+Out-Kv 'ARM_WSL_CAPABLE_UNATTENDED' $autoLogonArmed
+if ($autoLogonArmed) {
+    Out-Kv 'ARM_WSL_REASON' 'persistent auto-logon is armed (AutoAdminLogon=1 + DefaultPassword, no AutoLogonCount), so every boot creates the session CFV-Runner-User needs. Capable is a CLAIM about configuration; only a WSL job after a real reboot proves it.'
+} else {
+    Out-Kv 'ARM_WSL_REASON' 'S4U is denied to SYSTEM on this build (measured, four paths); an Interactive principal cannot run without a session. WSL jobs need a logon and record RunnerAbsent otherwise.'
+}
 
 # Start the SYSTEM runner now so this boot has one without waiting for a restart.
 $started = 'no'

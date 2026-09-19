@@ -683,7 +683,12 @@ function Restart-CfvBox {
     param(
         [Parameter(Mandatory)]$Run,
         [int]$WaitMinutes = 20,
-        [int]$RunnerGraceSeconds = 300
+        [int]$RunnerGraceSeconds = 300,
+        # After the SYSTEM runner is confirmed, ALSO wait for the wsljobs runner to
+        # beat -- the claim persistent auto-logon exists to make. Off by default so
+        # a box without auto-logon does not spend the grace window waiting for a
+        # session that cannot exist.
+        [switch]$WaitWslRunner
     )
     $before = Invoke-CfvBox -Run $Run -Name 'boot-before' -Quiet -Body @'
 $os = Get-CimInstance Win32_OperatingSystem
@@ -732,8 +737,8 @@ Write-Output "UPTIME_S=$([int]((Get-Date) - $os.LastBootUpTime).TotalSeconds)"
 `$p = '$($Run.JobDir)\_runner.heartbeat'
 Write-Output "HEARTBEAT=`$(if (Test-Path `$p) { (Get-Content `$p -Raw).Trim() } else { 'ABSENT' })"
 Write-Output "NOWUTC=`$((Get-Date).ToUniversalTime().ToString('s'))Z"
-Write-Output "TASKSTATE=`$(try { (Get-ScheduledTask -TaskName 'CFV-Runner' -ErrorAction Stop).State } catch { 'NO-TASK' })"
-Write-Output "TASKLAST=`$(try { (Get-ScheduledTaskInfo -TaskName 'CFV-Runner' -ErrorAction Stop).LastTaskResult } catch { 'NO-TASK' })"
+Write-Output "TASKSTATE=`$(try { (Get-ScheduledTask -TaskName 'CFV-Runner-System' -ErrorAction Stop).State } catch { 'NO-TASK' })"
+Write-Output "TASKLAST=`$(try { (Get-ScheduledTaskInfo -TaskName 'CFV-Runner-System' -ErrorAction Stop).LastTaskResult } catch { 'NO-TASK' })"
 "@
         if ($hb.Condition -eq 'Ok' -and $hb.Text -match 'HEARTBEAT=(\S+Z)' -and $hb.Text -match 'NOWUTC=(\S+)') {
             $hbT = ([regex]::Match($hb.Text,'HEARTBEAT=(\S+Z)')).Groups[1].Value
@@ -742,8 +747,43 @@ Write-Output "TASKLAST=`$(try { (Get-ScheduledTaskInfo -TaskName 'CFV-Runner' -E
                 $age = [int]([datetime]::Parse($now) - [datetime]::Parse($hbT)).TotalSeconds
                 if ($age -lt 90) {
                     Write-Host "  RUNNER RESTARTED ITSELF: heartbeat ${age}s old after the reboot, with no interactive login." -ForegroundColor Green
-                    return (New-CfvResult -Condition 'Ok' -Name 'restart' -Text $hb.Text `
-                             -Extra @{ BootBefore = $bootBefore; BootAfter = $bootAfter; HeartbeatAgeS = $age })
+                    $extra = @{ BootBefore = $bootBefore; BootAfter = $bootAfter; HeartbeatAgeS = $age }
+                    if (-not $WaitWslRunner) {
+                        return (New-CfvResult -Condition 'Ok' -Name 'restart' -Text $hb.Text -Extra $extra)
+                    }
+                    # The second half: the interactive runner, which exists only if the
+                    # box created a session on its own. Its heartbeat must be YOUNGER
+                    # than this boot, or it is a stale file from before the reboot --
+                    # a leftover heartbeat is exactly how a runner that never came back
+                    # would read as alive.
+                    $wslEnd = (Get-Date).AddSeconds($RunnerGraceSeconds)
+                    while ((Get-Date) -lt $wslEnd) {
+                        $w = Invoke-CfvBox -Run $Run -Name 'hb-wsl-after' -Quiet -Body @"
+`$p = '$($Run.WslJobDir)\_runner.heartbeat'
+Write-Output "WSLHB=`$(if (Test-Path `$p) { (Get-Content `$p -Raw).Trim() } else { 'ABSENT' })"
+Write-Output "NOWUTC=`$((Get-Date).ToUniversalTime().ToString('s'))Z"
+Write-Output "USERTASK=`$(try { (Get-ScheduledTask -TaskName 'CFV-Runner-User' -ErrorAction Stop).State } catch { 'NO-TASK' })"
+Write-Output "QUSER=`$((& query.exe user 2>&1 | Out-String) -replace '\s+',' ')"
+"@
+                        if ($w.Condition -eq 'Ok' -and $w.Text -match 'WSLHB=(\S+Z)' -and $w.Text -match 'NOWUTC=(\S+)') {
+                            $wT = ([regex]::Match($w.Text, 'WSLHB=(\S+Z)')).Groups[1].Value
+                            $nw = ([regex]::Match($w.Text, 'NOWUTC=(\S+)')).Groups[1].Value
+                            try {
+                                $wAge = [int]([datetime]::Parse($nw) - [datetime]::Parse($wT)).TotalSeconds
+                                $sinceBoot = [datetime]::Parse($wT).ToUniversalTime() -gt [datetime]::Parse($bootAfter).ToUniversalTime()
+                                if ($wAge -lt 90 -and $sinceBoot) {
+                                    Write-Host "  WSL RUNNER CAME BACK ON ITS OWN: heartbeat ${wAge}s old and newer than the boot, with no interactive login by a person." -ForegroundColor Green
+                                    $extra['WslHeartbeatAgeS'] = $wAge
+                                    $extra['WslQuser'] = ([regex]::Match($w.Text, 'QUSER=(.*)')).Groups[1].Value
+                                    return (New-CfvResult -Condition 'Ok' -Name 'restart' -Text ($hb.Text + "`n" + $w.Text) -Extra $extra)
+                                }
+                            } catch { }
+                        }
+                        Write-Host "  [$((Get-Date).ToString('HH:mm:ss'))] SYSTEM runner up; WSL runner not yet beating" -ForegroundColor DarkGray
+                        Start-Sleep -Seconds 20
+                    }
+                    return (New-CfvResult -Condition 'RunnerAbsent' -Name 'restart' -Text $hb.Text -Extra $extra `
+                             -Stderr "the SYSTEM runner came back but the WSL runner did not beat within ${RunnerGraceSeconds}s of it -- no interactive session was created by the boot itself. That is a fault in auto-logon, not in the product.")
                 }
             } catch { }
         }
