@@ -111,7 +111,7 @@ truer cause and the driver cannot say so. Candidate card C2.
 
 ## 5. Task 2.3 — OM-1: **BLOCKED, not taken**
 
-- Preconditions were all in place: product installed, gateway reachable, the one-time suspension
+- Preconditions in place: product installed (`INSTALLER_DONE=success`; distro up with systemd as PID 1). The gateway `/status` positive control was NOT taken — it is part of the blocked driver. The one-time suspension
   of hazard rule #5 **recorded and committed before the attempt** (`87d3512`,
   `2026-09-19_persistent_autologon_runplan.md`), last in run order, box due for teardown.
 - The `.iss` `[Icons]` entry is unchanged (`cmd.exe /c start http://127.0.0.1:8787`); the
