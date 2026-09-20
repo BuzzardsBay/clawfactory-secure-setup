@@ -1,0 +1,19 @@
+CFV_BOF:cfv-193-autologon-20260919T225635-5242-arm-7000ad
+ARM_WHOAMI=nt authority\system
+ARM_RUNID=cfv-193-autologon-20260919T225635-5242
+ARM_ACCOUNT_ENABLED=True
+ARM_CTL_ABSENT_TASK_RETURNS_NULL=True
+ARM_CTL_READBACK_DISCRIMINATES=True
+ARM_CTL_LOGONTYPES_SEEN=ServiceAccount|Interactive
+ARM_WINLOGON_AUTOADMINLOGON=1
+ARM_WINLOGON_DEFAULTPASSWORD_PRESENT=True
+ARM_AUTOLOGON_EXPECTED=True
+ARM_AUTOLOGON_ARMED=True
+ARM_SYSTEM_RESULT=PASS
+ARM_USER_RESULT=PASS
+ARM_WSL_CAPABLE_UNATTENDED=True
+ARM_WSL_REASON=persistent auto-logon is armed (AutoAdminLogon=1 + DefaultPassword, no AutoLogonCount), so every boot creates the session CFV-Runner-User needs. Capable is a CLAIM about configuration; only a WSL job after a real reboot proves it.
+ARM_SYSTEM_START_ISSUED=yes
+ARM_RESULT=PASS
+
+CFV_EOF:cfv-193-autologon-20260919T225635-5242-arm-7000ad

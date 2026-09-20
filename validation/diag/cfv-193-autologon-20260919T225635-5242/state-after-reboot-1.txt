@@ -1,0 +1,18 @@
+CONDITION=Ok
+AZEXIT=0
+BYTES=677
+ELAPSED=32
+STDERR=
+---- TEXT ----
+CFV_BOF:cfv-193-autologon-20260919T225635-5242-status-after-reboot-1-1a7f70
+S_BOOT=2026-09-19T23:07:22Z
+S_NOW=2026-09-19T23:10:48Z
+S_QUSER= USERNAME SESSIONNAME ID STATE IDLE TIME LOGON TIME clawadmin console 1 Active none 9/19/2026 11:07 PM 
+S_AUTOADMINLOGON=1
+S_DEFAULTPASSWORD_LEN=24
+S_AUTOLOGONCOUNT_ABSENT=True
+S_HB_jobs=2026-09-19T23:10:47Z state=idle job=- pid=0 elapsed=0 runid=cfv-193-autologon-20260919T225635-5242
+S_HB_wsljobs=2026-09-19T23:10:47Z state=idle job=- pid=0 elapsed=0 runid=cfv-193-autologon-20260919T225635-5242
+S_TASK_CFV-Runner-System=Running
+S_TASK_CFV-Runner-User=Running
+CFV_EOF:cfv-193-autologon-20260919T225635-5242-status-after-reboot-1-1a7f70
