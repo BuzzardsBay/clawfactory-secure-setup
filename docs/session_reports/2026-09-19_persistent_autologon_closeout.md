@@ -185,3 +185,56 @@ unfiltered residual).
 **Not done / not claimed.** No panel screenshots (declined 2026-09-01, unchanged). OM-1 not taken.
 Only one box was used, so "unattended across reboots" is proven on **one** fleet member over four
 reboots, not across a full cycle.
+
+---
+
+## 7. ADDENDUM 2026-09-20 — OM-1 second attempt: STILL NOT TAKEN
+
+**Operator decision:** option (a), "add a Defender exclusion for `validation\` on `cfv-193`, take
+the OM-1 screenshot, note it was measured under exclusion consistent with OM-B1, then deallocate."
+
+**Two corrections to the premise, both surfaced to the operator before acting.** The first block
+was on the *build machine*, not on `cfv-193`, so a VM-side exclusion could not unblock the local
+driver. The operator then chose to ship the capture code to the VM **as data** (read as a plain
+file, never parsed by the build machine's AV).
+
+**What was done**
+- Local driver split: `cfv-om1.ps1` no longer contains any capture logic; the on-VM code sits in
+  `validation/om1-payload/` and is read as data. The local block did **not** recur.
+- **Exclusion added on `cfv-193`** (`Add-MpPreference -ExclusionPath 'C:\cfv'`), read back with a
+  control: `EXC_AFTER` = `C:\cfv` + the three fleet exclusions OM-B1 already records
+  (`C:\Program Files\ClawFactory`, `C:\ProgramData\ClawFactory`,
+  `C:\Users\Public\Desktop\ClawFactory.lnk`); an unrelated path read `False`; real-time
+  protection was **left on**. Any OM-1 reading would therefore have been **under exclusion,
+  consistent with OM-B1** — it would not have observed Defender's behaviour on the product.
+- **Third unattended proof, incidental:** after `az vm deallocate` + `az vm start` the box
+  auto-logged-in by itself (`clawadmin console 1 Active`, logon 01:07) and the runner serviced jobs.
+- **`shape` step PASSED** — the installed shortcut is unchanged from the `.iss`:
+  `C:\Windows\System32\cmd.exe /c start http://127.0.0.1:8787`, working dir
+  `C:\Program Files\ClawFactory`, comment "Open ClawFactory dashboard in browser (gateway must be
+  running)". Card C5's "has the shortcut changed shape" question is answered: **no.**
+
+**What blocked it.** The `pre` job's drop dispatch was rejected **on the VM**:
+`This script contains malicious content and has been blocked by your antivirus software`
+(`ScriptContainedMaliciousContent`, from the run-command extension's `script88.ps1`). **A path
+exclusion does not cover AMSI's script-content scanning**, so the `C:\cfv` exclusion was
+irrelevant to it. Two independent Defender instances (build machine, then VM) now reject the same
+screen-capture payload. Going further means disabling real-time protection or AMSI on the VM, or
+obfuscating the payload — **each is beyond the exclusion the operator authorised**, and disabling
+Defender would also void the "consistent with OM-B1" framing. I stopped rather than escalate.
+
+**My own defect, found and fixed in the driver:** `Invoke-WslJob` ignored the result of the job
+drop, so a dropped-on-the-floor job was polled for a full 12 minutes and reported `Timeout`
+instead of the real condition. The drop is now checked and reported by name (candidate card C7,
+the same "unchecked call" class as the 4.4 success-line census).
+
+**Not taken:** the pre/post `/status` controls, the click, the screenshot. **OM-1 remains OPEN.**
+`cfv-193` is **deallocated again, not deleted** (it still holds the DefaultPassword on disk).
+
+**Not committed, deliberately:** `validation/cfv-om1.ps1` and `validation/om1-payload/` — the
+payload is the content two AV engines flag, and the driver is useless without it.
+
+**Decision needed (one):** (1) take OM-1 by eye in the batched end-of-run card — my
+recommendation now, since neither route to a programmatic capture survives AV without disabling
+it; (2) authorise disabling Defender real-time/AMSI on `cfv-193` only, for this one capture,
+recorded as a departure from OM-B1's framing; (3) delete `cfv-193` and leave OM-1 open.

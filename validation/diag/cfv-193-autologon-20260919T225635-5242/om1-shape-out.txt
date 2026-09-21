@@ -1,0 +1,7 @@
+SHAPE_LNK=C:\ProgramData\Microsoft\Windows\Start Menu\Programs\ClawFactory\ClawFactory Dashboard.lnk
+SHAPE_TARGET=C:\Windows\System32\cmd.exe
+SHAPE_ARGS=/c start http://127.0.0.1:8787
+SHAPE_COMMENT=Open ClawFactory dashboard in browser (gateway must be running)
+SHAPE_WORKDIR=C:\Program Files\ClawFactory
+RUNNER_EXITCODE=0
+RUNNER_ELAPSED_S=5

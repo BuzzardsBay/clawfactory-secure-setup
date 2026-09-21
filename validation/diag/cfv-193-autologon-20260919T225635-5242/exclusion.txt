@@ -1,0 +1,9 @@
+CFV_BOF:cfv-193-autologon-20260919T225635-5242-exclusion-f18905
+EXC_WHOAMI=nt authority\system
+EXC_BEFORE=C:\Program Files\ClawFactory;C:\ProgramData\ClawFactory;C:\Users\Public\Desktop\ClawFactory.lnk
+EXC_AFTER=C:\cfv;C:\Program Files\ClawFactory;C:\ProgramData\ClawFactory;C:\Users\Public\Desktop\ClawFactory.lnk
+EXC_CFV_PRESENT=True
+EXC_CTL_UNRELATED_PATH_PRESENT=False
+EXC_RTP_DISABLED=False
+EXC_QUSER= USERNAME SESSIONNAME ID STATE IDLE TIME LOGON TIME clawadmin console 1 Active none 9/21/2026 1:07 AM 
+CFV_EOF:cfv-193-autologon-20260919T225635-5242-exclusion-f18905
