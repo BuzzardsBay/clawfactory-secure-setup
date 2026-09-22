@@ -238,3 +238,45 @@ payload is the content two AV engines flag, and the driver is useless without it
 recommendation now, since neither route to a programmatic capture survives AV without disabling
 it; (2) authorise disabling Defender real-time/AMSI on `cfv-193` only, for this one capture,
 recorded as a departure from OM-B1's framing; (3) delete `cfv-193` and leave OM-1 open.
+
+---
+
+## 8. FINAL 2026-09-21 — OM-1 goes by eye; job closed
+
+**Operator decision:** OM-1 by eye, batched. Do not disable Defender or AMSI on `cfv-193`. Tear
+down `cfv-193` now. Card the capture-method redesign as a separate follow-up.
+
+**Correction surfaced before filing the follow-up.** The most obvious "redesign" — switch to
+`Graphics.CopyFromScreen` — is what the blocked payload already used
+(`validation/om1-payload/om1-shotfn.ps1:1,6`, never committed). That is recorded on the follow-up
+card itself so it is not re-proposed and re-blocked. What actually needs isolating is which part
+of the *shape* (inline dynamic script assembled per-dispatch, a base64 blob in the same file as
+the capture call, or the run-command wrapper's own framing) trips AMSI — not the screen-capture
+API, which was never the suspect.
+
+**Teardown.** `az vm delete`, NIC, public IP, NSG, disk — all exit 0. Unfiltered residual after:
+
+```
+clawfactoryvalc467              Microsoft.Storage/storageAccounts
+bake-vmVNET                     Microsoft.Network/virtualNetworks
+clawfactory-win11-baseline      Microsoft.Compute/images
+clawfactory-win11-baseline-v2   Microsoft.Compute/images
+```
+
+**Identical to the pre-run baseline.** No FAIL VMs, no orphaned disks. The `AutoAdminLogon`
+`DefaultPassword` this job generated no longer exists on any machine, anywhere.
+
+**Dispatch.** Card `#333` closed `done` with a comment summarising the OM-1 outcome and pointing at
+this document. Follow-on card `#334` filed, priority 3, carrying the correction above and NOT
+scheduled — OM-1 itself is covered by the by-eye batched card in the meantime.
+
+**Repo state.** `validation/cfv-om1.ps1` and `validation/om1-payload/` are deleted from the working
+tree (never committed) — the payload is exactly the content two AV engines flagged, and per
+`feedback_never_post_secrets`-adjacent judgment on flagged content, it does not belong in a public
+repo even unused. Everything else from this job (`cfv-provision.ps1`, `cfv-arm-autologon.ps1`,
+`cfv-autologon-proof.ps1`, the `cfv-arm-persistence.ps1`/`cfv-driverlib.ps1` edits, both run
+reports) is committed and pushed to `main`.
+
+**JOB CLOSED.** Persistent auto-logon: proven, shipped, scoped, torn down clean. OM-1: still open,
+now explicitly routed to the by-eye batched card rather than left ambiguous. One follow-up card
+filed for the capture-method question, correctly scoped so it does not retread the blocked attempt.
